@@ -1,0 +1,2 @@
+Mat Object: 4 MPI processes
+  type: mpiaij

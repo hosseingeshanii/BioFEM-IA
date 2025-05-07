@@ -1,0 +1,17 @@
+CPU_MEM_TOTAL: 394153264
+CPUS_ON_NODE: 48
+CPUS_ON_NODE: 48
+REQUESTED_CPUS: 8
+REQUESTED_CPUS: 8
+REQUESTED_NODES 1
+REQUESTED_NODES 1
+NODE_NAME: c123
+NODE_NAME: c123
+procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+ 3  0 140816 382508000   1568 4802444    0    0     0     3    0    0 41  0 59  0  0
+procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+ 3  0 140816 382508000   1568 4802444    0    0     0     3    0    0 41  0 59  0  0
+ 8  0 140816 360711968   1568 4909344    0    0     0   828 8001 12813  5  3 85  6  0
+ 8  0 140816 360711968   1568 4909344    0    0     0   828 7998 12796  5  3 85  6  0
