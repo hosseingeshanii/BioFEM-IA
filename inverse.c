@@ -561,7 +561,7 @@ PetscErrorCode FungUniJacobian(PetscInt ibi, FE* fem, PetscReal epsilon){
     }  
   }
   // nonuniform fiber
-  if (1){
+  if (!uniform_fiber_dir){
     for (int m = 7; m < 8; m++){
       for(ec=0; ec<ibm->n_elmt; ec++){       
                
