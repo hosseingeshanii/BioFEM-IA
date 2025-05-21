@@ -18,6 +18,7 @@ PetscInt   n_epochs=100, init_flag=1, epoch_start=0, epoch_output = 100;
 PetscReal  initial_elas = 10.0, initial_poisson = 0.2;
 PetscInt   constrained_el = 0;
 PetscInt   par_jac = 0, progress_bar_show = 0; 
+PetscReal  fib_smth_factor = 0.001, res_smth_factor = 0.001;
 
 
 char subdir[256] = {"./"};
@@ -109,6 +110,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-init_flag", &init_flag, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-epoch_start", &epoch_start, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-learning_rate", &learning_rate, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fib_smth_factor", &fib_smth_factor, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-initial_elas", &initial_elas, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-initial_poisson", &initial_poisson, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-patience", &patience, PETSC_NULL);
