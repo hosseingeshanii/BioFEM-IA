@@ -2,11 +2,11 @@
 ##SBATCH --export=NONE
 ##SBATCH --get-user-env=L
 
-#SBATCH --job-name=lr_10_init_100_true_fiber_el_fung
-#SBATCH --output=output_lr_10_init_100_true_fiber_el_fung.log
+#SBATCH --job-name=f_lr1e-2_uni
+#SBATCH --output=output_f_lr1e-2_uni.log
 #SBATCH --error=error.log
 #SBATCH --time=24:00:00
-#SBATCH --ntasks=8
+#SBATCH --ntasks=1
 #SBATCH --mem=300G
 
 # Load modules

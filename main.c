@@ -771,14 +771,11 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   if (ConstitutiveLawNonLinear) {
     InitMaterial(ibm);
   }
-  // printf("CHECK b InitVel\n");
 
   if (ti==0) InitVel(0, 0, fem);
-  // printf("CHECK b InitVel2\n");
-
   if (ti==0) InitVel(1, 0, fem);
-  // if (ti==0) InitVel(2, 0, fem);
-  // if (ti==0) InitVel(3, 0, fem);
+  if (ti==0) InitVel(2, 0, fem);
+  if (ti==0) InitVel(3, 0, fem);
   //if (ti==0 && manufactured) MoveBoundary(1, fem);
   // printf("CHECK b Output\n");
   PetscMPIInt rank;

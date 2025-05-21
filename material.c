@@ -206,7 +206,7 @@ PetscErrorCode initFung(FE *fem, PetscReal *initial_value){
       // if (m==7){
       //   // ibm->Fung_coeffs[m][ec] = -45./180.*3.141592;
       //   // ibm->Fung_coeffs[m][ec] = -45.0/180.*3.141592;
-      //   // ibm->Fung_coeffs_smth[m][ec] = 0.0;
+      //   ibm->Fung_coeffs[m][ec] = 0.0;
       // }
     }    
   }  
@@ -555,11 +555,31 @@ PetscErrorCode MembraneNonLinear(PetscInt ec, struct Cmpnts X1, struct Cmpnts X2
   
 
   // For the bhv inverse problem 
-  PetscReal fib_theta = ibm->Fung_coeffs[7][ec] + ibm->Fung_epsilons[7][ec];
-  BHVFiberDirUpdate(ec, fib_theta, ibm);
-  n_fib.x = ibm->n_fib[ec].x;
-  n_fib.y = ibm->n_fib[ec].y;
-  n_fib.z = ibm->n_fib[ec].z;
+  // PetscReal fib_theta = ibm->Fung_coeffs[7][ec] + ibm->Fung_epsilons[7][ec];
+  // BHVFiberDirUpdate(ec, fib_theta, ibm);
+  // n_fib.x = ibm->n_fib[ec].x;
+  // n_fib.y = ibm->n_fib[ec].y;
+  // n_fib.z = ibm->n_fib[ec].z;
+
+
+  /// For patch test
+  if (fibersmooth){    
+    n_fib.x = ibm->Fung_coeffs_smth[7][ec] + ibm->Fung_epsilons[7][ec];          
+  }
+  else{
+    n_fib.x = ibm->Fung_coeffs[7][ec] + ibm->Fung_epsilons[7][ec];
+  }
+
+  if (n_fib.x > 1.0){
+    n_fib.x = 1.0;
+  }
+  n_fib.y = pow(1 - n_fib.x*n_fib.x, 0.5);
+  n_fib.z = 0.0;
+
+  ibm->n_fib[ec].x = n_fib.x;
+  ibm->n_fib[ec].y = n_fib.y;
+  ibm->n_fib[ec].z = n_fib.z;
+  
 
   //----------------------------------------------------------------------//
   

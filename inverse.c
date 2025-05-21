@@ -14,7 +14,7 @@ extern PetscReal  initial_elas, initial_poisson;
 extern PetscInt   constrained_el;
 extern PetscInt   par_jac, progress_bar_show;
 
-
+extern PetscReal  fib_smth_factor, res_smth_factor;
 
 
 PetscErrorCode reset_Fung_epsilon(FE *fem){
@@ -560,7 +560,42 @@ PetscErrorCode FungUniJacobian(PetscInt ibi, FE* fem, PetscReal epsilon){
       }    
     }  
   }
+  // nonuniform fiber
+  if (1){
+    for (int m = 7; m < 8; m++){
+      for(ec=0; ec<ibm->n_elmt; ec++){       
+               
+        update_Fung_epsilon(ec, m, 1.0, epsilon, fem);
 
+        ResidualCalc(ibi, fem);
+        
+        VecGetArray(fem->Res, &RRes);
+        for (int i = 0; i < ibm->n_v; ++i) {
+          for (int k = 0; k < dof; k++){
+            residual_array_plus[i][k] = RRes[i*dof+k];
+          }        
+        }
+        VecRestoreArray(fem->Res, &RRes); 
+
+        update_Fung_epsilon(ec, m, -1.0, epsilon, fem);    
+        ResidualCalc(ibi, fem);
+        
+        VecGetArray(fem->Res, &RRes);
+        for (int i = 0; i < ibm->n_v; ++i) {
+          for (int k = 0; k < dof; k++){
+            residual_array_minus[i][k] = RRes[i*dof+k];
+          }
+        }
+        VecRestoreArray(fem->Res, &RRes); 
+        
+        for(nv=0; nv<ibm->n_v; nv++){              
+          for (int k = 0; k < dof; k++){          
+            fem->Jac_Fung[nv][ec][k][m] = (residual_array_plus[nv][k] - residual_array_minus[nv][k])/(2*epsilon);          
+          }      
+        }      
+      }    
+    }
+  }
   reset_Fung_epsilon(fem);
       
   free(residual_array_plus);
@@ -635,9 +670,11 @@ PetscErrorCode updateFungAdam(PetscReal *learning_rate, FE *fem, PetscInt time_s
 
           // Accumulate gradients over nv and k
           for (nv = 0; nv < ibm->n_v; nv++) {
-              for (k = 0; k < dof; k++) {
-                  g += RRes[nv * dof + k] * fem->Jac_Fung[nv][ec][k][m];
-              }
+            for (k = 0; k < dof; k++) {
+              // PetscPrintf(PETSC_COMM_WORLD, "RRes[nv * dof + k] = %f, abs(RRes[nv * dof + k]) = %f\n", RRes[nv * dof + k],);
+              g += RRes[nv * dof + k] * fem->Jac_Fung[nv][ec][k][m];
+              // g += RRes[nv * dof + k] / l(PetscAbsReal(RRes[nv * dof + k])+ epsion ) / ((PetscAbsReal(fem->Jac_Fung[nv][ec][k][m]) + epsilon )) * fem->Jac_Fung[nv][ec][k][m];
+            }
           }
 
           if (g==0){
@@ -663,11 +700,11 @@ PetscErrorCode updateFungAdam(PetscReal *learning_rate, FE *fem, PetscInt time_s
           ibm->Fung_coeffs[m][ec] -= lr * m_hat / (sqrt(v_hat) + epsilon);
           double pi = 3.141592;
           if (m == 7) {
-            if (ibm->Fung_coeffs[m][ec] > 0.0){
+            if (ibm->Fung_coeffs[m][ec] < 0.0){
               ibm->Fung_coeffs[m][ec] = 0.0;
             }
-            if (ibm->Fung_coeffs[m][ec] < -pi/2){
-              ibm->Fung_coeffs[m][ec] = -pi/2;
+            if (ibm->Fung_coeffs[m][ec] > 1.0){
+              ibm->Fung_coeffs[m][ec] = 1.0;
             }                        
           }
                     
@@ -714,6 +751,7 @@ PetscErrorCode update_elasticity(PetscReal *learning_rate, FE *fem, PetscInt tim
       for (nv = 0; nv < ibm->n_v; nv++) {
         for (k = 0; k < dof; k++) {
           g += RRes[nv*dof+k]*(fem->dR_dE[nv][ec][k][m]);
+          // g += RRes[nv*dof+k] / PetscAbs(fem->dR_dE[nv][ec][k][m]) * (fem->dR_dE[nv][ec][k][m]);
         }
       }
 
@@ -889,13 +927,13 @@ PetscErrorCode InvSolver(FE *fem){
   /// Initial Residual Calculation ///
 
       ResidualCalc(ibi, &fem[ibi]);
-      // PetscScalar *RRes;
-      // VecGetArray(fem[ibi].Res, &RRes);
-      // for (int i=0; i<ibm->n_v; i++){  
-      //   // printf("body=%d, node=%d, Initial Res : %f,%f,%f \n",ibi, i, RRes[i*dof+0], RRes[i*dof+1], RRes[i*dof+2]);            
-      // }
+      PetscScalar *RRes;
+      VecGetArray(fem[ibi].Res, &RRes);
+      for (int i=0; i<ibm->n_v; i++){  
+        // printf("body=%d, node=%d, Initial Res : %f,%f,%f \n",ibi, i, RRes[i*dof+0], RRes[i*dof+1], RRes[i*dof+2]);            
+      }
   
-      // VecRestoreArray(fem[ibi].Res, &RRes);
+      VecRestoreArray(fem[ibi].Res, &RRes);
   
       if (ressmooth){
         PetscPrintf(PETSC_COMM_WORLD, "Residual smoothing option has being selected\n");
@@ -943,19 +981,19 @@ PetscErrorCode InvSolver(FE *fem){
           ResSmoothToRes(&fem[ibi]);
         }
   
-        PetscScalar *RRes;
-        VecGetArray(fem[ibi].Res, &RRes);   
+        // PetscScalar *RRes;
+        // VecGetArray(fem[ibi].Res, &RRes);   
   
-        for (PetscInt i=0; i<ibm->n_v; i++){
-          for (PetscInt j=0; j<3; j++){            
-            double point_residual = RRes[i*dof+j];                                       
-            total_loss += ((point_residual - 0.0) * (point_residual - 0.0)/ ibm->n_v);          
+        // for (PetscInt i=0; i<ibm->n_v; i++){
+        //   for (PetscInt j=0; j<3; j++){            
+        //     double point_residual = RRes[i*dof+j];                                       
+        //     total_loss += ((point_residual - 0.0) * (point_residual - 0.0)/ ibm->n_v);          
             
-          }
-          // printf("body=%d, node=%d,  Res : %f,%f,%f \n",ibi, i, RRes[i*dof+0], RRes[i*dof+1], RRes[i*dof+2]);
-        }
+        //   }
+        //   // printf("body=%d, node=%d,  Res : %f,%f,%f \n",ibi, i, RRes[i*dof+0], RRes[i*dof+1], RRes[i*dof+2]);
+        // }
         
-        VecRestoreArray(fem[ibi].Res, &RRes);  
+        // VecRestoreArray(fem[ibi].Res, &RRes);  
       }
       }         
     }
@@ -1001,7 +1039,7 @@ PetscErrorCode InvSolver(FE *fem){
             
               if (uniform_fung){
                 PetscPrintf(PETSC_COMM_WORLD, "Spatially Uniform Jacobian\n");
-                FungUniJacobian(ibi, &fem[ibi], 1e-1);
+                FungUniJacobian(ibi, &fem[ibi], 1e-4);
               }
               else {
                 PetscPrintf(PETSC_COMM_WORLD, "Jacobian Computation\n");
@@ -1031,7 +1069,7 @@ PetscErrorCode InvSolver(FE *fem){
           if (Adam){          
             updateFungAdam(lr_fung, &fem[ibi], epoch);
             if (fibersmooth){
-              FiberSmoother(fem, 2, 0.5);
+              FiberSmoother(fem, 1, fib_smth_factor);
               UpdateFiber_from_smth(fem);
             }                                                           
           }
@@ -1052,17 +1090,28 @@ PetscErrorCode InvSolver(FE *fem){
           }
         }
       } 
-    
-      
-      if (ConstitutiveLawNonLinear) {
-      
-        printf("Epoch %d, Average Loss: %.10f, body: %d, theta: %f\n", epoch + 1, total_loss, 0, fem[0].ibm->Fung_coeffs[7][10]);
+          
+      for (ibi=0; ibi<nbody; ibi++){
+
+        IBMNodes   *ibm=fem[ibi].ibm;  
+        ResidualCalc(ibi, &fem[ibi]);
+        PetscScalar *RRes;
+        VecGetArray(fem[ibi].Res, &RRes);   
+  
+        for (PetscInt i=0; i<ibm->n_v; i++){
+          for (PetscInt j=0; j<3; j++){            
+            double point_residual = RRes[i*dof+j];                                       
+            total_loss += ((point_residual - 0.0) * (point_residual - 0.0)/ ibm->n_v);                    
+          }
+          // printf("body=%d, node=%d,  Res after update: %f,%f,%f \n",ibi, i, RRes[i*dof+0], RRes[i*dof+1], RRes[i*dof+2]);
+        }
         
-        for (ibi=0; ibi<nbody; ibi++){
+        VecRestoreArray(fem[ibi].Res, &RRes);  
+
+        if (ConstitutiveLawNonLinear){
           PetscReal *A_i;
           PetscMalloc((n_Fung_Coeffs)*sizeof(PetscReal), &(A_i));        
-  
-          // PetscReal A_i = 0.0, avg_nu = 0.0;
+            
           for (int m = 0; m < n_Fung_Coeffs; m++){
             A_i[m] = 0.0;
             for(int ec=0; ec < fem[ibi].ibm->n_elmt; ec++){
@@ -1074,27 +1123,25 @@ PetscErrorCode InvSolver(FE *fem){
           epoch + 1, total_loss, ibi, A_i[0], A_i[1], A_i[2], A_i[3], A_i[4], A_i[5], A_i[6], A_i[7]);
   
           PetscFree(A_i);
+          if (!ibi){
+            printf("Epoch %d, Average Loss: %.10f, body: %d, theta: %f\n", epoch + 1, total_loss, 0, fem[0].ibm->Fung_coeffs[7][10]);
+          }          
         }
-        
-        // printf("Epoch %d, Average Loss: %.8f, body: %d, theta: %f\n", epoch + 1, total_loss, 1, fem[0].ibm->Fung_coeffs[7][10]);
-        // printf("Epoch %d, Average Loss: %.8f, body: %d, theta: %f\n", epoch + 1, total_loss, 2, fem[2].ibm->Fung_coeffs[7][10]);
-      }
-      else{
-        PetscReal avg_El = 0.0, avg_nu = 0.0;
+
+        else{
+          PetscReal avg_El = 0.0, avg_nu = 0.0;
         for(int ec=0; ec<fem[0].ibm->n_elmt; ec++){
           avg_El += (fem[0].ibm->El[0][ec]/fem[0].ibm->n_elmt);
           avg_nu += fem[0].ibm->El[1][ec]/fem[0].ibm->n_elmt;
         }
-        
-  
+          
         PetscFPrintf(PETSC_COMM_WORLD, fp[0], "%d %.8f %d %f %f\n", 
           epoch + 1, total_loss, 0, avg_El, avg_nu);
   
         printf("Epoch %d, Average Loss: %.8f, body: %d, El: %f, nu: %f\n", epoch + 1, total_loss, 0, avg_El, avg_nu);
-      }
-
-
-    }    
+        }
+      }     
+    }
   }
   // Close the file
   PetscPrintf(PETSC_COMM_WORLD, "Before closing the inverse result files ...\n");

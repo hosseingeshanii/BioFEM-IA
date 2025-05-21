@@ -160,9 +160,9 @@ PetscErrorCode FExternal(FE *fem) {
   //SurfaceNormalPressure(.4, fem);
 
   //bhv
-    SurfaceNormalPressure(5332.9, fem); //15998.7, 10665.8, 5332.9    
-    EdgeFix(1, fem);
-    EdgeFree(0, fem);
+  //SurfaceNormalPressure(15998.7, fem); //15998.7, 10665.8, 5332.9
+  //CardiacPressure(fem);
+  //EdgeFix(1, fem);
   
   //biax
   /* PetscReal ratio=1.0;  PetscInt step=3000; */
@@ -174,11 +174,11 @@ PetscErrorCode FExternal(FE *fem) {
   /* if(ti>5*step && ti<6*step+1) ratio=0.7; */
   /* if(ti>6*step && ti<7*step+1) ratio=1.0; */
 
-  // EdgeConstPressure(0, -6.e4, 1, fem);
-  // EdgeConstPressure(1, 2.e4, 0, fem);
-  // EdgeConstPressure(2, 6.e4, 1, fem);
-  // EdgeConstPressure(3, -2.e4, 0, fem);
-  // EdgeFree(0, fem);
+  EdgeConstPressure(0, -6.e4, 1, fem);
+  EdgeConstPressure(1, 2.e4, 0, fem);
+  EdgeConstPressure(2, 6.e4, 1, fem);
+  EdgeConstPressure(3, -2.e4, 0, fem);
+  EdgeFree(0, fem);
   
   /* EdgeFree(1, fem); */
   /* EdgeFree(2, fem); */
