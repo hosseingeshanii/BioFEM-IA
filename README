@@ -1,0 +1,7 @@
+Run the following commands before making the testt executable:
+
+ml GCC/9.3.0  OpenMPI/4.0.3
+ml PETSc/3.12.4-Python-3.8.2
+export PATH="/scratch/user/hgeshani/.conda/envs/pyt/bin:$PATH"
+export PYTHONPATH=/scratch/user/hgeshani/.conda/envs/pyt/lib/python3.11/site-packages:$PYTHONPATH
+export LD_LIBRARY_PATH=/scratch/user/hgeshani/.conda/envs/pyt/lib:$LD_LIBRARY_PATH

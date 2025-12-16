@@ -1,0 +1,48 @@
+# Object files
+*.o
+*.a
+*.so
+
+# Executables
+*.exe
+a.out
+
+# PETSc / MPI outputs
+*.log
+*.out
+*.err
+
+# Editor files
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Build directories
+build/
+
+
+# Doxygen output
+html/
+latex/
+xml/
+man/
+
+
+# Runtime output / data files
+*.dat
+*.dat.info
+*.log
+*.out
+*.err
+
+# Mesh / list files
+blist*
+elist*
+nlist*
+
+# Temporary / scratch
+tmp*
+test*
+ascii_info*
