@@ -46,3 +46,7 @@ nlist*
 tmp*
 test*
 ascii_info*
+
+# Runtime input / tuning files
+init_*.txt
+lr_*.txt
