@@ -15,9 +15,6 @@ typedef struct {
   node  *head;
 } List;
 
-struct  Cmpnts{
-  PetscReal  x, y, z;
-};
 
 typedef struct {
   PetscReal  x, y;
@@ -65,7 +62,7 @@ typedef struct {
   PetscReal      *x_bp, *y_bp, *z_bp, *x_bp0, *y_bp0, *z_bp0;
 
   PetscReal      *x_bpi, *y_bpi, *z_bpi;    // intermediate coords when muscle activation is on.
-  
+
   PetscReal      *p4x, *p4y, *p4z, *p5x, *p5y, *p5z, *p6x, *p6y, *p6z;
   PetscReal      *p4x0, *p4y0, *p4z0, *p5x0, *p5y0, *p5z0, *p6x0, *p6y0, *p6z0;
   PetscReal      *kve0, *kve;

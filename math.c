@@ -88,18 +88,28 @@ PetscErrorCode INV(PetscReal T[3][3], PetscReal _Tinv[3][3]) {
 }
 
 //--------------------------------------------------------------------------------------- 
-PetscErrorCode MATMULT(PetscReal A[][2], PetscReal B[][2], PetscReal C[][2]) {
-
-  PetscInt i,j,k;
-  for (i=0; i<2; i++){
-    for (j=0; j<2; j++){
-      C[i][j]=0;
-      for (k=0; k<2; k++){
-	C[i][j]+=A[i][k]*B[k][j];
+PetscErrorCode MATMULT(const PetscReal A[3][3], const PetscReal B[3][3], 
+                      PetscReal C[3][3]) 
+{
+  // PetscInt i,j,k;
+  // for (i=0; i<2; i++){
+  //   for (j=0; j<2; j++){
+  //     C[i][j]=0;
+  //     for (k=0; k<2; k++){
+	// C[i][j]+=A[i][k]*B[k][j];
+  //     }
+  //   }
+  // }
+  
+  for (PetscInt i = 0; i < 3; i++) {
+    for (PetscInt j = 0; j < 3; j++) {
+      C[i][j] = 0.0;
+      for (PetscInt k = 0; k < 3; k++) {
+          C[i][j] += A[i][k] * B[k][j];
       }
     }
   }
-  
+
   return(0);
 }
 
@@ -129,4 +139,36 @@ PetscReal SIGN(PetscReal a) {
   if (a<0) return(-1.);
 
   return(0.);
+}
+
+#include "math.h"
+
+PetscErrorCode RaiseIndices2(const PetscReal gInv[3][3],
+                            const PetscReal A_cov[3][3],
+                            PetscReal A_cont[3][3])
+{
+    PetscReal tmp[3][3];
+
+    /* tmp = g^{ip} A_{pq} */
+    MATMULT(gInv, A_cov, tmp);
+
+    /* A^{ij} = tmp * g^{qj} */
+    MATMULT(tmp, gInv, A_cont);
+
+    return 0;
+}
+
+PetscErrorCode LowerIndices2(const PetscReal gCov[3][3],
+                            const PetscReal A_cont[3][3],
+                            PetscReal A_cov[3][3])
+{
+    PetscReal tmp[3][3];
+
+    /* tmp = g_{ip} A^{pq} */
+    MATMULT(gCov, A_cont, tmp);
+
+    /* A_{ij} = tmp * g_{qj} */
+    MATMULT(tmp, gCov, A_cov);
+
+    return 0;
 }

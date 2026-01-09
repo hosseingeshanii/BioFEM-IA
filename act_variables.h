@@ -3,6 +3,7 @@
 
 
 #include <petscsys.h>   /* PetscInt, PetscReal, PetscScalar */
+#include "types.h"
 
 /*------------------------------------------------------------------------------
  *  Naming convention:
@@ -19,8 +20,6 @@
 typedef struct {
     PetscReal Cov[3][3];
     PetscReal Cont[3][3];
-    PetscReal Cov_bar[3][3];
-    PetscReal Cont_bar[3][3];
 } Elem2DTens;
 
 /*------------------------------------------------------------------------------
@@ -34,8 +33,8 @@ typedef struct {
  *  Vector stored in covariant and contravariant forms
  *----------------------------------------------------------------------------*/
 typedef struct {
-    PetscReal Cov[3];
-    PetscReal Cont[3];
+    Cmpnts Cov[3];
+    Cmpnts Cont[3];
 } ElemVec;
 
 /*------------------------------------------------------------------------------
@@ -43,25 +42,25 @@ typedef struct {
  *----------------------------------------------------------------------------*/
 typedef struct {
     /* Kinematics */
-    Elem2DTens   Fa;      /* Active deformation gradient */
-    Elem2DTens   C;       /* Total right Cauchy–Green tensor */
-    Elem2DTens   Ce;      /* Elastic right Cauchy–Green tensor */
+    Elem2DTens   *Fa, *Fa_inv;      /* Active deformation gradient */
+    Elem2DTens   *C, *C_inv;       /* Total right Cauchy–Green tensor */
+    Elem2DTens   *Ce, *Ce_inv;      /* Elastic right Cauchy–Green tensor */
 
     /* Stress */
-    Elem2DTens   Se;      /* Elastic second Piola–Kirchhoff stress */
-    Elem2DTens   S;       /* Total second Piola–Kirchhoff stress */
+    Elem2DTens   *Se;      /* Elastic second Piola–Kirchhoff stress */
+    Elem2DTens   *S;       /* Total second Piola–Kirchhoff stress */
 
     /* Metric tensors */
-    Elem2DTens   gm;      /* Current configuration metric */
-    Elem2DTens   gm0;     /* Reference configuration metric */
+    Elem2DTens   *gm;      /* Current configuration metric */
+    Elem2DTens   *gm0;     /* Reference configuration metric */
 
     /* Material tangents */
-    Elem4DTens   CCe;     /* Elastic material tangent */
-    Elem4DTens   CC;      /* Total material tangent */
+    Elem4DTens   *CCe;     /* Elastic material tangent */
+    Elem4DTens   *CC;      /* Total material tangent */
 
     /* Basis vectors */
-    ElemVec      g;       /* Current basis vectors */
-    ElemVec      g0;      /* Reference basis vectors */
+    ElemVec      *g;       /* Current basis vectors */
+    ElemVec      *g0;      /* Reference basis vectors */
 
 } ElemActData;
 
