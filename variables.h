@@ -32,28 +32,6 @@ typedef struct {
   MuscleActParams muscle_act_params;
 } UserCtx;
 
-// typedef struct {
-
-//   struct Cmpnts g_e[3];     // Intermediate covariant basis vectors after muscle activation for each element
-//   struct Cmpnts g_0[5][3];  // undeformed configuration basis vecs for 5 points through the thickness
-
-//   struct Cmpnts act_fib;
-//   PetscReal     Fa[3][3];   // Active deformation gradient per element  
-//   PetscReal     Fbar[5][3][3];   // Inverse Active deformation gradient tensor per element 
-//   PetscReal     k_e[3];          // Intermediate curvature after muscle activation for each element                            
-//   PetscReal     S_m[5][3];  // S_m: membrane elastic stress,  
-//   PetscReal     S_b[5][3];  // S_b: bending elastic stress,                                                 
-//   PetscReal     S_e[5][3];  // S_e: elastic stress,
-//   PetscReal     S[5][3];    // S: total stress in final configuration    
-//                             // up to 5 points through the thickness we can keep stress components. 
-
-// } ElemActData;
-
-// typedef struct {
-//   ElemActData   *elem_act_data; 
-//   Vec           g_e_target;     // Vec form of g_e used in tao solver  
-//   PetscScalar   theta[5], w[5];
-// } ActData;
 
 
 

@@ -37,6 +37,17 @@ typedef struct {
     Cmpnts Cont[3];
 } ElemVec;
 
+typedef struct {
+    Cmpnts ndx21, ndx31, nn;
+    Cmpnts gc1, gc2;
+    Cmpnts Aaa, Abb, Aab;
+    PetscReal k[3];
+    PetscReal nA;
+    PetscInt  v;    /* valence, useful for irregular */
+    PetscInt  nob;  /* no ghost missing */
+} SubdivGeomQP;
+
+
 /*------------------------------------------------------------------------------
  *  Element-level activation data
  *----------------------------------------------------------------------------*/
@@ -61,6 +72,8 @@ typedef struct {
     /* Basis vectors */
     ElemVec      *g;       /* Current basis vectors */
     ElemVec      *g0;      /* Reference basis vectors */
+
+    SubdivGeomQP *geom;    /* size n_qp */
 
 } ElemActData;
 
