@@ -127,9 +127,41 @@ PetscErrorCode ActDataAllocate(FE *fem)
         CHKERRQ(ierr);
         ierr = PetscMalloc1(n_qp, &ead->g0);
         CHKERRQ(ierr);
+
+        /* NEW: geometry cache */
+        ierr = PetscMalloc1(n_qp, &ead->geom); CHKERRQ(ierr);
+        for (PetscInt qp = 0; qp < n_qp; qp++) {
+        ead->geom[qp].nen = 0;
+        ead->geom[qp].v = 0;
+        ead->geom[qp].is_irregular = 0;
+        ead->geom[qp].INa0  = NULL;
+        ead->geom[qp].INa1  = NULL;
+        ead->geom[qp].INab0 = NULL;
+        ead->geom[qp].INab1 = NULL;
+        ead->geom[qp].INab2 = NULL;
+        }
     }
 
     return 0;
+}
+
+/* Call this from your ActDataDestroy loop per element. */
+static PetscErrorCode ElemActDataGeomDestroy_(FE *fem, ElemActData *ead)
+{
+  PetscErrorCode ierr = 0;
+  PetscInt n_qp = fem->act_data.n_qp;
+
+  if (!ead || !ead->geom) return 0;
+
+  for (PetscInt qp = 0; qp < n_qp; qp++) {
+    ierr = PetscFree(ead->geom[qp].INa0);  CHKERRQ(ierr);
+    ierr = PetscFree(ead->geom[qp].INa1);  CHKERRQ(ierr);
+    ierr = PetscFree(ead->geom[qp].INab0); CHKERRQ(ierr);
+    ierr = PetscFree(ead->geom[qp].INab1); CHKERRQ(ierr);
+    ierr = PetscFree(ead->geom[qp].INab2); CHKERRQ(ierr);
+  }
+  ierr = PetscFree(ead->geom); CHKERRQ(ierr);
+  return 0;
 }
 
 PetscErrorCode ActDataDestroy(FE *fem)
@@ -143,42 +175,31 @@ PetscErrorCode ActDataDestroy(FE *fem)
     {
         ElemActData *ead = &act->elem_act_data[ec];
 
-        ierr = PetscFree(ead->Fa);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->Fa_inv);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->C);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->C_inv);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->Ce);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->Ce_inv);
-        CHKERRQ(ierr);
+        /* NEW: free geom cache */
+        ierr = ElemActDataGeomDestroy_(fem, ead); CHKERRQ(ierr);
 
-        ierr = PetscFree(ead->Se);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->S);
-        CHKERRQ(ierr);
+        ierr = PetscFree(ead->Fa);  CHKERRQ(ierr);
+        ierr = PetscFree(ead->Fa_inv);  CHKERRQ(ierr);
+        ierr = PetscFree(ead->C);   CHKERRQ(ierr);
+        ierr = PetscFree(ead->C_inv);   CHKERRQ(ierr);
+        ierr = PetscFree(ead->Ce);  CHKERRQ(ierr);
+        ierr = PetscFree(ead->Ce_inv);  CHKERRQ(ierr);
 
-        ierr = PetscFree(ead->gm);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->gm0);
-        CHKERRQ(ierr);
+        ierr = PetscFree(ead->Se);  CHKERRQ(ierr);
+        ierr = PetscFree(ead->S);   CHKERRQ(ierr);
 
-        ierr = PetscFree(ead->CCe);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->CC);
-        CHKERRQ(ierr);
+        ierr = PetscFree(ead->gm);  CHKERRQ(ierr);
+        ierr = PetscFree(ead->gm0); CHKERRQ(ierr);
 
-        ierr = PetscFree(ead->g);
-        CHKERRQ(ierr);
-        ierr = PetscFree(ead->g0);
-        CHKERRQ(ierr);
+        ierr = PetscFree(ead->CCe); CHKERRQ(ierr);
+        ierr = PetscFree(ead->CC);  CHKERRQ(ierr);
+
+        ierr = PetscFree(ead->g);   CHKERRQ(ierr);
+        ierr = PetscFree(ead->g0);  CHKERRQ(ierr);
     }
 
-    ierr = PetscFree(act->elem_act_data);
-    CHKERRQ(ierr);
+    ierr = PetscFree(act->elem_act_data);   CHKERRQ(ierr);
+    act->elem_act_data = NULL;
 
     return 0;
 }

@@ -38,13 +38,25 @@ typedef struct {
 } ElemVec;
 
 typedef struct {
-    Cmpnts ndx21, ndx31, nn;
-    Cmpnts gc1, gc2;
-    Cmpnts Aaa, Abb, Aab;
-    PetscReal k[3];
-    PetscReal nA;
-    PetscInt  v;    /* valence, useful for irregular */
-    PetscInt  nob;  /* no ghost missing */
+  PetscInt  nen;          /* 12 for regular, v+6 for irregular */
+  PetscInt  v;            /* valence for irregular, 0 regular */
+  PetscInt  is_irregular; /* 0 or 1 */
+
+  /* first derivs + normal */
+  Cmpnts ndx21, ndx31, nn;
+
+  /* contravariant in-surface basis vectors */
+  Cmpnts gc1, gc2;
+
+  /* second derivative combos used in bending b1,b2,b3 */
+  Cmpnts Aaa, Abb, Aab;
+
+  /* Only for irregular: length nen arrays */
+  PetscReal *INa0;   /* INa[0][i] */
+  PetscReal *INa1;   /* INa[1][i] */
+  PetscReal *INab0;  /* INab[0][i] */
+  PetscReal *INab1;  /* INab[1][i] */
+  PetscReal *INab2;  /* INab[2][i] */
 } SubdivGeomQP;
 
 
