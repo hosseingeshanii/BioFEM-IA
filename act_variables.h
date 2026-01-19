@@ -85,7 +85,7 @@ typedef struct {
     ElemVec      *g;       /* Current basis vectors */
     ElemVec      *g0;      /* Reference basis vectors */
 
-    SubdivGeomQP *geom;    /* size n_qp */
+    SubdivGeomQP *geom;    /* size 1 : midsurface geometry cache */
 
 } ElemActData;
 
