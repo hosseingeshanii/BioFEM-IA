@@ -22,8 +22,10 @@
 #include <math.h>
 #include <petsctao.h>
 #include <petscviewer.h>
-
 #include "variables.h" /* Project-local header */
+#include <petscsys.h>
+#include <stdlib.h>
+
 
 /*--------------------------------------------------------------------------------------------------
  *                                        Typedefs & Macros
@@ -115,40 +117,55 @@ PetscErrorCode ActDataAllocate(FE *fem)
 
         /* NEW: single midsurface geometry cache (size 1) */
         ierr = PetscMalloc1(1, &ead->geom);       CHKERRQ(ierr);
+        ierr = PetscMalloc1(1, &ead->geom0); CHKERRQ(ierr);
 
         ead->geom[0].nen = 0;
         ead->geom[0].v = 0;
         ead->geom[0].is_irregular = 0;
 
-        ead->geom[0].INa0  = NULL;
-        ead->geom[0].INa1  = NULL;
-        ead->geom[0].INab0 = NULL;
-        ead->geom[0].INab1 = NULL;
-        ead->geom[0].INab2 = NULL;
+        ead->geom0[0].nen = 0;
+        ead->geom0[0].v = 0;
+        ead->geom0[0].is_irregular = 0;
+
+        // ead->geom[0].INa0  = NULL;
+        // ead->geom[0].INa1  = NULL;
+        // ead->geom[0].INab0 = NULL;
+        // ead->geom[0].INab1 = NULL;
+        // ead->geom[0].INab2 = NULL;
+
+        PetscMemzero(&ead->geom[0],  sizeof(SubdivGeomQP));
+        PetscMemzero(&ead->geom0[0], sizeof(SubdivGeomQP));
     }
 
     return 0;
+}
+
+static PetscErrorCode SubdivGeomDestroy_(SubdivGeomQP *G)
+{
+  PetscErrorCode ierr = 0;
+  if (!G) return 0;
+
+  ierr = PetscFree(G->INa0);  CHKERRQ(ierr);
+  ierr = PetscFree(G->INa1);  CHKERRQ(ierr);
+  ierr = PetscFree(G->INab0); CHKERRQ(ierr);
+  ierr = PetscFree(G->INab1); CHKERRQ(ierr);
+  ierr = PetscFree(G->INab2); CHKERRQ(ierr);
+
+  PetscMemzero(G, sizeof(*G));
+  return 0;
 }
 
 /* Call this from your ActDataDestroy loop per element. */
 static PetscErrorCode ElemActDataGeomDestroy_(ElemActData *ead)
 {
   PetscErrorCode ierr = 0;
+  if (!ead) return 0;
 
-  if (!ead || !ead->geom) return 0;
-
-  ierr = PetscFree(ead->geom[0].INa0);  CHKERRQ(ierr);
-  ierr = PetscFree(ead->geom[0].INa1);  CHKERRQ(ierr);
-  ierr = PetscFree(ead->geom[0].INab0); CHKERRQ(ierr);
-  ierr = PetscFree(ead->geom[0].INab1); CHKERRQ(ierr);
-  ierr = PetscFree(ead->geom[0].INab2); CHKERRQ(ierr);
-
-  ierr = PetscFree(ead->geom);          CHKERRQ(ierr);
-  ead->geom = NULL;
+  if (ead->geom)  { ierr = SubdivGeomDestroy_(&ead->geom[0]);  CHKERRQ(ierr); ierr = PetscFree(ead->geom);  CHKERRQ(ierr); ead->geom  = NULL; }
+  if (ead->geom0) { ierr = SubdivGeomDestroy_(&ead->geom0[0]); CHKERRQ(ierr); ierr = PetscFree(ead->geom0); CHKERRQ(ierr); ead->geom0 = NULL; }
 
   return 0;
 }
-
 
 PetscErrorCode ActDataDestroy(FE *fem)
 {
@@ -219,7 +236,10 @@ static PetscErrorCode SubdivGeomEnsureIrregularArrays_(SubdivGeomQP *G, PetscInt
 
 /* The main geometry update.
    Call this once per element per configuration (before stresses or fint). */
-PetscErrorCode ElemUpdateGeomSubdiv(FE *fem, PetscInt ec)
+static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
+    FE *fem, PetscInt ec,
+    const PetscReal *xb, const PetscReal *yb, const PetscReal *zb,
+    SubdivGeomQP *G)
 {
   PetscErrorCode ierr = 0;
   IBMNodes    *ibm = fem->ibm;
@@ -229,7 +249,7 @@ PetscErrorCode ElemUpdateGeomSubdiv(FE *fem, PetscInt ec)
   PetscCheck(ead, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead is NULL");
   PetscCheck(ead->geom, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->geom is NULL");
 
-  SubdivGeomQP *G = &ead->geom[0];  /* midsurface cache */
+//   SubdivGeomQP *G = &ead->geom[0];  /* midsurface cache */
 
   /* ============================================================
      REGULAR PATCH
@@ -242,9 +262,9 @@ PetscErrorCode ElemUpdateGeomSubdiv(FE *fem, PetscInt ec)
     for (PetscInt i = 0; i < 12; i++) {
       if (ibm->patch[16*ec + i] != 1000000) {
         node = ibm->patch[16*ec + i];
-        x[i] = ibm->x_bp[node];
-        y[i] = ibm->y_bp[node];
-        z[i] = ibm->z_bp[node];
+        x[i] = ibm->xb[node];
+        y[i] = ibm->yb[node];
+        z[i] = ibm->zb[node];
       } else {
         nob = 0;
       }
@@ -331,9 +351,9 @@ PetscErrorCode ElemUpdateGeomSubdiv(FE *fem, PetscInt ec)
     for (PetscInt i = 0; i < nen; i++) {
       ierr = PetscMalloc1(3, &X0[i]); CHKERRQ(ierr);
       PetscInt node = ibm->patch[16*ec + i];
-      X0[i][0] = ibm->x_bp[node];
-      X0[i][1] = ibm->y_bp[node];
-      X0[i][2] = ibm->z_bp[node];
+      X0[i][0] = ibm->xb[node];
+      X0[i][1] = ibm->yb[node];
+      X0[i][2] = ibm->zb[node];
     }
 
     PetscReal w = (1.0/(PetscReal)v) *
@@ -468,32 +488,109 @@ PetscErrorCode ElemUpdateGeomSubdiv(FE *fem, PetscInt ec)
           ibm->ire[ec], ec);
 }
 
-/* ============================================================================
-   4) ElemUpdateG: now ONLY copies from cached geom -> ead->g
-   ============================================================================
-*/
+
+PetscErrorCode ElemUpdateGeomSubdiv(FE *fem, PetscInt ec)   /* current */
+{
+  IBMNodes *ibm = fem->ibm;
+  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+  return ElemUpdateGeomSubdivFromCoords_(fem, ec, ibm->x_bp,  ibm->y_bp,  ibm->z_bp,  &ead->geom[0]);
+}
+
+PetscErrorCode ElemUpdateGeom0Subdiv(FE *fem, PetscInt ec)  /* reference */
+{
+  IBMNodes *ibm = fem->ibm;
+  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+  return ElemUpdateGeomSubdivFromCoords_(fem, ec, ibm->x_bp0, ibm->y_bp0, ibm->z_bp0, &ead->geom0[0]);
+}
+
+
+/* Compute a3,1 and a3,2 given midsurface derivatives and tangents. */
+static inline void Compute_a3_alpha_(
+    const struct Cmpnts a1, const struct Cmpnts a2,
+    const struct Cmpnts Aaa, const struct Cmpnts Aab, const struct Cmpnts Abb,
+    struct Cmpnts *a3_1, struct Cmpnts *a3_2)
+{
+  /* size_a3 = ||a1 x a2|| */
+  PetscReal size_a3 = SIZE(CROSS(a1, a2));
+
+  /* Unnormalized:  a3,1 ~ (a1,1 x a2 + a1 x a2,1) with a2,1 = Aab */
+  *a3_1 = PLUS(CROSS(Aaa, a2), CROSS(a1, Aab));
+
+  /* Unnormalized:  a3,2 ~ (a1,2 x a2 + a1 x a2,2) with a1,2 = Aab, a2,2 = Abb */
+  *a3_2 = PLUS(CROSS(Aab, a2), CROSS(a1, Abb));
+
+  /* Normalize by ||a1 x a2|| (same as your old code) */
+  a3_1->x /= size_a3;  a3_1->y /= size_a3;  a3_1->z /= size_a3;
+  a3_2->x /= size_a3;  a3_2->y /= size_a3;  a3_2->z /= size_a3;
+}
+
+
+/* Update ead->g and ead->g0 for all qp using theta[qp]. */
 PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
 {
   PetscErrorCode ierr = 0;
-  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+  ActData     *act = &fem->act_data;
+  ElemActData *ead = &act->elem_act_data[ec];
 
-  PetscCheck(ead->geom, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->geom is NULL");
-  PetscCheck(ead->g,    PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->g is NULL");
+  PetscCheck(act->n_qp > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "n_qp must be > 0");
+  PetscCheck(act->theta,   PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "act->theta is NULL");
+  PetscCheck(ead->g,       PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->g is NULL");
+  PetscCheck(ead->g0,      PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->g0 is NULL");
+  PetscCheck(ead->geom,    PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->geom is NULL (need midsurface cache)");
+  PetscCheck(ead->geom0,   PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->geom0 is NULL (need reference midsurface cache)");
 
-  for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
-    const SubdivGeomQP *G = &ead->geom[qp];
+  /* thickness half-scale */
+  const PetscReal hhalf = 0.5 * h0;
 
-    ead->g[qp].Cov[0]  = G->ndx21;
-    ead->g[qp].Cov[1]  = G->ndx31;
-    ead->g[qp].Cov[2]  = G->nn;
+  /* -------- CURRENT midsurface data -------- */
+  const SubdivGeomQP *Gc = &ead->geom[0];   /* current midsurface */
+  const struct Cmpnts a1c  = Gc->ndx21;
+  const struct Cmpnts a2c  = Gc->ndx31;
+  const struct Cmpnts a3c  = Gc->nn;        /* already UNIT(CROSS(a1,a2)) in your geom */
 
-    ead->g[qp].Cont[0] = G->gc1;
-    ead->g[qp].Cont[1] = G->gc2;
-    ead->g[qp].Cont[2] = G->nn; /* as before; adjust if you want true g^3 */
+  struct Cmpnts a3c_1, a3c_2;
+  Compute_a3_alpha_(a1c, a2c, Gc->Aaa, Gc->Aab, Gc->Abb, &a3c_1, &a3c_2);
+
+  /* -------- REFERENCE midsurface data -------- */
+  const SubdivGeomQP *G0 = &ead->geom0[0];  /* reference midsurface */
+  const struct Cmpnts a10 = G0->ndx21;
+  const struct Cmpnts a20 = G0->ndx31;
+  const struct Cmpnts a30 = G0->nn;
+
+  struct Cmpnts a30_1, a30_2;
+  Compute_a3_alpha_(a10, a20, G0->Aaa, G0->Aab, G0->Abb, &a30_1, &a30_2);
+
+  /* -------- Fill for all thickness qp -------- */
+  for (PetscInt qp = 0; qp < act->n_qp; qp++) {
+
+    const PetscReal theta3 = hhalf * PetscRealPart(act->theta[qp]);
+
+    /* CURRENT: g_alpha = a_alpha + theta3 * a3,alpha ; g3 = a3 */
+    ead->g[qp].Cov[0] = PLUS(a1c,  AMULT(theta3, a3c_1));
+    ead->g[qp].Cov[1] = PLUS(a2c,  AMULT(theta3, a3c_2));
+    ead->g[qp].Cov[2] = a3c;
+
+    /* If you want contravariants too: you can either:
+       (A) keep using your surface contravariants gc1,gc2 from geom (OK if you only need surface contras),
+       or (B) compute full 3D contravariant basis for g_i (more correct).
+       For now, set them consistent with your earlier approach: */
+    ead->g[qp].Cont[0] = Gc->gc1;
+    ead->g[qp].Cont[1] = Gc->gc2;
+    ead->g[qp].Cont[2] = a3c; /* same note as before */
+
+    /* REFERENCE: g0_alpha = a0_alpha + theta3 * a0_3,alpha ; g0_3 = a0_3 */
+    ead->g0[qp].Cov[0] = PLUS(a10, AMULT(theta3, a30_1));
+    ead->g0[qp].Cov[1] = PLUS(a20, AMULT(theta3, a30_2));
+    ead->g0[qp].Cov[2] = a30;
+
+    ead->g0[qp].Cont[0] = G0->gc1;
+    ead->g0[qp].Cont[1] = G0->gc2;
+    ead->g0[qp].Cont[2] = a30;
   }
 
   return ierr;
 }
+
 
 /*--------------------------------------------------------------------------------------------------
  *                           Element-Level Computation Routines
@@ -888,10 +985,10 @@ PetscErrorCode ModElemC33(FE *fem, PetscInt ec)
 }
 
 
-PetscErrorCode UpdateFint(FE *fem)
-{
-    h/2. * A0 * Bm * qp_w[qp] * S[qp] + h/2. * A0 * Bb * qp_w[qp] * S[qp] * (h/2. * qp_xi[qp]);
-}
+// PetscErrorCode UpdateFint(FE *fem)
+// {
+//     h/2. * A0 * Bm * qp_w[qp] * S[qp] + h/2. * A0 * Bb * qp_w[qp] * S[qp] * (h/2. * qp_xi[qp]);
+// }
 
 
 /* Transfer reference covariant basis vectors (G1,G2) from IBMNodes storage
@@ -929,289 +1026,179 @@ PetscErrorCode ElemUpdateG0(FE *fem, PetscInt ec)
 }
 
 
-/* active_strain.c */
-
-#include "variables.h"
-#include <petscsys.h>
-#include <math.h>
-#include <stdlib.h>
 
 
-
-PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec,
-                          const PetscReal Sm[3],   /* membrane stress resultants (your Sm[m]) */
-                          const PetscReal S[3],    /* bending stress resultants (your S[m]) */
-                          const PetscReal Em[3],   /* membrane strains (for IE) */
-                          const PetscReal Eb[3],   /* bending strains  (for IE) */
-                          PetscReal A0, PetscReal h0,
-                          PetscReal *Fb_out        /* output: element force vector (size 36 for reg, 3*(v+6) for irreg) */
-                          )
+#undef __FUNCT__
+#define __FUNCT__ "ElemUpdFint"
+PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
 {
   PetscErrorCode ierr = 0;
-  IBMNodes    *ibm = fem->ibm;
-  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+  IBMNodes    *ibm = NULL;
+  ElemActData *ead = NULL;
 
-  const PetscInt dof = fem->dof; /* expect 3 */
-
+  PetscCheck(fem,    PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "fem is NULL");
   PetscCheck(Fb_out, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "Fb_out is NULL");
-  PetscCheck(ead->g, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->g is NULL");
 
-  /* You asked: max qps small; not parallel now.
-     Note: Your Na/Nab are center-based so qp repeats; still loop qp if you want integration later. */
+  ibm = fem->ibm;
+  PetscCheck(ibm, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "fem->ibm is NULL");
+
+  ead = &fem->act_data.elem_act_data[ec];
+  PetscCheck(ead,         PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead is NULL");
+  PetscCheck(ead->S,      PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->S is NULL");
+  PetscCheck(ead->geom,   PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->geom is NULL");
+  PetscCheck(fem->act_data.w,     PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "act_data.w is NULL");
+  PetscCheck(fem->act_data.theta, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "act_data.theta is NULL");
+  PetscCheck(fem->act_data.n_qp > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "n_qp must be > 0");
+
+  /* We use midsurface geometry only (you requested single-geom design). */
+  const SubdivGeomQP *G = &ead->geom[0];
+
+  /* Surface bases (midsurface) */
+  const struct Cmpnts ndx21 = G->ndx21;  /* a1 */
+  const struct Cmpnts ndx31 = G->ndx31;  /* a2 */
+  const struct Cmpnts nn    = G->nn;     /* a3 (unit normal) */
+  const struct Cmpnts gc1   = G->gc1;    /* a^1 */
+  const struct Cmpnts gc2   = G->gc2;    /* a^2 */
+
+  /* Second derivatives / curvature-like vectors */
+  const struct Cmpnts Aaa = G->Aaa;      /* a1,1  (your naming) */
+  const struct Cmpnts Abb = G->Abb;      /* a2,2  */
+  const struct Cmpnts Aab = G->Aab;      /* a1,2  */
+
+  /* Convenience scalars */
+  PetscReal A0 = ibm->dA0;
+  const PetscReal half_h0 = 0.5 * h0;
+  const PetscReal pref0   = 0.5 * h0 * A0;  /* 0.5*h0*A0 */
+
+  /* -------------------------------------------------------------------
+     Loop through thickness quadrature points qp
+     ------------------------------------------------------------------- */
   for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
 
-    /* Grab basis computed in ElemUpdateG */
-    const struct Cmpnts ndx21 = ead->g[qp].Cov[0];
-    const struct Cmpnts ndx31 = ead->g[qp].Cov[1];
-    const struct Cmpnts nn    = ead->g[qp].Cov[2];
+    const PetscReal w_qp  = PetscRealPart(fem->act_data.w[qp]);      /* weight */
+    const PetscReal xi_qp = PetscRealPart(fem->act_data.theta[qp]);  /* through-thickness coord */
 
-    const struct Cmpnts gc1   = ead->g[qp].Cont[0];
-    const struct Cmpnts gc2   = ead->g[qp].Cont[1];
+    /* Build S-vector from contravariant stress at this qp */
+    PetscReal Sv[3];
+    Sv[0] = ead->S[qp].Cont[0][0];
+    Sv[1] = ead->S[qp].Cont[1][1];
+    Sv[2] = ead->S[qp].Cont[0][1];
 
-    /* ------------------------- REGULAR PATCH ------------------------- */
+    /* ============================================================
+       REGULAR PATCH (12 control points -> 36 dofs)
+       ============================================================ */
     if (ibm->ire[ec] == 0) {
 
-      /* Build x/y/z for Aaa, Abb, Aab only (needed for bending b1,b2,b3) */
-      PetscReal x[12], y[12], z[12];
-      PetscInt  node, nob = 1;
-
-      for (PetscInt i = 0; i < 12; i++) {
-        if (ibm->patch[16*ec + i] != 1000000) {
-          node = ibm->patch[16*ec + i];
-          x[i] = ibm->x_bp[node];
-          y[i] = ibm->y_bp[node];
-          z[i] = ibm->z_bp[node];
-        } else {
-          nob = 0;
-        }
-      }
-      PetscCheck(nob, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
-                 "Regular patch missing control point ec=%" PetscInt_FMT, ec);
-
-      struct Cmpnts Aaa = {0,0,0}, Abb = {0,0,0}, Aab = {0,0,0};
-
-      for (PetscInt i = 0; i < 12; i++) {
-        Aaa.x += Nab_center[0][i]*x[i];
-        Aaa.y += Nab_center[0][i]*y[i];
-        Aaa.z += Nab_center[0][i]*z[i];
-
-        Abb.x += Nab_center[1][i]*x[i];
-        Abb.y += Nab_center[1][i]*y[i];
-        Abb.z += Nab_center[1][i]*z[i];
-
-        Aab.x += Nab_center[2][i]*x[i];
-        Aab.y += Nab_center[2][i]*y[i];
-        Aab.z += Nab_center[2][i]*z[i];
-      }
-
-      /* Membrane matrix */
       PetscReal Bm[3][36];
-      for (PetscInt i = 0; i < 12; i++) {
-        Bm[0][3*i+0] = Na_center[0][i]*ndx21.x;   Bm[0][3*i+1] = Na_center[0][i]*ndx21.y;   Bm[0][3*i+2] = Na_center[0][i]*ndx21.z;
-        Bm[1][3*i+0] = Na_center[1][i]*ndx31.x;   Bm[1][3*i+1] = Na_center[1][i]*ndx31.y;   Bm[1][3*i+2] = Na_center[1][i]*ndx31.z;
-        Bm[2][3*i+0] = Na_center[0][i]*ndx31.x + Na_center[1][i]*ndx21.x;
-        Bm[2][3*i+1] = Na_center[0][i]*ndx31.y + Na_center[1][i]*ndx21.y;
-        Bm[2][3*i+2] = Na_center[0][i]*ndx31.z + Na_center[1][i]*ndx21.z;
-      }
-
-      /* Bending matrix */
       PetscReal Bs[3][36];
-      for (PetscInt i = 0; i < 12; i++) {
-        struct Cmpnts ng1 = AMULT(Na_center[0][i], gc1);
-        struct Cmpnts ng2 = AMULT(Na_center[1][i], gc2);
-        struct Cmpnts ng  = PLUS(ng1, ng2);
 
-        PetscReal b1 = DOT(ng, Aaa);
-        PetscReal b2 = DOT(ng, Abb);
-        PetscReal b3 = DOT(ng, Aab);
+      /* Membrane Bm */
+      for (PetscInt a = 0; a < 12; a++) {
+        Bm[0][3*a+0] = Na_center[0][a]*ndx21.x;   Bm[0][3*a+1] = Na_center[0][a]*ndx21.y;   Bm[0][3*a+2] = Na_center[0][a]*ndx21.z;
+        Bm[1][3*a+0] = Na_center[1][a]*ndx31.x;   Bm[1][3*a+1] = Na_center[1][a]*ndx31.y;   Bm[1][3*a+2] = Na_center[1][a]*ndx31.z;
 
-        Bs[0][3*i+0] = -(Nab_center[0][i] + b1)*nn.x;   Bs[0][3*i+1] = -(Nab_center[0][i] + b1)*nn.y;   Bs[0][3*i+2] = -(Nab_center[0][i] + b1)*nn.z;
-        Bs[1][3*i+0] = -(Nab_center[1][i] + b2)*nn.x;   Bs[1][3*i+1] = -(Nab_center[1][i] + b2)*nn.y;   Bs[1][3*i+2] = -(Nab_center[1][i] + b2)*nn.z;
-        Bs[2][3*i+0] = -2.0*(Nab_center[2][i] + b3)*nn.x; Bs[2][3*i+1] = -2.0*(Nab_center[2][i] + b3)*nn.y; Bs[2][3*i+2] = -2.0*(Nab_center[2][i] + b3)*nn.z;
+        Bm[2][3*a+0] = Na_center[0][a]*ndx31.x + Na_center[1][a]*ndx21.x;
+        Bm[2][3*a+1] = Na_center[0][a]*ndx31.y + Na_center[1][a]*ndx21.y;
+        Bm[2][3*a+2] = Na_center[0][a]*ndx31.z + Na_center[1][a]*ndx21.z;
       }
 
-      /* membrane force */
-      PetscReal Fm[36];
+      /* Bending Bs */
+      for (PetscInt a = 0; a < 12; a++) {
+
+        /* ng = Na0 * a^1 + Na1 * a^2 */
+        const struct Cmpnts ng1 = AMULT(Na_center[0][a], gc1);
+        const struct Cmpnts ng2 = AMULT(Na_center[1][a], gc2);
+        const struct Cmpnts ng  = PLUS(ng1, ng2);
+
+        const PetscReal b1 = DOT(ng, Aaa);
+        const PetscReal b2 = DOT(ng, Abb);
+        const PetscReal b3 = DOT(ng, Aab);
+
+        Bs[0][3*a+0] = -(Nab_center[0][a] + b1)*nn.x;    Bs[0][3*a+1] = -(Nab_center[0][a] + b1)*nn.y;    Bs[0][3*a+2] = -(Nab_center[0][a] + b1)*nn.z;
+        Bs[1][3*a+0] = -(Nab_center[1][a] + b2)*nn.x;    Bs[1][3*a+1] = -(Nab_center[1][a] + b2)*nn.y;    Bs[1][3*a+2] = -(Nab_center[1][a] + b2)*nn.z;
+        Bs[2][3*a+0] = -2.0*(Nab_center[2][a] + b3)*nn.x; Bs[2][3*a+1] = -2.0*(Nab_center[2][a] + b3)*nn.y; Bs[2][3*a+2] = -2.0*(Nab_center[2][a] + b3)*nn.z;
+      }
+
+      /* Assemble contribution */
       for (PetscInt ii = 0; ii < 36; ii++) {
-        PetscReal sum = 0.0;
-        for (PetscInt m = 0; m < 3; m++) sum += Bm[m][ii] * Sm[m] * A0 * h0;
-        Fm[ii] = sum;
-      }
-
-      /* bending + membrane */
-      for (PetscInt ii = 0; ii < 36; ii++) {
-        PetscReal sum = 0.0;
-        for (PetscInt m = 0; m < 3; m++) sum += Bs[m][ii] * S[m] * A0 * PetscPowReal(h0, 3.0) / 12.0;
-        Fb_out[ii] += sum + Fm[ii];
-      }
-
-      /* IE/FC bookkeeping exactly like your code (optional to keep here) */
-      {
-        PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
-        PetscReal sum = 0.;
-        for (PetscInt i = 0; i < 3; i++) {
-          sum += 0.5*(A0*h0*Em[i]*Sm[i] + A0*PetscPowReal(h0,3.0)/12.*Eb[i]*S[i]);
-          fem->FC[dof*ec + i] = Sm[i]*A0*h0 + A0*PetscPowReal(h0,2.0)/2.*S[i];
+        PetscReal mem = 0.0, bend = 0.0;
+        for (PetscInt m = 0; m < 3; m++) {
+          mem  += Bm[m][ii] * Sv[m];
+          bend += Bs[m][ii] * Sv[m];
         }
-        fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
+
+        Fb_out[ii] += pref0 * w_qp * ( mem + bend * (half_h0 * xi_qp) );
       }
 
       continue;
     }
 
-    /* ------------------------- IRREGULAR PATCH ------------------------- */
+    /* ============================================================
+       IRREGULAR PATCH (nen = v+6 control points -> 3*nen dofs)
+       ============================================================ */
     if (ibm->ire[ec] == 1) {
 
-      const PetscInt v = ibm->val[ec];
-      PetscInt node, nob = 1;
+      PetscCheck(G->is_irregular, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+                 "geom says not irregular but ibm->ire[ec]==1 (ec=%" PetscInt_FMT ")", ec);
 
-      for (PetscInt i = 0; i < (v+6); i++) {
-        if (ibm->patch[16*ec+i] == 1000000) { nob = 0; }
-      }
-      PetscCheck(nob, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
-                 "Irregular patch missing control point ec=%" PetscInt_FMT, ec);
+      const PetscInt nen = G->nen;
+      PetscCheck(nen > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "Invalid nen=%" PetscInt_FMT, nen);
 
-      /* Rebuild X0 just to compute Aaa/Abb/Aab and INa/INab (same as your original).
-         Note: we are NOT recomputing ndx21/ndx31/nn/gc1/gc2: we reuse them from ElemUpdateG. */
-      PetscReal **X0 = (PetscReal**)malloc((v+6)*sizeof(PetscReal*));
-      PetscCheck(X0, PETSC_COMM_SELF, PETSC_ERR_MEM, "malloc failed X0");
-      for (PetscInt i = 0; i < (v+6); i++) {
-        X0[i] = (PetscReal*)malloc(3*sizeof(PetscReal));
-        PetscCheck(X0[i], PETSC_COMM_SELF, PETSC_ERR_MEM, "malloc failed X0[i]");
-        node = ibm->patch[16*ec + i];
-        X0[i][0] = ibm->x_bp[node];
-        X0[i][1] = ibm->y_bp[node];
-        X0[i][2] = ibm->z_bp[node];
-      }
+      PetscCheck(G->INa0 && G->INa1 && G->INab0 && G->INab1 && G->INab2,
+                 PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "Irregular IN arrays not allocated in geom cache");
 
-      PetscReal w = (1./v)*(0.625 - pow(0.375 + 0.25*PetscCosReal(2*PETSC_PI/v), 2.));
+      /* We form Bm and Bs on the fly to avoid giant stack arrays. */
+      for (PetscInt a = 0; a < nen; a++) {
 
-      PetscReal B3[12][v+6], B2[12][v+12], B1[v+12][v+6];
+        /* Membrane rows for this control point a */
+        PetscReal Bm0x = G->INa0[a]*ndx21.x;
+        PetscReal Bm0y = G->INa0[a]*ndx21.y;
+        PetscReal Bm0z = G->INa0[a]*ndx21.z;
 
-      for (PetscInt i = 0; i < 12; i++)
-        for (PetscInt j = 0; j < (v+12); j++)
-          B2[i][j] = 0.;
+        PetscReal Bm1x = G->INa1[a]*ndx31.x;
+        PetscReal Bm1y = G->INa1[a]*ndx31.y;
+        PetscReal Bm1z = G->INa1[a]*ndx31.z;
 
-      for (PetscInt i = 0; i < (v+12); i++)
-        for (PetscInt j = 0; j < (v+6); j++)
-          B1[i][j] = 0.;
+        PetscReal Bm2x = G->INa0[a]*ndx31.x + G->INa1[a]*ndx21.x;
+        PetscReal Bm2y = G->INa0[a]*ndx31.y + G->INa1[a]*ndx21.y;
+        PetscReal Bm2z = G->INa0[a]*ndx31.z + G->INa1[a]*ndx21.z;
 
-      /* B2 */
-      B2[0][v+9]  = 1.;  B2[1][v+6]  = 1.;  B2[2][v+4]  = 1.;  B2[3][v+1]  = 1.;
-      B2[4][v+2]  = 1.;  B2[5][v+5]  = 1.;  B2[6][v]    = 1.;  B2[7][1]    = 1.;
-      B2[8][v+3]  = 1.;  B2[9][v-1]  = 1.;  B2[10][0]   = 1.;  B2[11][2]   = 1.;
+        /* Bending coefficients b1,b2,b3 */
+        const struct Cmpnts ng1 = AMULT(G->INa0[a], gc1);
+        const struct Cmpnts ng2 = AMULT(G->INa1[a], gc2);
+        const struct Cmpnts ng  = PLUS(ng1, ng2);
 
-      /* B1 (same as in ElemUpdateG; keep identical) */
-      {
-        PetscInt j;
-        B1[0][0] = 1 - v*w;  for (j=0; j<v; j++) {B1[0][1+j] = w;}
-        B1[1][0] = 0.375;  B1[1][1] = 0.375;  B1[1][2] = 0.125;  B1[1][v] = 0.125;
-        B1[2][0] = 0.375;  B1[2][1] = 0.125;  B1[2][2] = 0.375;  B1[2][3] = 0.125;
-        if (v>5) {B1[v-4][0] = 0.375;  B1[v-4][v-5] = 0.125;  B1[v-4][v-4] = 0.375;  B1[v-4][v-3] = 0.125;}
-        if (v>4) {B1[v-3][0] = 0.375;  B1[v-3][v-4] = 0.125;  B1[v-3][v-3] = 0.375;  B1[v-3][v-2] = 0.125;}
-        B1[v-2][0] = 0.375;  B1[v-2][v-3] = 0.125;  B1[v-2][v-2] = 0.375;  B1[v-2][v-1] = 0.125;
-        B1[v-1][0] = 0.375;  B1[v-1][v-2] = 0.125;  B1[v-1][v-1] = 0.375;  B1[v-1][v] = 0.125;
-        B1[v][0] = 0.375;  B1[v][1] = 0.125;  B1[v][v-1] = 0.125;  B1[v][v] = 0.375;
-        B1[v+1][0] = 0.125;  B1[v+1][1] = 0.375;  B1[v+1][v] = 0.375;  B1[v+1][v+1] = 0.125;
-        B1[v+2][0] = 0.0625;  B1[v+2][1] = 0.625;  B1[v+2][2] = 0.0625;  B1[v+2][v] = 0.0625;  B1[v+2][v+1] = 0.0625;  B1[v+2][v+2] = 0.0625;  B1[v+2][v+3] = 0.0625;
-        B1[v+3][0] = 0.125;  B1[v+3][1] = 0.375;  B1[v+3][2] = 0.375;  B1[v+3][v+3] = 0.125;
-        B1[v+4][0] = 0.0625;  B1[v+4][1] = 0.0625;  B1[v+4][v-1] = 0.0625;  B1[v+4][v] = 0.625;  B1[v+4][v+1] = 0.0625;  B1[v+4][v+4] = 0.0625;  B1[v+4][v+5] = 0.0625;
-        B1[v+5][0] = 0.125;  B1[v+5][v-1] = 0.375;  B1[v+5][v] = 0.375;  B1[v+5][v+5] = 0.125;
-        B1[v+6][1] = 0.375;  B1[v+6][v] = 0.125;  B1[v+6][v+1] = 0.375;  B1[v+6][v+2] =  0.125;
-        B1[v+7][1] = 0.375;  B1[v+7][v+1] =  0.125;  B1[v+7][v+2] =  0.375;  B1[v+7][v+3] = 0.125;
-        B1[v+8][1] = 0.375;  B1[v+8][2] = 0.125;  B1[v+8][v+2] = 0.125;  B1[v+8][v+3] = 0.375;
-        B1[v+9][1] = 0.125;  B1[v+9][v] = 0.375;  B1[v+9][v+1] = 0.375;  B1[v+9][v+4] = 0.125;
-        B1[v+10][v] = 0.375;  B1[v+10][v+1] = 0.125;  B1[v+10][v+4] = 0.375;  B1[v+10][v+5] = 0.125;
-        B1[v+11][v-1] = 0.125;  B1[v+11][v] = 0.375;  B1[v+11][v+4] = 0.125;  B1[v+11][v+5] = 0.375;
-      }
+        const PetscReal b1 = DOT(ng, Aaa);
+        const PetscReal b2 = DOT(ng, Abb);
+        const PetscReal b3 = DOT(ng, Aab);
 
-      for (PetscInt i = 0; i < 12; i++) {
-        for (PetscInt j = 0; j < (v+6); j++) {
-          B3[i][j] = 0.;
-          for (PetscInt m = 0; m < (v+12); m++) {
-            B3[i][j] += B2[i][m]*B1[m][j];
-          }
+        /* Bending rows (same pattern as your “B4”) */
+        PetscReal Bs0 = -(G->INab0[a] + b1);
+        PetscReal Bs1 = -(G->INab1[a] + b2);
+        PetscReal Bs2 = -2.0*(G->INab2[a] + b3);
+
+        /* For each DOF component (x,y,z) for control point a */
+        const PetscInt base = 3*a;
+
+        /* x */
+        {
+          PetscReal mem  = Bm0x*Sv[0] + Bm1x*Sv[1] + Bm2x*Sv[2];
+          PetscReal bend = (Bs0*nn.x)*Sv[0] + (Bs1*nn.x)*Sv[1] + (Bs2*nn.x)*Sv[2];
+          Fb_out[base+0] += pref0 * w_qp * ( mem + bend * (half_h0 * xi_qp) );
+        }
+        /* y */
+        {
+          PetscReal mem  = Bm0y*Sv[0] + Bm1y*Sv[1] + Bm2y*Sv[2];
+          PetscReal bend = (Bs0*nn.y)*Sv[0] + (Bs1*nn.y)*Sv[1] + (Bs2*nn.y)*Sv[2];
+          Fb_out[base+1] += pref0 * w_qp * ( mem + bend * (half_h0 * xi_qp) );
+        }
+        /* z */
+        {
+          PetscReal mem  = Bm0z*Sv[0] + Bm1z*Sv[1] + Bm2z*Sv[2];
+          PetscReal bend = (Bs0*nn.z)*Sv[0] + (Bs1*nn.z)*Sv[1] + (Bs2*nn.z)*Sv[2];
+          Fb_out[base+2] += pref0 * w_qp * ( mem + bend * (half_h0 * xi_qp) );
         }
       }
-
-      PetscReal INa[2][v+6], INab[3][v+6];
-      for (PetscInt j = 0; j < (v+6); j++) {
-        PetscReal sum1=0., sum2=0., sum3=0., sum4=0., sum5=0.;
-        for (PetscInt i = 0; i < 12; i++) {
-          sum1 += B3[i][j]*Na_center[0][i];
-          sum2 += B3[i][j]*Na_center[1][i];
-          sum3 += B3[i][j]*Nab_center[0][i];
-          sum4 += B3[i][j]*Nab_center[1][i];
-          sum5 += B3[i][j]*Nab_center[2][i];
-        }
-        INa[0][j]  = -2*sum1;
-        INa[1][j]  = -2*sum2;
-        INab[0][j] =  4*sum3;
-        INab[1][j] =  4*sum4;
-        INab[2][j] =  4*sum5;
-      }
-
-      /* Aaa/Abb/Aab from INab */
-      struct Cmpnts Aaa = {0,0,0}, Abb = {0,0,0}, Aab = {0,0,0};
-      for (PetscInt i = 0; i < (v+6); i++) {
-        Aaa.x += INab[0][i]*X0[i][0];  Aaa.y += INab[0][i]*X0[i][1];  Aaa.z += INab[0][i]*X0[i][2];
-        Abb.x += INab[1][i]*X0[i][0];  Abb.y += INab[1][i]*X0[i][1];  Abb.z += INab[1][i]*X0[i][2];
-        Aab.x += INab[2][i]*X0[i][0];  Aab.y += INab[2][i]*X0[i][1];  Aab.z += INab[2][i]*X0[i][2];
-      }
-
-      /* Membrane matrix */
-      PetscReal Bm[3][3*(v+6)];
-      for (PetscInt i = 0; i < (v+6); i++) {
-        Bm[0][3*i+0] = INa[0][i]*ndx21.x;   Bm[0][3*i+1] = INa[0][i]*ndx21.y;   Bm[0][3*i+2] = INa[0][i]*ndx21.z;
-        Bm[1][3*i+0] = INa[1][i]*ndx31.x;   Bm[1][3*i+1] = INa[1][i]*ndx31.y;   Bm[1][3*i+2] = INa[1][i]*ndx31.z;
-        Bm[2][3*i+0] = INa[0][i]*ndx31.x + INa[1][i]*ndx21.x;
-        Bm[2][3*i+1] = INa[0][i]*ndx31.y + INa[1][i]*ndx21.y;
-        Bm[2][3*i+2] = INa[0][i]*ndx31.z + INa[1][i]*ndx21.z;
-      }
-
-      /* Bending matrix (you called it B4) */
-      PetscReal B4[3][3*(v+6)];
-      for (PetscInt i = 0; i < (v+6); i++) {
-        struct Cmpnts ng1 = AMULT(INa[0][i], gc1);
-        struct Cmpnts ng2 = AMULT(INa[1][i], gc2);
-        struct Cmpnts ng  = PLUS(ng1, ng2);
-
-        PetscReal b1 = DOT(ng, Aaa);
-        PetscReal b2 = DOT(ng, Abb);
-        PetscReal b3 = DOT(ng, Aab);
-
-        B4[0][3*i+0] = -(INab[0][i] + b1)*nn.x;   B4[0][3*i+1] = -(INab[0][i] + b1)*nn.y;   B4[0][3*i+2] = -(INab[0][i] + b1)*nn.z;
-        B4[1][3*i+0] = -(INab[1][i] + b2)*nn.x;   B4[1][3*i+1] = -(INab[1][i] + b2)*nn.y;   B4[1][3*i+2] = -(INab[1][i] + b2)*nn.z;
-        B4[2][3*i+0] = -2.0*(INab[2][i] + b3)*nn.x; B4[2][3*i+1] = -2.0*(INab[2][i] + b3)*nn.y; B4[2][3*i+2] = -2.0*(INab[2][i] + b3)*nn.z;
-      }
-
-      /* membrane force */
-      PetscReal Fm[3*(v+6)];
-      for (PetscInt ii = 0; ii < 3*(v+6); ii++) {
-        PetscReal sum = 0.0;
-        for (PetscInt m = 0; m < 3; m++) sum += Bm[m][ii] * Sm[m] * A0 * h0;
-        Fm[ii] = sum;
-      }
-
-      for (PetscInt ii = 0; ii < 3*(v+6); ii++) {
-        PetscReal sum = 0.0;
-        for (PetscInt m = 0; m < 3; m++) sum += B4[m][ii] * S[m] * A0 * PetscPowReal(h0, 3.0) / 12.0;
-        Fb_out[ii] += sum + Fm[ii];
-      }
-
-      /* IE/FC bookkeeping (same idea; keep if you want) */
-      {
-        PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
-        PetscReal sum = 0.;
-        for (PetscInt i = 0; i < 3; i++) {
-          sum += 0.5*(A0*h0*Em[i]*Sm[i] + A0*PetscPowReal(h0,3.0)/12.*Eb[i]*S[i]);
-          fem->FC[dof*ec + i] = Sm[i]*A0*h0 + A0*PetscPowReal(h0,2.0)/2.*S[i];
-        }
-        fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
-      }
-
-      for (PetscInt i = 0; i < (v+6); i++) free(X0[i]);
-      free(X0);
 
       continue;
     }
@@ -1223,6 +1210,293 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec,
 
   return ierr;
 }
+
+
+// PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec,
+//                           const PetscReal Sm[3],   /* membrane stress resultants (your Sm[m]) */
+//                           const PetscReal S[3],    /* bending stress resultants (your S[m]) */
+//                           const PetscReal Em[3],   /* membrane strains (for IE) */
+//                           const PetscReal Eb[3],   /* bending strains  (for IE) */
+//                           PetscReal A0, PetscReal h0,
+//                           PetscReal *Fb_out        /* output: element force vector (size 36 for reg, 3*(v+6) for irreg) */
+//                           )
+// {
+//   PetscErrorCode ierr = 0;
+//   IBMNodes    *ibm = fem->ibm;
+//   ElemActData *ead = &fem->act_data.elem_act_data[ec];
+
+//   const PetscInt dof = fem->dof; /* expect 3 */
+
+//   PetscCheck(Fb_out, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "Fb_out is NULL");
+//   PetscCheck(ead->g, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->g is NULL");
+
+//   /* You asked: max qps small; not parallel now.
+//      Note: Your Na/Nab are center-based so qp repeats; still loop qp if you want integration later. */
+//   for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+
+//     /* Grab basis computed in ElemUpdateG */
+//     const struct Cmpnts ndx21 = ead->g[qp].Cov[0];
+//     const struct Cmpnts ndx31 = ead->g[qp].Cov[1];
+//     const struct Cmpnts nn    = ead->g[qp].Cov[2];
+
+//     const struct Cmpnts gc1   = ead->g[qp].Cont[0];
+//     const struct Cmpnts gc2   = ead->g[qp].Cont[1];
+
+//     /* ------------------------- REGULAR PATCH ------------------------- */
+//     if (ibm->ire[ec] == 0) {
+
+//       /* Build x/y/z for Aaa, Abb, Aab only (needed for bending b1,b2,b3) */
+//       PetscReal x[12], y[12], z[12];
+//       PetscInt  node, nob = 1;
+
+//       for (PetscInt i = 0; i < 12; i++) {
+//         if (ibm->patch[16*ec + i] != 1000000) {
+//           node = ibm->patch[16*ec + i];
+//           x[i] = ibm->x_bp[node];
+//           y[i] = ibm->y_bp[node];
+//           z[i] = ibm->z_bp[node];
+//         } else {
+//           nob = 0;
+//         }
+//       }
+//       PetscCheck(nob, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+//                  "Regular patch missing control point ec=%" PetscInt_FMT, ec);
+
+//       struct Cmpnts Aaa = {0,0,0}, Abb = {0,0,0}, Aab = {0,0,0};
+
+//       for (PetscInt i = 0; i < 12; i++) {
+//         Aaa.x += Nab_center[0][i]*x[i];
+//         Aaa.y += Nab_center[0][i]*y[i];
+//         Aaa.z += Nab_center[0][i]*z[i];
+
+//         Abb.x += Nab_center[1][i]*x[i];
+//         Abb.y += Nab_center[1][i]*y[i];
+//         Abb.z += Nab_center[1][i]*z[i];
+
+//         Aab.x += Nab_center[2][i]*x[i];
+//         Aab.y += Nab_center[2][i]*y[i];
+//         Aab.z += Nab_center[2][i]*z[i];
+//       }
+
+//       /* Membrane matrix */
+//       PetscReal Bm[3][36];
+//       for (PetscInt i = 0; i < 12; i++) {
+//         Bm[0][3*i+0] = Na_center[0][i]*ndx21.x;   Bm[0][3*i+1] = Na_center[0][i]*ndx21.y;   Bm[0][3*i+2] = Na_center[0][i]*ndx21.z;
+//         Bm[1][3*i+0] = Na_center[1][i]*ndx31.x;   Bm[1][3*i+1] = Na_center[1][i]*ndx31.y;   Bm[1][3*i+2] = Na_center[1][i]*ndx31.z;
+//         Bm[2][3*i+0] = Na_center[0][i]*ndx31.x + Na_center[1][i]*ndx21.x;
+//         Bm[2][3*i+1] = Na_center[0][i]*ndx31.y + Na_center[1][i]*ndx21.y;
+//         Bm[2][3*i+2] = Na_center[0][i]*ndx31.z + Na_center[1][i]*ndx21.z;
+//       }
+
+//       /* Bending matrix */
+//       PetscReal Bs[3][36];
+//       for (PetscInt i = 0; i < 12; i++) {
+//         struct Cmpnts ng1 = AMULT(Na_center[0][i], gc1);
+//         struct Cmpnts ng2 = AMULT(Na_center[1][i], gc2);
+//         struct Cmpnts ng  = PLUS(ng1, ng2);
+
+//         PetscReal b1 = DOT(ng, Aaa);
+//         PetscReal b2 = DOT(ng, Abb);
+//         PetscReal b3 = DOT(ng, Aab);
+
+//         Bs[0][3*i+0] = -(Nab_center[0][i] + b1)*nn.x;   Bs[0][3*i+1] = -(Nab_center[0][i] + b1)*nn.y;   Bs[0][3*i+2] = -(Nab_center[0][i] + b1)*nn.z;
+//         Bs[1][3*i+0] = -(Nab_center[1][i] + b2)*nn.x;   Bs[1][3*i+1] = -(Nab_center[1][i] + b2)*nn.y;   Bs[1][3*i+2] = -(Nab_center[1][i] + b2)*nn.z;
+//         Bs[2][3*i+0] = -2.0*(Nab_center[2][i] + b3)*nn.x; Bs[2][3*i+1] = -2.0*(Nab_center[2][i] + b3)*nn.y; Bs[2][3*i+2] = -2.0*(Nab_center[2][i] + b3)*nn.z;
+//       }
+
+//       /* membrane force */
+//       PetscReal Fm[36];
+//       for (PetscInt ii = 0; ii < 36; ii++) {
+//         PetscReal sum = 0.0;
+//         for (PetscInt m = 0; m < 3; m++) sum += Bm[m][ii] * Sm[m] * A0 * h0;
+//         Fm[ii] = sum;
+//       }
+
+//       /* bending + membrane */
+//       for (PetscInt ii = 0; ii < 36; ii++) {
+//         PetscReal sum = 0.0;
+//         for (PetscInt m = 0; m < 3; m++) sum += Bs[m][ii] * S[m] * A0 * PetscPowReal(h0, 3.0) / 12.0;
+//         Fb_out[ii] += sum + Fm[ii];
+//       }
+
+//       /* IE/FC bookkeeping exactly like your code (optional to keep here) */
+//       {
+//         PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
+//         PetscReal sum = 0.;
+//         for (PetscInt i = 0; i < 3; i++) {
+//           sum += 0.5*(A0*h0*Em[i]*Sm[i] + A0*PetscPowReal(h0,3.0)/12.*Eb[i]*S[i]);
+//           fem->FC[dof*ec + i] = Sm[i]*A0*h0 + A0*PetscPowReal(h0,2.0)/2.*S[i];
+//         }
+//         fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
+//       }
+
+//       continue;
+//     }
+
+//     /* ------------------------- IRREGULAR PATCH ------------------------- */
+//     if (ibm->ire[ec] == 1) {
+
+//       const PetscInt v = ibm->val[ec];
+//       PetscInt node, nob = 1;
+
+//       for (PetscInt i = 0; i < (v+6); i++) {
+//         if (ibm->patch[16*ec+i] == 1000000) { nob = 0; }
+//       }
+//       PetscCheck(nob, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+//                  "Irregular patch missing control point ec=%" PetscInt_FMT, ec);
+
+//       /* Rebuild X0 just to compute Aaa/Abb/Aab and INa/INab (same as your original).
+//          Note: we are NOT recomputing ndx21/ndx31/nn/gc1/gc2: we reuse them from ElemUpdateG. */
+//       PetscReal **X0 = (PetscReal**)malloc((v+6)*sizeof(PetscReal*));
+//       PetscCheck(X0, PETSC_COMM_SELF, PETSC_ERR_MEM, "malloc failed X0");
+//       for (PetscInt i = 0; i < (v+6); i++) {
+//         X0[i] = (PetscReal*)malloc(3*sizeof(PetscReal));
+//         PetscCheck(X0[i], PETSC_COMM_SELF, PETSC_ERR_MEM, "malloc failed X0[i]");
+//         node = ibm->patch[16*ec + i];
+//         X0[i][0] = ibm->x_bp[node];
+//         X0[i][1] = ibm->y_bp[node];
+//         X0[i][2] = ibm->z_bp[node];
+//       }
+
+//       PetscReal w = (1./v)*(0.625 - pow(0.375 + 0.25*PetscCosReal(2*PETSC_PI/v), 2.));
+
+//       PetscReal B3[12][v+6], B2[12][v+12], B1[v+12][v+6];
+
+//       for (PetscInt i = 0; i < 12; i++)
+//         for (PetscInt j = 0; j < (v+12); j++)
+//           B2[i][j] = 0.;
+
+//       for (PetscInt i = 0; i < (v+12); i++)
+//         for (PetscInt j = 0; j < (v+6); j++)
+//           B1[i][j] = 0.;
+
+//       /* B2 */
+//       B2[0][v+9]  = 1.;  B2[1][v+6]  = 1.;  B2[2][v+4]  = 1.;  B2[3][v+1]  = 1.;
+//       B2[4][v+2]  = 1.;  B2[5][v+5]  = 1.;  B2[6][v]    = 1.;  B2[7][1]    = 1.;
+//       B2[8][v+3]  = 1.;  B2[9][v-1]  = 1.;  B2[10][0]   = 1.;  B2[11][2]   = 1.;
+
+//       /* B1 (same as in ElemUpdateG; keep identical) */
+//       {
+//         PetscInt j;
+//         B1[0][0] = 1 - v*w;  for (j=0; j<v; j++) {B1[0][1+j] = w;}
+//         B1[1][0] = 0.375;  B1[1][1] = 0.375;  B1[1][2] = 0.125;  B1[1][v] = 0.125;
+//         B1[2][0] = 0.375;  B1[2][1] = 0.125;  B1[2][2] = 0.375;  B1[2][3] = 0.125;
+//         if (v>5) {B1[v-4][0] = 0.375;  B1[v-4][v-5] = 0.125;  B1[v-4][v-4] = 0.375;  B1[v-4][v-3] = 0.125;}
+//         if (v>4) {B1[v-3][0] = 0.375;  B1[v-3][v-4] = 0.125;  B1[v-3][v-3] = 0.375;  B1[v-3][v-2] = 0.125;}
+//         B1[v-2][0] = 0.375;  B1[v-2][v-3] = 0.125;  B1[v-2][v-2] = 0.375;  B1[v-2][v-1] = 0.125;
+//         B1[v-1][0] = 0.375;  B1[v-1][v-2] = 0.125;  B1[v-1][v-1] = 0.375;  B1[v-1][v] = 0.125;
+//         B1[v][0] = 0.375;  B1[v][1] = 0.125;  B1[v][v-1] = 0.125;  B1[v][v] = 0.375;
+//         B1[v+1][0] = 0.125;  B1[v+1][1] = 0.375;  B1[v+1][v] = 0.375;  B1[v+1][v+1] = 0.125;
+//         B1[v+2][0] = 0.0625;  B1[v+2][1] = 0.625;  B1[v+2][2] = 0.0625;  B1[v+2][v] = 0.0625;  B1[v+2][v+1] = 0.0625;  B1[v+2][v+2] = 0.0625;  B1[v+2][v+3] = 0.0625;
+//         B1[v+3][0] = 0.125;  B1[v+3][1] = 0.375;  B1[v+3][2] = 0.375;  B1[v+3][v+3] = 0.125;
+//         B1[v+4][0] = 0.0625;  B1[v+4][1] = 0.0625;  B1[v+4][v-1] = 0.0625;  B1[v+4][v] = 0.625;  B1[v+4][v+1] = 0.0625;  B1[v+4][v+4] = 0.0625;  B1[v+4][v+5] = 0.0625;
+//         B1[v+5][0] = 0.125;  B1[v+5][v-1] = 0.375;  B1[v+5][v] = 0.375;  B1[v+5][v+5] = 0.125;
+//         B1[v+6][1] = 0.375;  B1[v+6][v] = 0.125;  B1[v+6][v+1] = 0.375;  B1[v+6][v+2] =  0.125;
+//         B1[v+7][1] = 0.375;  B1[v+7][v+1] =  0.125;  B1[v+7][v+2] =  0.375;  B1[v+7][v+3] = 0.125;
+//         B1[v+8][1] = 0.375;  B1[v+8][2] = 0.125;  B1[v+8][v+2] = 0.125;  B1[v+8][v+3] = 0.375;
+//         B1[v+9][1] = 0.125;  B1[v+9][v] = 0.375;  B1[v+9][v+1] = 0.375;  B1[v+9][v+4] = 0.125;
+//         B1[v+10][v] = 0.375;  B1[v+10][v+1] = 0.125;  B1[v+10][v+4] = 0.375;  B1[v+10][v+5] = 0.125;
+//         B1[v+11][v-1] = 0.125;  B1[v+11][v] = 0.375;  B1[v+11][v+4] = 0.125;  B1[v+11][v+5] = 0.375;
+//       }
+
+//       for (PetscInt i = 0; i < 12; i++) {
+//         for (PetscInt j = 0; j < (v+6); j++) {
+//           B3[i][j] = 0.;
+//           for (PetscInt m = 0; m < (v+12); m++) {
+//             B3[i][j] += B2[i][m]*B1[m][j];
+//           }
+//         }
+//       }
+
+//       PetscReal INa[2][v+6], INab[3][v+6];
+//       for (PetscInt j = 0; j < (v+6); j++) {
+//         PetscReal sum1=0., sum2=0., sum3=0., sum4=0., sum5=0.;
+//         for (PetscInt i = 0; i < 12; i++) {
+//           sum1 += B3[i][j]*Na_center[0][i];
+//           sum2 += B3[i][j]*Na_center[1][i];
+//           sum3 += B3[i][j]*Nab_center[0][i];
+//           sum4 += B3[i][j]*Nab_center[1][i];
+//           sum5 += B3[i][j]*Nab_center[2][i];
+//         }
+//         INa[0][j]  = -2*sum1;
+//         INa[1][j]  = -2*sum2;
+//         INab[0][j] =  4*sum3;
+//         INab[1][j] =  4*sum4;
+//         INab[2][j] =  4*sum5;
+//       }
+
+//       /* Aaa/Abb/Aab from INab */
+//       struct Cmpnts Aaa = {0,0,0}, Abb = {0,0,0}, Aab = {0,0,0};
+//       for (PetscInt i = 0; i < (v+6); i++) {
+//         Aaa.x += INab[0][i]*X0[i][0];  Aaa.y += INab[0][i]*X0[i][1];  Aaa.z += INab[0][i]*X0[i][2];
+//         Abb.x += INab[1][i]*X0[i][0];  Abb.y += INab[1][i]*X0[i][1];  Abb.z += INab[1][i]*X0[i][2];
+//         Aab.x += INab[2][i]*X0[i][0];  Aab.y += INab[2][i]*X0[i][1];  Aab.z += INab[2][i]*X0[i][2];
+//       }
+
+//       /* Membrane matrix */
+//       PetscReal Bm[3][3*(v+6)];
+//       for (PetscInt i = 0; i < (v+6); i++) {
+//         Bm[0][3*i+0] = INa[0][i]*ndx21.x;   Bm[0][3*i+1] = INa[0][i]*ndx21.y;   Bm[0][3*i+2] = INa[0][i]*ndx21.z;
+//         Bm[1][3*i+0] = INa[1][i]*ndx31.x;   Bm[1][3*i+1] = INa[1][i]*ndx31.y;   Bm[1][3*i+2] = INa[1][i]*ndx31.z;
+//         Bm[2][3*i+0] = INa[0][i]*ndx31.x + INa[1][i]*ndx21.x;
+//         Bm[2][3*i+1] = INa[0][i]*ndx31.y + INa[1][i]*ndx21.y;
+//         Bm[2][3*i+2] = INa[0][i]*ndx31.z + INa[1][i]*ndx21.z;
+//       }
+
+//       /* Bending matrix (you called it B4) */
+//       PetscReal B4[3][3*(v+6)];
+//       for (PetscInt i = 0; i < (v+6); i++) {
+//         struct Cmpnts ng1 = AMULT(INa[0][i], gc1);
+//         struct Cmpnts ng2 = AMULT(INa[1][i], gc2);
+//         struct Cmpnts ng  = PLUS(ng1, ng2);
+
+//         PetscReal b1 = DOT(ng, Aaa);
+//         PetscReal b2 = DOT(ng, Abb);
+//         PetscReal b3 = DOT(ng, Aab);
+
+//         B4[0][3*i+0] = -(INab[0][i] + b1)*nn.x;   B4[0][3*i+1] = -(INab[0][i] + b1)*nn.y;   B4[0][3*i+2] = -(INab[0][i] + b1)*nn.z;
+//         B4[1][3*i+0] = -(INab[1][i] + b2)*nn.x;   B4[1][3*i+1] = -(INab[1][i] + b2)*nn.y;   B4[1][3*i+2] = -(INab[1][i] + b2)*nn.z;
+//         B4[2][3*i+0] = -2.0*(INab[2][i] + b3)*nn.x; B4[2][3*i+1] = -2.0*(INab[2][i] + b3)*nn.y; B4[2][3*i+2] = -2.0*(INab[2][i] + b3)*nn.z;
+//       }
+
+//       /* membrane force */
+//       PetscReal Fm[3*(v+6)];
+//       for (PetscInt ii = 0; ii < 3*(v+6); ii++) {
+//         PetscReal sum = 0.0;
+//         for (PetscInt m = 0; m < 3; m++) sum += Bm[m][ii] * Sm[m] * A0 * h0;
+//         Fm[ii] = sum;
+//       }
+
+//       for (PetscInt ii = 0; ii < 3*(v+6); ii++) {
+//         PetscReal sum = 0.0;
+//         for (PetscInt m = 0; m < 3; m++) sum += B4[m][ii] * S[m] * A0 * PetscPowReal(h0, 3.0) / 12.0;
+//         Fb_out[ii] += sum + Fm[ii];
+//       }
+
+//       /* IE/FC bookkeeping (same idea; keep if you want) */
+//       {
+//         PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
+//         PetscReal sum = 0.;
+//         for (PetscInt i = 0; i < 3; i++) {
+//           sum += 0.5*(A0*h0*Em[i]*Sm[i] + A0*PetscPowReal(h0,3.0)/12.*Eb[i]*S[i]);
+//           fem->FC[dof*ec + i] = Sm[i]*A0*h0 + A0*PetscPowReal(h0,2.0)/2.*S[i];
+//         }
+//         fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
+//       }
+
+//       for (PetscInt i = 0; i < (v+6); i++) free(X0[i]);
+//       free(X0);
+
+//       continue;
+//     }
+
+//     SETERRQ(PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+//             "Unknown ibm->ire[ec]=%" PetscInt_FMT " for ec=%" PetscInt_FMT,
+//             ibm->ire[ec], ec);
+//   }
+
+//   return ierr;
+// }
 
 
 // PetscErrorCode Init(FE *fem, PetscInt ec)
