@@ -11,7 +11,7 @@ extern struct Cmpnts  UNIT(struct Cmpnts v1);
 extern PetscReal  SIZE(struct Cmpnts v1);
 extern struct Cmpnts  AMULT(PetscReal alpha, struct Cmpnts v1);
 extern PetscErrorCode  INV(PetscReal T[3][3], PetscReal _Tinv[3][3]);
-extern PetscErrorCode  MATMULT(PetscReal A[][2], PetscReal B[][2], PetscReal C[][2]);
+extern PetscErrorCode MATMULT(const PetscReal A[3][3], const PetscReal B[3][3], PetscReal C[3][3]);
 extern PetscErrorCode  TRANS(PetscReal A[3][3], PetscReal _AT[3][3]);
 extern PetscErrorCode  StressLinear(PetscInt ec, struct Cmpnts X1, struct Cmpnts X2, struct Cmpnts X3, PetscReal Strain[3], PetscReal _S[3], PetscInt method, IBMNodes *ibm);
 extern PetscErrorCode  StressManufactured(PetscInt ec, struct Cmpnts X1, struct Cmpnts X2, struct Cmpnts X3, PetscReal Strain[3], PetscReal _S[3], PetscInt method, IBMNodes *ibm);

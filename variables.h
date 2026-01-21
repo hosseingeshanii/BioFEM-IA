@@ -20,17 +20,16 @@ typedef struct {
   PetscReal  x, y;
 } Cpt2D;
 
-typedef struct {
-  PetscReal  c, A1, A2, A3, A4, A5, A6;  //Fung Model Coeff
-} FungC;
 
-typedef struct {
-  PetscReal  gamma, a_1, a_2; 
-} MuscleActParams;
 
-typedef struct {
-  MuscleActParams muscle_act_params;
-} UserCtx;
+// typedef struct {
+//   PetscReal  c, A1, A2, A3, A4, A5, A6;  //Fung Model Coeff
+// } FungC;
+
+
+// typedef struct {
+//   MuscleActParams muscle_act_params;
+// } UserCtx;
 
 
 
@@ -89,7 +88,7 @@ typedef struct {
   Mat        J_Seq;
   ActData    act_data;
   IBMNodes   *ibm;
-  UserCtx    userctx;
+  // UserCtx    userctx;
 } FE;
 
 #endif

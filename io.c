@@ -61,11 +61,11 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->y_bp0));
   PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->z_bp0));
 
-  if (muscle_activation){
-    PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->x_bpi));
-    PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->y_bpi));
-    PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->z_bpi));    
-  }
+  // if (muscle_activation){
+  //   PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->x_bpi));
+  //   PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->y_bpi));
+  //   PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscReal), &(ibm->z_bpi));    
+  // }
   
 
   PetscMalloc((ibm->n_elmt + 2*ibm->n_ghosts)*sizeof(PetscInt), &(ibm->nv1));
@@ -227,25 +227,25 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   }
 
 
-  if(muscle_activation){
-    PetscErrorCode ierr;
+  // if(muscle_activation){
+  //   PetscErrorCode ierr;
 
 
-    ierr = PetscMalloc(ibm->n_elmt * sizeof(ElemActData), &fem->act_data.elem_act_data); CHKERRQ(ierr);
+  //   ierr = PetscMalloc(ibm->n_elmt * sizeof(ElemActData), &fem->act_data.elem_act_data); CHKERRQ(ierr);
     
-    PetscInt nBasisVecs = 2;
-    VecCreateSeq(PETSC_COMM_SELF, ibm->n_elmt * nBasisVecs * dof, &fem->act_data.g_e_target);
-    VecSet(fem->act_data.g_e_target, 0.0); 
+  //   PetscInt nBasisVecs = 2;
+  //   VecCreateSeq(PETSC_COMM_SELF, ibm->n_elmt * nBasisVecs * dof, &fem->act_data.g_e_target);
+  //   VecSet(fem->act_data.g_e_target, 0.0); 
 
-    for (PetscInt ec = 0; ec < ibm->n_elmt; ec++) {
-      for (PetscInt i = 0; i < 3; i++) {
-        for (PetscInt j = 0; j < 3; j++) {
-            fem->act_data.elem_act_data[ec].Fa[i][j] = 0.0;
-        }
-      }
-    }
+  //   for (PetscInt ec = 0; ec < ibm->n_elmt; ec++) {
+  //     for (PetscInt i = 0; i < 3; i++) {
+  //       for (PetscInt j = 0; j < 3; j++) {
+  //           fem->act_data.elem_act_data[ec].Fa[i][j] = 0.0;
+  //       }
+  //     }
+  //   }
     
-  }
+  // }
 
   PetscMalloc((ibm->n_elmt + 2*ibm->n_ghosts)*sizeof(PetscReal), &(ibm->nf_x));
   PetscMalloc((ibm->n_elmt + 2*ibm->n_ghosts)*sizeof(PetscReal), &(ibm->Nf_x)); 
@@ -306,10 +306,10 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   }
   
   
-  if (muscle_activation){
-    VecDuplicate(fem->Res, &(fem->x_intmd));
-    VecSet(fem->x_intmd, 0.0);
-  }
+  // if (muscle_activation){
+  //   VecDuplicate(fem->Res, &(fem->x_intmd));
+  //   VecSet(fem->x_intmd, 0.0);
+  // }
   return (0);
 }
 
@@ -631,58 +631,58 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
 
   PetscFPrintf(PETSC_COMM_WORLD, f, "CELL_DATA %d\n",ibm->n_elmt);
   
-  if (muscle_activation){
+  // if (muscle_activation){
 
   
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "TENSORS Fa float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f %f %f %f %f %f %f\n",
-      fem->act_data.elem_act_data[i].Fa[0][0], fem->act_data.elem_act_data[i].Fa[0][1], fem->act_data.elem_act_data[i].Fa[0][2], 
-      fem->act_data.elem_act_data[i].Fa[1][0], fem->act_data.elem_act_data[i].Fa[1][1], fem->act_data.elem_act_data[i].Fa[1][2], 
-      fem->act_data.elem_act_data[i].Fa[2][0], fem->act_data.elem_act_data[i].Fa[2][1], fem->act_data.elem_act_data[i].Fa[2][2]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "TENSORS Fa float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f %f %f %f %f %f %f\n",
+  //     fem->act_data.elem_act_data[i].Fa[0][0], fem->act_data.elem_act_data[i].Fa[0][1], fem->act_data.elem_act_data[i].Fa[0][2], 
+  //     fem->act_data.elem_act_data[i].Fa[1][0], fem->act_data.elem_act_data[i].Fa[1][1], fem->act_data.elem_act_data[i].Fa[1][2], 
+  //     fem->act_data.elem_act_data[i].Fa[2][0], fem->act_data.elem_act_data[i].Fa[2][1], fem->act_data.elem_act_data[i].Fa[2][2]);
+  // }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS ge1 float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
-      fem->act_data.elem_act_data[i].g_e[0].x, fem->act_data.elem_act_data[i].g_e[0].y, fem->act_data.elem_act_data[i].g_e[0].z);    
-    }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS ge1 float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+  //     fem->act_data.elem_act_data[i].g_e[0].x, fem->act_data.elem_act_data[i].g_e[0].y, fem->act_data.elem_act_data[i].g_e[0].z);    
+  //   }
   
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS ge2 float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
-      fem->act_data.elem_act_data[i].g_e[1].x, fem->act_data.elem_act_data[i].g_e[1].y, fem->act_data.elem_act_data[i].g_e[1].z);    
-    }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS ge2 float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+  //     fem->act_data.elem_act_data[i].g_e[1].x, fem->act_data.elem_act_data[i].g_e[1].y, fem->act_data.elem_act_data[i].g_e[1].z);    
+  //   }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS G1 float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
-      ibm->G1[i*dof], ibm->G1[i*dof+1], ibm->G1[i*dof+2]);    
-    }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS G1 float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+  //     ibm->G1[i*dof], ibm->G1[i*dof+1], ibm->G1[i*dof+2]);    
+  //   }
   
-    PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS G2 float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
-      ibm->G2[i*dof], ibm->G2[i*dof+1], ibm->G2[i*dof+2]);    
-    }
+  //   PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS G2 float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+  //     ibm->G2[i*dof], ibm->G2[i*dof+1], ibm->G2[i*dof+2]);    
+  //   }
 
-    PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS FG1 float\n");
-    PetscInt nBasisVecs = 2;
-    Vec F;
-    PetscReal  *farray;
-    VecDuplicate(fem->act_data.g_e_target, &F);
+  //   PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS FG1 float\n");
+  //   PetscInt nBasisVecs = 2;
+  //   Vec F;
+  //   PetscReal  *farray;
+  //   VecDuplicate(fem->act_data.g_e_target, &F);
 
-    calculate_cov_basis(fem->x, F, fem);
-    VecGetArray(F, &farray);
+  //   calculate_cov_basis(fem->x, F, fem);
+  //   VecGetArray(F, &farray);
     
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
-      farray[dof*nBasisVecs*i + 0] ,farray[dof*nBasisVecs*i + 1] , farray[dof*nBasisVecs*i + 2] );    
-    }
-    VecRestoreArray(F, &farray);
-    VecDestroy(&F);
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+  //     farray[dof*nBasisVecs*i + 0] ,farray[dof*nBasisVecs*i + 1] , farray[dof*nBasisVecs*i + 2] );    
+  //   }
+  //   VecRestoreArray(F, &farray);
+  //   VecDestroy(&F);
 
-  }
+  // }
 
   
   

@@ -28,9 +28,9 @@ MANSEC       = SNES
 
 LIBFLAG      =
 
-SOURCEC = main.c io.c membrane.c math.c external.c bending.c material.c bcs.c contact.c inverse.c muscle_activation.c
+SOURCEC = main.c io.c membrane.c math.c external.c bending.c material.c bcs.c contact.c inverse.c active_strain.c
 
-OBJSC = main.o io.o membrane.o math.o external.o bending.o material.o bcs.o contact.o inverse.o muscle_activation.o
+OBJSC = main.o io.o membrane.o math.o external.o bending.o material.o bcs.o contact.o inverse.o active_strain.o
 
 LIBBASE = libpetscmat
 

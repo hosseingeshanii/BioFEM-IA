@@ -1,7 +1,9 @@
 #ifndef MATH_H
 #define MATH_H
 
-#include "variables.h"  
+typedef struct Cmpnts { 
+  PetscReal x, y, z;
+} Cmpnts;
 
 struct Cmpnts PLUS(struct Cmpnts v1, struct Cmpnts v2);
 struct Cmpnts MINUS(struct Cmpnts v1, struct Cmpnts v2);
@@ -16,12 +18,14 @@ PetscErrorCode INV(PetscReal T[3][3], PetscReal _Tinv[3][3]);
 PetscErrorCode MATMULT(const PetscReal A[3][3], const PetscReal B[3][3], PetscReal C[3][3]);
 PetscErrorCode TRANS(PetscReal A[3][3], PetscReal _AT[3][3]);
 PetscReal SIGN(PetscReal a);
-
+PetscReal DET3x3(const PetscReal A[3][3]);
 PetscErrorCode RaiseIndices2(const PetscReal gInv[3][3],
                             const PetscReal A_cov[3][3],
                             PetscReal A_cont[3][3]);
 PetscErrorCode LowerIndices2(const PetscReal gCov[3][3],
                             const PetscReal A_cont[3][3],
                             PetscReal A_cov[3][3]);
+
+
 
 #endif

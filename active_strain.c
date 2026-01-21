@@ -72,6 +72,15 @@ static const PetscReal Nab_center[3][12] = {
 };
 
 
+PetscErrorCode GetUserActParams(FE *fem){
+    // UserCtx  *userctx = &fem->userctx;    
+
+    PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);
+    
+    return 0;
+}
+
 PetscErrorCode ActDataAllocate(FE *fem)
 {
     PetscErrorCode ierr;
@@ -262,9 +271,9 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
     for (PetscInt i = 0; i < 12; i++) {
       if (ibm->patch[16*ec + i] != 1000000) {
         node = ibm->patch[16*ec + i];
-        x[i] = ibm->xb[node];
-        y[i] = ibm->yb[node];
-        z[i] = ibm->zb[node];
+        x[i] = xb[node];
+        y[i] = yb[node];
+        z[i] = zb[node];
       } else {
         nob = 0;
       }
@@ -351,9 +360,9 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
     for (PetscInt i = 0; i < nen; i++) {
       ierr = PetscMalloc1(3, &X0[i]); CHKERRQ(ierr);
       PetscInt node = ibm->patch[16*ec + i];
-      X0[i][0] = ibm->xb[node];
-      X0[i][1] = ibm->yb[node];
-      X0[i][2] = ibm->zb[node];
+      X0[i][0] = xb[node];
+      X0[i][1] = yb[node];
+      X0[i][2] = zb[node];
     }
 
     PetscReal w = (1.0/(PetscReal)v) *
@@ -608,7 +617,7 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
     PetscReal S[3][3], ST[3][3];
     PetscReal tmp[3][3];
 
-    PetscReal gamma = fem->userctx.muscle_act_params.gamma;
+    PetscReal gamma = fem->act_data.muscle_act_params.gamma;
 
     /*------------------------------------------------------------*/
     /* 1. Active deformation gradient in Cartesian basis          */
@@ -647,7 +656,7 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
             S[1][j] = ead->g0[qp].Cov[j].y;
             S[2][j] = ead->g0[qp].Cov[j].z;
         }
-        TRANSPOSE(S, ST);
+        TRANS(S, ST);
         /*------------------------------------------------------------*/
         /* 3. Fa_ij = S^T * Fa_cart * S                               */
         /*------------------------------------------------------------*/
@@ -779,8 +788,8 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
     ElemActData *ead = &fem->act_data.elem_act_data[ec];
 
     PetscReal detCe, detG0, Je;
-    PetscReal mu = fem->userctx.mu; // shear modulus
-    PetscReal K = fem->userctx.K;   // bulk modulus
+    PetscReal mu = fem->act_data.mu; // shear modulus
+    PetscReal K = fem->act_data.K;   // bulk modulus
 
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
     {
@@ -830,7 +839,7 @@ PetscErrorCode ElemTotStress(FE *fem, PetscInt ec)
                             for (PetscInt s = 0; s < 3; s++)
                             {
                                 
-                                ead->S[qp].Cont[i][j] = 1 / 2 * ead->Fa_inv[qp].Cont[w][p] * ead->Fa_inv[qp].Cont[z][s] * ead->gm0[qp].Cont[s][j] * (ead->Se[qp].Cont[p][z] * ead->gm0[qp].Cont[w][i] + ead->Se[qp].Cont[p][i] * ead->gm0[qp].Cont[w][z])
+                                ead->S[qp].Cont[i][j] = 1 / 2 * ead->Fa_inv[qp].Cont[w][p] * ead->Fa_inv[qp].Cont[z][s] * ead->gm0[qp].Cont[s][j] * (ead->Se[qp].Cont[p][z] * ead->gm0[qp].Cont[w][i] + ead->Se[qp].Cont[p][i] * ead->gm0[qp].Cont[w][z]);
                             }
                         }
                     }
@@ -846,6 +855,7 @@ PetscErrorCode ElemElsTangMatTens(FE *fem, PetscInt ec)
 {
     PetscErrorCode ierr = 0;
     ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    PetscReal K = fem->act_data.K;
 
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)    
     {
@@ -985,12 +995,6 @@ PetscErrorCode ModElemC33(FE *fem, PetscInt ec)
 }
 
 
-// PetscErrorCode UpdateFint(FE *fem)
-// {
-//     h/2. * A0 * Bm * qp_w[qp] * S[qp] + h/2. * A0 * Bb * qp_w[qp] * S[qp] * (h/2. * qp_xi[qp]);
-// }
-
-
 /* Transfer reference covariant basis vectors (G1,G2) from IBMNodes storage
    (computed by Kve0()) into element activation data ead->g0[qp].Cov[]. */
 PetscErrorCode ElemUpdateG0(FE *fem, PetscInt ec)
@@ -1066,7 +1070,7 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
   const struct Cmpnts Aab = G->Aab;      /* a1,2  */
 
   /* Convenience scalars */
-  PetscReal A0 = ibm->dA0;
+  PetscReal A0 = ibm->dA0[ec];
   const PetscReal half_h0 = 0.5 * h0;
   const PetscReal pref0   = 0.5 * h0 * A0;  /* 0.5*h0*A0 */
 
@@ -1514,10 +1518,10 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
  * @param n_elems  Number of elements.
  * @param func     Element routine to apply.
  */
-PetscErrorCode UpdateElements(FE *fem, PetscInt n_elems, ElemFunc func)
+PetscErrorCode UpdateElements(FE *fem, ElemFunc func)
 {
     PetscErrorCode ierr;
-
+    PetscInt n_elems = fem->ibm->n_elmt;
     for (PetscInt ec = 0; ec < n_elems; ec++)
     {
         ierr = func(fem, ec);

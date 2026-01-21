@@ -3,7 +3,8 @@
 
 
 #include <petscsys.h>   /* PetscInt, PetscReal, PetscScalar */
-#include "types.h"
+#include "math.h"
+
 
 /*------------------------------------------------------------------------------
  *  Naming convention:
@@ -90,15 +91,21 @@ typedef struct {
 
 } ElemActData;
 
+typedef struct {
+  PetscReal  gamma, a_1, a_2; 
+} MuscleActParams;
+
 /*------------------------------------------------------------------------------
  *  Activation-related global data
  *----------------------------------------------------------------------------*/
 typedef struct {
-    PetscInt       n_qp;             /* Number of quadrature points */
-    PetscScalar   *theta;            /* Quadrature locations */
-    PetscScalar   *w;                /* Quadrature weights */
-
-    ElemActData   *elem_act_data;
+    PetscInt        n_qp;             /* Number of quadrature points */
+    PetscScalar     *theta;            /* Quadrature locations */
+    PetscScalar     *w;                /* Quadrature weights */
+    PetscReal       mu;               /* Shear modulus */
+    PetscReal       K;                /* Bulk modulus */
+    MuscleActParams muscle_act_params;
+    ElemActData     *elem_act_data;
 } ActData;
 
 #endif 

@@ -1,12 +1,14 @@
 static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 
 #include "variables.h"
+#include "math.h"
 #include <petscsystypes.h>  // Correct PETSc header for PetscBool type
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdbool.h>  
 #include <stdlib.h>
+#include "active_strain.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
@@ -165,8 +167,24 @@ int main(int argc, char **argv)
   if (muscle_activation){
 
     for (ibi=0; ibi<nbody; ibi++) { 
+      PetscPrintf(PETSC_COMM_SELF, "Initializing muscle activation data structures for body %d\n", ibi);
+      GetUserActParams(&fem[ibi]);
+
+      ActDataAllocate(&fem[ibi]);
+      PetscPrintf(PETSC_COMM_SELF, "After ActDataAllocate for body %d\n", ibi);
+
+      UpdateElements(&fem[ibi], ElemUpdateGeom0Subdiv);
+      PetscPrintf(PETSC_COMM_SELF, "After UpdateElements for body %d\n", ibi);
+
+      UpdateElements(&fem[ibi], ElemUpdateGeomSubdiv);
+      PetscPrintf(PETSC_COMM_SELF, "After UpdateElements for ElemUpdateGeomSubdiv for body %d\n", ibi);
+
+      ActDataDestroy(&fem[ibi]); // Just to check no memory leak in allocation
+      PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy for body %d\n", ibi);
+      
+      
       // ti = 0;
-      InitMuscleActProblem(&fem[ibi]);
+      // InitMuscleActProblem(&fem[ibi]);
       // update_user_act_params(&fem[ibi]);      
       // update_act_Fa(&fem[ibi]);
       // update_intmd_state_cov_basis(&fem[ibi]);
@@ -486,7 +504,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R,void *ctx) {
   for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
 
   if (muscle_activation){
-    UpdateFInternalAftAct(fem);
+    // UpdateFInternalAftAct(fem);
   }
   else{
     FInternal(fem);
@@ -987,11 +1005,11 @@ PetscErrorCode Free(FE *fem) {
     PetscFree(ibm->p5x0);  PetscFree(ibm->p5y0);  PetscFree(ibm->p5z0);
     PetscFree(ibm->p6x0);  PetscFree(ibm->p6y0);  PetscFree(ibm->p6z0);
   }
-  if(muscle_activation){
-    PetscFree(fem->act_data.elem_act_data);
-    VecDestroy(&fem->act_data.g_e_target);
+  // if(muscle_activation){
+  //   PetscFree(fem->act_data.elem_act_data);
+  //   VecDestroy(&fem->act_data.g_e_target);
 
-  }
+  // }
   
   return(0);
 }

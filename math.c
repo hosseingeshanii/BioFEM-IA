@@ -1,4 +1,5 @@
 #include  "variables.h"
+#include "math.h"
 
 
 struct Cmpnts PLUS(struct Cmpnts v1, struct Cmpnts v2) {
@@ -141,7 +142,14 @@ PetscReal SIGN(PetscReal a) {
   return(0.);
 }
 
-#include "math.h"
+PetscReal DET3x3(const PetscReal A[3][3])
+{
+    return
+          A[0][0]*(A[1][1]*A[2][2] - A[1][2]*A[2][1])
+        - A[0][1]*(A[1][0]*A[2][2] - A[1][2]*A[2][0])
+        + A[0][2]*(A[1][0]*A[2][1] - A[1][1]*A[2][0]);
+}
+
 
 PetscErrorCode RaiseIndices2(const PetscReal gInv[3][3],
                             const PetscReal A_cov[3][3],
