@@ -76,8 +76,11 @@ PetscErrorCode GetUserActParams(FE *fem){
     // UserCtx  *userctx = &fem->userctx;    
 
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
-    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);
-    
+    PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);    
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-bulk_modulus", &(fem->act_data.K), PETSC_NULL);
+
+    fem->act_data.mu = mu;
     return 0;
 }
 
@@ -88,6 +91,9 @@ PetscErrorCode ActDataAllocate(FE *fem)
 
     PetscInt nelem = fem->ibm->n_elmt;
     PetscInt n_qp = act->n_qp;
+
+    ierr = PetscMalloc1(n_qp, &act->theta);
+    ierr = PetscMalloc1(n_qp, &act->w);
 
     /*------------------------------------------------------------*/
     /* Allocate element-level activation data                     */
@@ -149,6 +155,64 @@ PetscErrorCode ActDataAllocate(FE *fem)
     return 0;
 }
 
+PetscErrorCode SetGaussianQuadrature(FE *fem)
+{
+    PetscFunctionBeginUser;
+
+    // Initialize all to zero
+    for (PetscInt i = 0; i < 5; i++) {
+        fem->act_data.theta[i] = 0.0;
+        fem->act_data.w[i] = 0.0;
+    }
+
+    switch (fem->act_data.n_qp) {
+    case 1:
+        fem->act_data.theta[0] = 0.0;
+        fem->act_data.w[0] = 2.0;
+        break;
+
+    case 2:
+        fem->act_data.theta[0] = -0.5773502691896257;  // ±1/sqrt(3)
+        fem->act_data.theta[1] =  0.5773502691896257;
+        fem->act_data.w[0] = fem->act_data.w[1] = 1.0;
+        break;
+
+    case 3:
+        fem->act_data.theta[0] = -0.7745966692414834;
+        fem->act_data.theta[1] =  0.0;
+        fem->act_data.theta[2] =  0.7745966692414834;
+        fem->act_data.w[0] = fem->act_data.w[2] = 0.5555555555555556;
+        fem->act_data.w[1] = 0.8888888888888888;
+        break;
+
+    case 4:
+        fem->act_data.theta[0] = -0.8611363115940526;
+        fem->act_data.theta[1] = -0.3399810435848563;
+        fem->act_data.theta[2] =  0.3399810435848563;
+        fem->act_data.theta[3] =  0.8611363115940526;
+        fem->act_data.w[0] = fem->act_data.w[3] = 0.3478548451374538;
+        fem->act_data.w[1] = fem->act_data.w[2] = 0.6521451548625461;
+        break;
+
+    case 5:
+        fem->act_data.theta[0] = -0.9061798459386640;
+        fem->act_data.theta[1] = -0.5384693101056831;
+        fem->act_data.theta[2] =  0.0;
+        fem->act_data.theta[3] =  0.5384693101056831;
+        fem->act_data.theta[4] =  0.9061798459386640;
+        fem->act_data.w[0] = fem->act_data.w[4] = 0.2369268850561891;
+        fem->act_data.w[1] = fem->act_data.w[3] = 0.4786286704993665;
+        fem->act_data.w[2] = 0.5688888888888889;
+        break;
+
+    default:
+        SETERRQ(PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
+                "Number of Gauss points must be between 1 and 5");
+    }
+
+    PetscFunctionReturn(0);
+}
+
 static PetscErrorCode SubdivGeomDestroy_(SubdivGeomQP *G)
 {
   PetscErrorCode ierr = 0;
@@ -164,7 +228,6 @@ static PetscErrorCode SubdivGeomDestroy_(SubdivGeomQP *G)
   return 0;
 }
 
-/* Call this from your ActDataDestroy loop per element. */
 static PetscErrorCode ElemActDataGeomDestroy_(ElemActData *ead)
 {
   PetscErrorCode ierr = 0;
@@ -211,6 +274,9 @@ PetscErrorCode ActDataDestroy(FE *fem)
     }
 
     ierr = PetscFree(act->elem_act_data);   CHKERRQ(ierr);
+    ierr = PetscFree(act->theta);   CHKERRQ(ierr);
+    ierr = PetscFree(act->w);   CHKERRQ(ierr);
+
     act->elem_act_data = NULL;
 
     return 0;
@@ -528,13 +594,48 @@ static inline void Compute_a3_alpha_(
   /* Unnormalized:  a3,2 ~ (a1,2 x a2 + a1 x a2,2) with a1,2 = Aab, a2,2 = Abb */
   *a3_2 = PLUS(CROSS(Aab, a2), CROSS(a1, Abb));
 
-  /* Normalize by ||a1 x a2|| (same as your old code) */
+  /* Normalize by ||a1 x a2|| */
   a3_1->x /= size_a3;  a3_1->y /= size_a3;  a3_1->z /= size_a3;
   a3_2->x /= size_a3;  a3_2->y /= size_a3;  a3_2->z /= size_a3;
 }
 
 
 /* Update ead->g and ead->g0 for all qp using theta[qp]. */
+/* Helper: Compute metric tensor from covariant basis vectors
+ * g_ij = g_i . g_j
+ */
+static PetscErrorCode ComputeMetricTensor(const Cmpnts g_cov[3], 
+                                          PetscReal gCov[3][3])
+{
+  for (PetscInt i = 0; i < 3; i++) {
+    for (PetscInt j = 0; j < 3; j++) {
+      gCov[i][j] = DOT(g_cov[i], g_cov[j]);
+    }
+  }
+  return 0;
+}
+
+/* Helper: Compute contravariant basis vectors from metric tensor inverse
+ * g^i = g^ij * g_j  (raised indices)
+ */
+static PetscErrorCode ComputeContravariantBasis(const PetscReal gInv[3][3],
+                                                const Cmpnts g_cov[3],
+                                                Cmpnts g_cont[3])
+{
+  for (PetscInt i = 0; i < 3; i++) {
+    g_cont[i].x = 0.0;
+    g_cont[i].y = 0.0;
+    g_cont[i].z = 0.0;
+    for (PetscInt j = 0; j < 3; j++) {
+      g_cont[i].x += gInv[i][j] * g_cov[j].x;
+      g_cont[i].y += gInv[i][j] * g_cov[j].y;
+      g_cont[i].z += gInv[i][j] * g_cov[j].z;
+    }
+  }
+  return 0;
+}
+
+/* Update ead->g, ead->g0, ead->gm, ead->gm0 for all qp using theta[qp]. */
 PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
 {
   PetscErrorCode ierr = 0;
@@ -545,6 +646,8 @@ PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
   PetscCheck(act->theta,   PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "act->theta is NULL");
   PetscCheck(ead->g,       PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->g is NULL");
   PetscCheck(ead->g0,      PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->g0 is NULL");
+  PetscCheck(ead->gm,      PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->gm is NULL (metric tensor)");
+  PetscCheck(ead->gm0,     PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->gm0 is NULL (reference metric tensor)");
   PetscCheck(ead->geom,    PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->geom is NULL (need midsurface cache)");
   PetscCheck(ead->geom0,   PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->geom0 is NULL (need reference midsurface cache)");
 
@@ -555,7 +658,7 @@ PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
   const SubdivGeomQP *Gc = &ead->geom[0];   /* current midsurface */
   const struct Cmpnts a1c  = Gc->ndx21;
   const struct Cmpnts a2c  = Gc->ndx31;
-  const struct Cmpnts a3c  = Gc->nn;        /* already UNIT(CROSS(a1,a2)) in your geom */
+  const struct Cmpnts a3c  = Gc->nn;        /* already UNIT(CROSS(a1,a2)) in geom */
 
   struct Cmpnts a3c_1, a3c_2;
   Compute_a3_alpha_(a1c, a2c, Gc->Aaa, Gc->Aab, Gc->Abb, &a3c_1, &a3c_2);
@@ -574,27 +677,47 @@ PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
 
     const PetscReal theta3 = hhalf * PetscRealPart(act->theta[qp]);
 
-    /* CURRENT: g_alpha = a_alpha + theta3 * a3,alpha ; g3 = a3 */
+    /* -------- CURRENT configuration -------- */
+    /* Covariant basis vectors: g_alpha = a_alpha + theta3 * a3,alpha ; g_3 = a3 */
     ead->g[qp].Cov[0] = PLUS(a1c,  AMULT(theta3, a3c_1));
     ead->g[qp].Cov[1] = PLUS(a2c,  AMULT(theta3, a3c_2));
     ead->g[qp].Cov[2] = a3c;
 
-    /* If you want contravariants too: you can either:
-       (A) keep using your surface contravariants gc1,gc2 from geom (OK if you only need surface contras),
-       or (B) compute full 3D contravariant basis for g_i (more correct).
-       For now, set them consistent with your earlier approach: */
-    ead->g[qp].Cont[0] = Gc->gc1;
-    ead->g[qp].Cont[1] = Gc->gc2;
-    ead->g[qp].Cont[2] = a3c; /* same note as before */
+    /* Compute covariant metric tensor: g_ij = g_i . g_j */
+    ierr = ComputeMetricTensor(ead->g[qp].Cov, ead->gm[qp].Cov); CHKERRQ(ierr);
 
-    /* REFERENCE: g0_alpha = a0_alpha + theta3 * a0_3,alpha ; g0_3 = a0_3 */
+    /* Compute contravariant metric tensor: g^ij = (g_ij)^{-1} */
+    PetscReal gInv[3][3];
+    ierr = INV(ead->gm[qp].Cov, gInv); CHKERRQ(ierr);
+    for (PetscInt i = 0; i < 3; i++) {
+      for (PetscInt j = 0; j < 3; j++) {
+        ead->gm[qp].Cont[i][j] = gInv[i][j];
+      }
+    }
+
+    /* Compute contravariant basis vectors: g^i = g^ij * g_j */
+    ierr = ComputeContravariantBasis(gInv, ead->g[qp].Cov, ead->g[qp].Cont); CHKERRQ(ierr);
+
+    /* -------- REFERENCE configuration -------- */
+    /* Covariant basis vectors: g0_alpha = a0_alpha + theta3 * a0_3,alpha ; g0_3 = a0_3 */
     ead->g0[qp].Cov[0] = PLUS(a10, AMULT(theta3, a30_1));
     ead->g0[qp].Cov[1] = PLUS(a20, AMULT(theta3, a30_2));
     ead->g0[qp].Cov[2] = a30;
 
-    ead->g0[qp].Cont[0] = G0->gc1;
-    ead->g0[qp].Cont[1] = G0->gc2;
-    ead->g0[qp].Cont[2] = a30;
+    /* Compute covariant metric tensor: g0_ij = g0_i . g0_j */
+    ierr = ComputeMetricTensor(ead->g0[qp].Cov, ead->gm0[qp].Cov); CHKERRQ(ierr);
+
+    /* Compute contravariant metric tensor: g0^ij = (g0_ij)^{-1} */
+    PetscReal g0Inv[3][3];
+    ierr = INV(ead->gm0[qp].Cov, g0Inv); CHKERRQ(ierr);
+    for (PetscInt i = 0; i < 3; i++) {
+      for (PetscInt j = 0; j < 3; j++) {
+        ead->gm0[qp].Cont[i][j] = g0Inv[i][j];
+      }
+    }
+
+    /* Compute contravariant basis vectors: g0^i = g0^ij * g0_j */
+    ierr = ComputeContravariantBasis(g0Inv, ead->g0[qp].Cov, ead->g0[qp].Cont); CHKERRQ(ierr);
   }
 
   return ierr;
@@ -604,6 +727,16 @@ PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
 /*--------------------------------------------------------------------------------------------------
  *                           Element-Level Computation Routines
  *-------------------------------------------------------------------------------------------------*/
+
+/* Helper function to print 3x3 matrix */
+static inline void PrintMat3x3(const char *label, PetscReal M[3][3])
+{
+   PetscPrintf(PETSC_COMM_WORLD, "%s\n", label);
+    for (PetscInt i = 0; i < 3; i++) {
+       PetscPrintf(PETSC_COMM_WORLD, "  [%12.6f  %12.6f  %12.6f]\n",
+                   (double)M[i][0], (double)M[i][1], (double)M[i][2]);
+    }
+}
 
 /* Deformation gradient */
 PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
@@ -644,7 +777,7 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
         Fa_cart[1][1] = 1.0 - gamma;
         Fa_cart[2][2] = 1.0;
     }
-
+        // PrintMat3x3("Fa_cart", Fa_cart);
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
     {
         /*------------------------------------------------------------*/
@@ -657,11 +790,14 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
             S[2][j] = ead->g0[qp].Cov[j].z;
         }
         TRANS(S, ST);
+        // PrintMat3x3("S", S);
         /*------------------------------------------------------------*/
         /* 3. Fa_ij = S^T * Fa_cart * S                               */
         /*------------------------------------------------------------*/
         MATMULT(ST, Fa_cart, tmp);
         MATMULT(tmp, S, ead->Fa[qp].Cov);
+
+        // PrintMat3x3("ead->Fa[qp].Cov", ead->Fa[qp].Cov);
 
         /*------------------------------------------------------------*/
         /* 4. Invert in Cartesian basis                               */
@@ -669,11 +805,15 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
         ierr = INV(Fa_cart, Finv_cart);
         CHKERRQ(ierr);
 
+        // PrintMat3x3("Finv_cart", Finv_cart);
+
         /*------------------------------------------------------------*/
         /* 5. F̄_ij = S^T * Fa_cart^{-1} * S                           */
         /*------------------------------------------------------------*/
         MATMULT(ST, Finv_cart, tmp);
         MATMULT(tmp, S, ead->Fa_inv[qp].Cov);
+
+        // PrintMat3x3("ead->Fa_inv[qp].Cov", ead->Fa_inv[qp].Cov);
 
         /*------------------------------------------------------------*/
         /* 6. Raise indices                                           */
@@ -682,11 +822,14 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
                              ead->Fa[qp].Cov,
                              ead->Fa[qp].Cont);
         CHKERRQ(ierr);
+        // PrintMat3x3("ead->Fa[qp].Cov", ead->Fa[qp].Cov);
 
         ierr = RaiseIndices2(ead->gm0[qp].Cont,
                              ead->Fa_inv[qp].Cov,
                              ead->Fa_inv[qp].Cont);
         CHKERRQ(ierr);
+        // PrintMat3x3("ead->Fa_inv[qp].Cov", ead->Fa_inv[qp].Cov);
+
     }
 
     return ierr;
@@ -725,6 +868,7 @@ PetscErrorCode ElemCGDefTens(FE *fem, PetscInt ec)
         ead->C[qp].Cov[2][2] = 1.0;
         ead->C_inv[qp].Cont[2][2] = 1.0;
 
+        // PrintMat3x3("C_cov before raise", ead->C[qp].Cov);
         ierr = RaiseIndices2(ead->gm[qp].Cont,
                              ead->C[qp].Cov,
                              ead->C[qp].Cont);
@@ -825,7 +969,14 @@ PetscErrorCode ElemTotStress(FE *fem, PetscInt ec)
     ElemActData *ead = &fem->act_data.elem_act_data[ec];
 
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
-    {
+    {   
+      for (PetscInt i = 0; i < 3; i++)
+        {
+          for (PetscInt j = 0; j < 3; j++)
+          {
+              ead->S[qp].Cont[i][j] = 0.0;
+          }
+        }
         for (PetscInt i = 0; i < 3; i++)
         {
             for (PetscInt j = 0; j < 3; j++)
@@ -839,13 +990,14 @@ PetscErrorCode ElemTotStress(FE *fem, PetscInt ec)
                             for (PetscInt s = 0; s < 3; s++)
                             {
                                 
-                                ead->S[qp].Cont[i][j] = 1 / 2 * ead->Fa_inv[qp].Cont[w][p] * ead->Fa_inv[qp].Cont[z][s] * ead->gm0[qp].Cont[s][j] * (ead->Se[qp].Cont[p][z] * ead->gm0[qp].Cont[w][i] + ead->Se[qp].Cont[p][i] * ead->gm0[qp].Cont[w][z]);
+                                ead->S[qp].Cont[i][j] += 0.5 * ead->Fa_inv[qp].Cont[w][p] * ead->Fa_inv[qp].Cont[z][s] * ead->gm0[qp].Cont[s][j] * (ead->Se[qp].Cont[p][z] * ead->gm0[qp].Cont[w][i] + ead->Se[qp].Cont[p][i] * ead->gm0[qp].Cont[w][z]);
                             }
                         }
                     }
                 }
             }
         }
+        // PrintMat3x3(" Total S", ead->S[qp].Cont);
     }
     return 0;
 }
@@ -856,6 +1008,7 @@ PetscErrorCode ElemElsTangMatTens(FE *fem, PetscInt ec)
     PetscErrorCode ierr = 0;
     ElemActData *ead = &fem->act_data.elem_act_data[ec];
     PetscReal K = fem->act_data.K;
+    PetscReal mu = fem->act_data.mu; // shear modulus
 
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)    
     {
@@ -903,17 +1056,18 @@ PetscErrorCode ElemTotTangMatTens(FE *fem, PetscInt ec)
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
     {
         /* (Optional) If you want to reset CC each qp before accumulating, uncomment:
-        for (PetscInt i=0;i<3;i++)
+        
+        */
+       for (PetscInt i=0;i<3;i++)
         for (PetscInt j=0;j<3;j++)
         for (PetscInt k=0;k<3;k++)
         for (PetscInt l=0;l<3;l++)
             ead->CC[qp].Cont[i][j][k][l] = 0.0;
-        */
 
-        for (PetscInt i = 0; i < 3; i++)
-        for (PetscInt j = 0; j < 3; j++)
-        for (PetscInt k = 0; k < 3; k++)
-        for (PetscInt l = 0; l < 3; l++)
+        for (PetscInt i = 2; i < 3; i++)
+        for (PetscInt j = 2; j < 3; j++)
+        for (PetscInt k = 2; k < 3; k++)
+        for (PetscInt l = 2; l < 3; l++)
         {
             for (PetscInt g = 0; g < 3; g++)
             for (PetscInt h = 0; h < 3; h++)
@@ -955,7 +1109,7 @@ PetscErrorCode ElemTotTangMatTens(FE *fem, PetscInt ec)
 /* Modification of element tensor component C33 (one Newton step per call)
    Goal: drive S33 -> 0 by updating C33 using DeltaC33 = -2*S33 / CC3333.
 */
-PetscErrorCode ModElemC33(FE *fem, PetscInt ec)
+PetscErrorCode ModElemC33(FE *fem, PetscInt ec, PetscReal *delta)
 {
     PetscErrorCode ierr = 0;
     ElemActData   *ead  = &fem->act_data.elem_act_data[ec];
@@ -978,12 +1132,18 @@ PetscErrorCode ModElemC33(FE *fem, PetscInt ec)
                    PETSC_COMM_SELF, PETSC_ERR_FP,
                    "CC3333 too small (%.6e) at qp=%" PetscInt_FMT, (double)CC3333, qp);
 
+        // PetscPrintf(PETSC_COMM_SELF, "S33 before update at qp=%" PetscInt_FMT ": %.6e\n", qp, (double)S33);
+        // PetscPrintf(PETSC_COMM_SELF, "CC3333 before update at qp=%" PetscInt_FMT ": %.6e\n", qp, (double)CC3333);
         /* One Newton update step */
-        PetscReal DeltaC33 = -2.0 * S33 / CC3333;
 
+        PetscReal DeltaC33 = -2.0 * S33 / CC3333;
+        *delta  = DeltaC33;
         /* Update C33 (covariant) */
+        // PetscPrintf(PETSC_COMM_SELF, "before updating C33 = %f\n", (double)ead->C[qp].Cov[2][2]);
         ead->C[qp].Cov[2][2] += DeltaC33;
-        
+        // PetscPrintf(PETSC_COMM_SELF, "after updating C33 = %f\n", (double)ead->C[qp].Cov[2][2]);
+        // PetscPrintf(PETSC_COMM_SELF, "after updating C33 = %f\n", (double)ead->C[qp].Cov[2][2]);
+
         /* Recompute stress/tangent after update so outer loop sees new S33.
            If your outer iteration recomputes these anyway, you can omit these.
         */
@@ -1030,8 +1190,6 @@ PetscErrorCode ElemUpdateG0(FE *fem, PetscInt ec)
 }
 
 
-
-
 #undef __FUNCT__
 #define __FUNCT__ "ElemUpdFint"
 PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
@@ -1054,7 +1212,7 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
   PetscCheck(fem->act_data.theta, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "act_data.theta is NULL");
   PetscCheck(fem->act_data.n_qp > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "n_qp must be > 0");
 
-  /* We use midsurface geometry only (you requested single-geom design). */
+  /* We use midsurface geometry only. */
   const SubdivGeomQP *G = &ead->geom[0];
 
   /* Surface bases (midsurface) */
@@ -1065,14 +1223,14 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
   const struct Cmpnts gc2   = G->gc2;    /* a^2 */
 
   /* Second derivatives / curvature-like vectors */
-  const struct Cmpnts Aaa = G->Aaa;      /* a1,1  (your naming) */
+  const struct Cmpnts Aaa = G->Aaa;      /* a1,1  */
   const struct Cmpnts Abb = G->Abb;      /* a2,2  */
   const struct Cmpnts Aab = G->Aab;      /* a1,2  */
 
   /* Convenience scalars */
   PetscReal A0 = ibm->dA0[ec];
   const PetscReal half_h0 = 0.5 * h0;
-  const PetscReal pref0   = 0.5 * h0 * A0;  /* 0.5*h0*A0 */
+  const PetscReal pref0   = 0.5 * h0 * A0; 
 
   /* -------------------------------------------------------------------
      Loop through thickness quadrature points qp
@@ -1176,7 +1334,7 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
         const PetscReal b2 = DOT(ng, Abb);
         const PetscReal b3 = DOT(ng, Aab);
 
-        /* Bending rows (same pattern as your “B4”) */
+        /* Bending rows */
         PetscReal Bs0 = -(G->INab0[a] + b1);
         PetscReal Bs1 = -(G->INab1[a] + b2);
         PetscReal Bs2 = -2.0*(G->INab2[a] + b3);
@@ -1215,6 +1373,126 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
   return ierr;
 }
 
+PetscErrorCode InitActStrainProblem(FE *fem){
+  PetscFunctionBeginUser;
+
+  PetscCall(GetUserActParams(fem));
+  PetscCall(ActDataAllocate(fem));
+  PetscCall(SetGaussianQuadrature(fem));
+  
+  return 0;
+}
+
+PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
+  PetscFunctionBeginUser;
+
+  ElemActData *ead = NULL;
+
+  PetscErrorCode ierr = 0;
+  PetscReal delta;
+
+  ead = &fem->act_data.elem_act_data[ec];
+
+  for (PetscInt sub_itr = 0; sub_itr < fem->act_data.C33_subitr_nums; sub_itr++){
+
+    ElemElasCGDefTens(fem, ec);
+    ElemElasStress(fem, ec);  
+    ElemTotStress(fem, ec);  
+    ElemElsTangMatTens(fem, ec);  
+    ElemTotTangMatTens(fem, ec); 
+    // if (ec == 10)
+    // {
+    //   // PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
+    //   // PetscPrintf(PETSC_COMM_SELF, "sub_itr = %d \n", sub_itr);
+    // }
+    // PetscPrintf(PETSC_COMM_SELF, "after ElemTotTangMatTens \n");
+    // delta = 0.0;
+        // PrintMat3x3(" ead->C[0].Cov be C33 Update", ead->C[0].Cov);
+
+    ModElemC33(fem, ec, &delta);
+
+    if (ec == 10)
+    {
+      // PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
+      // PetscPrintf(PETSC_COMM_SELF, "sub_itr = %d \n", sub_itr);
+    }
+
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+      ierr = RaiseIndices2(ead->gm[qp].Cont,
+                            ead->C[qp].Cov,
+                            ead->C[qp].Cont);
+      CHKERRQ(ierr);
+
+      ierr = INV(ead->C[qp].Cov, ead->C_inv[qp].Cov);
+      CHKERRQ(ierr);                           
+
+      ierr = RaiseIndices2(ead->gm[qp].Cont,
+                            ead->C_inv[qp].Cov,
+                            ead->C_inv[qp].Cont);
+      CHKERRQ(ierr);                           
+    }
+
+     ElemElasCGDefTens(fem, ec);
+    ElemElasStress(fem, ec);  
+    ElemTotStress(fem, ec);  
+    if (ec == 10)
+    {
+    // PrintMat3x3(" Total S after C33 Update", ead->S[0].Cont);
+      // PetscPrintf(PETSC_COMM_SELF, "sub_itr = %d \n", sub_itr);
+    }
+    
+    // PrintMat3x3(" ead->C[0].Cov after C33 Update", ead->C[0].Cov);
+    
+    ElemElsTangMatTens(fem, ec);  
+    ElemTotTangMatTens(fem, ec); 
+  }    
+}
+
+PetscErrorCode FInternalPreCalc(FE *fem) {
+  PetscFunctionBeginUser;
+
+  UpdateElements(fem, ElemUpdateGeom0Subdiv);  
+  UpdateElements(fem, ElemUpdateGeomSubdiv);  
+  UpdateElements(fem, ElemUpdateG);  
+  UpdateElements(fem, ElemActDefGrad);  
+  UpdateElements(fem, ElemCGDefTens);  
+
+  UpdateElements(fem, ElemC33Solve);
+  return 0;
+}
+
+PetscErrorCode FInternalAct(FE *fem){
+  IBMNodes       *ibm=fem->ibm;
+  PetscInt       i, ec;
+  PetscReal      Fm[9], Fb[42], Fint[9];
+  
+  for (i=0; i<9; i++) {Fm[i]=0.0; Fint[i]=0.0;}
+  for (i=0; i<42; i++) {Fb[i]=0.0;}
+
+  FInternalPreCalc(fem);
+  // PetscPrintf(PETSC_COMM_SELF, "FInternalPreCalc completed\n");
+  PetscReal  *FF;
+  VecGetArray(fem->Fint, &FF);
+
+  for (ec=0; ec<ibm->n_elmt; ec++) {
+    PetscInt  node, v = ibm->val[ec];
+
+    ElemUpdFint(fem, ec, Fb);
+
+    for (i=0; i<(v+6); i++) {
+      if (ibm->patch[16*ec+i]!=1000000) {
+        node = ibm->patch[16*ec+i];
+
+        FF[dof*node] += Fb[dof*i];
+        FF[dof*node+1] += Fb[dof*i+1];
+        FF[dof*node+2] += Fb[dof*i+2];
+        
+      }
+    } 
+  }
+
+  VecRestoreArray(fem->Fint, &FF); 
+}
 
 // PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec,
 //                           const PetscReal Sm[3],   /* membrane stress resultants (your Sm[m]) */

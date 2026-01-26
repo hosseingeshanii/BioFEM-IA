@@ -104,6 +104,7 @@ typedef struct {
     PetscScalar     *w;                /* Quadrature weights */
     PetscReal       mu;               /* Shear modulus */
     PetscReal       K;                /* Bulk modulus */
+    PetscInt        C33_subitr_nums;
     MuscleActParams muscle_act_params;
     ElemActData     *elem_act_data;
 } ActData;

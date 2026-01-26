@@ -167,20 +167,12 @@ int main(int argc, char **argv)
   if (muscle_activation){
 
     for (ibi=0; ibi<nbody; ibi++) { 
-      PetscPrintf(PETSC_COMM_SELF, "Initializing muscle activation data structures for body %d\n", ibi);
-      GetUserActParams(&fem[ibi]);
-
-      ActDataAllocate(&fem[ibi]);
-      PetscPrintf(PETSC_COMM_SELF, "After ActDataAllocate for body %d\n", ibi);
-
-      UpdateElements(&fem[ibi], ElemUpdateGeom0Subdiv);
-      PetscPrintf(PETSC_COMM_SELF, "After UpdateElements for body %d\n", ibi);
-
-      UpdateElements(&fem[ibi], ElemUpdateGeomSubdiv);
-      PetscPrintf(PETSC_COMM_SELF, "After UpdateElements for ElemUpdateGeomSubdiv for body %d\n", ibi);
-
-      ActDataDestroy(&fem[ibi]); // Just to check no memory leak in allocation
-      PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy for body %d\n", ibi);
+      
+      InitActStrainProblem(&fem[ibi]);
+      PetscPrintf(PETSC_COMM_SELF, "Active-Strain problem got initiliazed. \n");
+      
+      // ActDataDestroy(&fem[ibi]); // Just to check no memory leak in allocation
+      // PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy for body %d\n", ibi);
       
       
       // ti = 0;
@@ -504,7 +496,9 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R,void *ctx) {
   for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
 
   if (muscle_activation){
-    // UpdateFInternalAftAct(fem);
+    FInternalAct(fem);
+    // PetscPrintf(PETSC_COMM_SELF, "FInternalAct completed\n");
+
   }
   else{
     FInternal(fem);
@@ -539,7 +533,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R,void *ctx) {
 PetscErrorCode FInternal(FE *fem) {
 
   IBMNodes       *ibm=fem->ibm;
-  PetscInt       i;
+  PetscInt       i, ec;
   PetscReal      Fm[9], Fb[42], Fint[9];
   struct Cmpnts  x1, x2, x3, X1, X2, X3;
   PetscInt       n1e, n2e, n3e, n4e, n5e, n6e, j;
@@ -575,7 +569,13 @@ PetscErrorCode FInternal(FE *fem) {
     //PetscPrintf(PETSC_COMM_SELF, "Check before Fbending %d\n", bending);
 
     if (bending) {
-      Fbending(ec, X1, X2, X3, x1, x2, x3, Fb, fem);
+      // if (muscle_activation){
+      //   ElemUpdFint(fem, ec, Fb);
+      // }
+      // else{
+        Fbending(ec, X1, X2, X3, x1, x2, x3, Fb, fem);
+      // }
+      
     }
     //PetscPrintf(PETSC_COMM_SELF, "Check after Fbending!\n");
     
@@ -1005,11 +1005,10 @@ PetscErrorCode Free(FE *fem) {
     PetscFree(ibm->p5x0);  PetscFree(ibm->p5y0);  PetscFree(ibm->p5z0);
     PetscFree(ibm->p6x0);  PetscFree(ibm->p6y0);  PetscFree(ibm->p6z0);
   }
-  // if(muscle_activation){
-  //   PetscFree(fem->act_data.elem_act_data);
-  //   VecDestroy(&fem->act_data.g_e_target);
-
-  // }
+  if(muscle_activation){
+    ActDataDestroy(fem); // Just to check no memory leak in allocation
+    PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy HaHa\n");
+  }
   
   return(0);
 }
