@@ -255,8 +255,10 @@ int main(int argc, char **argv)
 	   -fem_snes_monitor
 	   #-fem_ksp_type fgmres	 */
 	Vec U;
+        PetscErrorCode ierr;
         VecDuplicate(fem[ibi].x, &U);
         VecCopy(fem[ibi].x, U);
+        
         //SNES
         SNESCreate(PETSC_COMM_SELF, &snes);
         SNESSetFunction(snes, fem[ibi].Res, FormFunctionFEM, (void *)&fem[ibi]);
@@ -264,10 +266,26 @@ int main(int argc, char **argv)
         SNESSetFromOptions(snes);
         MatCreateSNESMF(snes, &J);  //MatrixFree
         SNESSetJacobian(snes, J, J, MatMFFDComputeJacobian, (void *)&fem[ibi]);
-        SNESSolve(snes, PETSC_NULL,U); //Cannot pass fem[ibi].x
-
+        
+        ierr = SNESSolve(snes, PETSC_NULL, U);
+        PetscPrintf(PETSC_COMM_SELF, " after SNESSolve (ierr=%d)\n", ierr);
+        
         VecCopy(U, fem[ibi].x);
-        SNESDestroy(&snes); VecDestroy(&U); MatDestroy(&J);
+        PetscPrintf(PETSC_COMM_SELF, " after VecCopy1\n");
+
+        /* Only destroy if SNESSolve didn't corrupt the object */
+        if (snes != NULL) {
+            PetscErrorCode destroy_ierr = SNESDestroy(&snes);
+            if (destroy_ierr != 0) {
+                PetscPrintf(PETSC_COMM_SELF, " WARNING: SNESDestroy failed with ierr = %d\n", destroy_ierr);
+            } else {
+                PetscPrintf(PETSC_COMM_SELF, " after SNESDestroy\n");
+            }
+        }
+
+        VecDestroy(&U);
+        PetscPrintf(PETSC_COMM_SELF, " after VecDestroy\n");
+
       }
       VecCopy(fem[ibi].x, fem[ibi].y); //for contact energy calculations
       xAccVel(&fem[ibi]);
@@ -283,6 +301,8 @@ int main(int argc, char **argv)
     if (contact) {Fcontact(fem);} //static_bhv
     
     for (ibi=0; ibi<nbody; ibi++) {
+        PetscPrintf(PETSC_COMM_SELF, " after for \n");
+
       Contact(&fem[ibi]);
       VecCopy(fem[ibi].xn, fem[ibi].xnm1);
       VecCopy(fem[ibi].x, fem[ibi].xn);
@@ -294,6 +314,8 @@ int main(int argc, char **argv)
       VecNorm(fem[ibi].xd, NORM_INFINITY, &normv);
       VecNorm(fem[ibi].xdd, NORM_INFINITY, &norma);
       VecNorm(fem[ibi].Fint, NORM_INFINITY, &normfint);
+
+      PetscPrintf(PETSC_COMM_SELF, " after VecNorm\n");
       PetscPrintf(PETSC_COMM_SELF, "body:%d Norm(x-xn)= %le Vel %f Acc %f Fint %f\n",ibi,norm,normv,norma, normfint);
     }
 
@@ -302,7 +324,7 @@ int main(int argc, char **argv)
     //if (ti!=0 && ti == (ti/tiout)*tiout){
     if (ti == (ti/tiout)*tiout){
       for (ibi=0; ibi<nbody; ibi++) {
-        Output(&fem[ibi], ti, ibi, subdir);
+        // Output(&fem[ibi], ti, ibi, subdir);
         
   
 	//LocationOut(&fem[ibi], ti, ibi);
@@ -316,6 +338,7 @@ int main(int argc, char **argv)
     // LocationOut(&fem[ibi], ti-1, ibi);
     //Output(&fem[ibi], ti, ibi);
     if(outghost){OutputGhost(&fem[ibi], ti, ibi);}
+    PetscPrintf(PETSC_COMM_SELF, "Body %d Finished\n", ibi);
     Free(&fem[ibi]);
   }
   // PetscPrintf(PETSC_COMM_SELF, "Parallel Jacobian Computation %d\n", rank);
@@ -497,7 +520,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R,void *ctx) {
 
   if (muscle_activation){
     FInternalAct(fem);
-    // PetscPrintf(PETSC_COMM_SELF, "FInternalAct completed\n");
+    PetscPrintf(PETSC_COMM_SELF, "FInternalAct completed\n");
 
   }
   else{
