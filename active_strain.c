@@ -282,6 +282,78 @@ PetscErrorCode ActDataDestroy(FE *fem)
     return 0;
 }
 
+
+static void PrintCmpnts_(const char *name, Cmpnts a)
+{
+PetscPrintf(PETSC_COMM_SELF, " %-8s = (% .6e, % .6e, % .6e)\n", name, a.x, a.y, a.z);
+}
+
+
+static PetscErrorCode PrintSubdivGeomQP_(const char *label, PetscInt ec, const SubdivGeomQP *G)
+{
+PetscErrorCode ierr = 0;
+PetscCheck(G, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "G is NULL");
+
+
+PetscPrintf(PETSC_COMM_SELF,
+"\n==== %s: ec=%" PetscInt_FMT " ====\n"
+" is_irregular=%" PetscInt_FMT " v=%" PetscInt_FMT " nen=%" PetscInt_FMT "\n",
+label, ec, G->is_irregular, G->v, G->nen);
+
+
+PrintCmpnts_("ndx21", G->ndx21);
+PrintCmpnts_("ndx31", G->ndx31);
+PrintCmpnts_("nn", G->nn);
+PrintCmpnts_("gc1", G->gc1);
+PrintCmpnts_("gc2", G->gc2);
+PrintCmpnts_("Aaa", G->Aaa);
+PrintCmpnts_("Abb", G->Abb);
+PrintCmpnts_("Aab", G->Aab);
+
+
+if (G->is_irregular) {
+PetscCheck(G->nen > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "Irregular but nen<=0");
+PetscCheck(G->INa0 && G->INa1 && G->INab0 && G->INab1 && G->INab2,
+PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,
+"Irregular but one or more IN* arrays are NULL");
+
+
+/* print a small sample to avoid huge output */
+const PetscInt nshow = PetscMin((PetscInt)6, G->nen);
+PetscPrintf(PETSC_COMM_SELF, " IN* sample (first %" PetscInt_FMT " entries):\n", nshow);
+for (PetscInt i = 0; i < nshow; i++) {
+PetscPrintf(PETSC_COMM_SELF,
+" i=%" PetscInt_FMT
+" INa0=% .6e INa1=% .6e INab0=% .6e INab1=% .6e INab2=% .6e\n",
+i, G->INa0[i], G->INa1[i], G->INab0[i], G->INab1[i], G->INab2[i]);
+}
+} else {
+/* regular should not carry irregular arrays */
+if (G->INa0 || G->INa1 || G->INab0 || G->INab1 || G->INab2) {
+PetscPrintf(PETSC_COMM_SELF,
+" WARNING: regular patch but IN* arrays are not NULL (stale?)\n");
+}
+}
+
+
+return ierr;
+}
+
+PetscErrorCode DebugPrintGeomForElement(FE *fem, PetscInt ec)
+{
+  PetscErrorCode ierr = 0;
+  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+
+  PetscCheck(ead, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead is NULL");
+  PetscCheck(ead->geom0, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->geom0 is NULL");
+  PetscCheck(ead->geom,  PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "ead->geom is NULL");
+
+  ierr = PrintSubdivGeomQP_("GEOM0 (reference) geom0[0]", ec, &ead->geom0[0]); CHKERRQ(ierr);
+  ierr = PrintSubdivGeomQP_("GEOM  (current)   geom[0]",  ec, &ead->geom[0]);  CHKERRQ(ierr);
+
+  return ierr;
+}
+
 /* Helper: ensure irregular arrays are allocated to length nen */
 static PetscErrorCode SubdivGeomEnsureIrregularArrays_(SubdivGeomQP *G, PetscInt nen)
 {
@@ -635,6 +707,98 @@ static PetscErrorCode ComputeContravariantBasis(const PetscReal gInv[3][3],
   return 0;
 }
 
+/* --- small helpers --- */
+
+
+static void PrintMat3_(const char *name, const PetscReal A[3][3])
+{
+PetscPrintf(PETSC_COMM_SELF, " %s =\n", name);
+for (PetscInt i = 0; i < 3; i++) {
+PetscPrintf(PETSC_COMM_SELF, " [% .6e % .6e % .6e]\n", A[i][0], A[i][1], A[i][2]);
+}
+}
+
+
+static PetscErrorCode PrintElemG_(FE *fem, PetscInt ec, PetscInt qp)
+{
+PetscErrorCode ierr = 0;
+ActData *act = &fem->act_data;
+ElemActData *ead = &act->elem_act_data[ec];
+
+
+PetscCheck(ec >= 0 && ec < fem->ibm->n_elmt, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
+"ec out of range: ec=%" PetscInt_FMT, ec);
+PetscCheck(qp >= 0 && qp < act->n_qp, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
+"qp out of range: qp=%" PetscInt_FMT, qp);
+
+
+PetscPrintf(PETSC_COMM_SELF,
+"\n============================================================\n"
+"ElemUpdateG dump: ec=%" PetscInt_FMT " qp=%" PetscInt_FMT "\n"
+" ire=%" PetscInt_FMT " val(v)=%" PetscInt_FMT " theta=% .6e\n"
+"============================================================\n",
+ec, qp, fem->ibm->ire[ec], fem->ibm->val[ec], (double)PetscRealPart(act->theta[qp]));
+
+
+/* --- midsurface cached geometry (optional sanity check) --- */
+if (ead->geom && ead->geom0) {
+const SubdivGeomQP *Gc = &ead->geom[0];
+const SubdivGeomQP *G0 = &ead->geom0[0];
+
+
+PetscPrintf(PETSC_COMM_SELF, "\n-- midsurface cache (geom[0]) current --\n");
+PrintCmpnts_("a1=ndx21", Gc->ndx21);
+PrintCmpnts_("a2=ndx31", Gc->ndx31);
+PrintCmpnts_("a3=nn", Gc->nn);
+PrintCmpnts_("gc1", Gc->gc1);
+PrintCmpnts_("gc2", Gc->gc2);
+
+
+PetscPrintf(PETSC_COMM_SELF, "\n-- midsurface cache (geom0[0]) reference --\n");
+PrintCmpnts_("a1_0", G0->ndx21);
+PrintCmpnts_("a2_0", G0->ndx31);
+PrintCmpnts_("a3_0", G0->nn);
+PrintCmpnts_("gc1_0", G0->gc1);
+PrintCmpnts_("gc2_0", G0->gc2);
+}
+
+
+/* --- CURRENT configuration: basis + metrics --- */
+PetscPrintf(PETSC_COMM_SELF, "\n-- CURRENT (g, gm) at qp --\n");
+PrintCmpnts_("g1 (Cov)", ead->g[qp].Cov[0]);
+PrintCmpnts_("g2 (Cov)", ead->g[qp].Cov[1]);
+PrintCmpnts_("g3 (Cov)", ead->g[qp].Cov[2]);
+
+
+PrintCmpnts_("g^1 (Cont)", ead->g[qp].Cont[0]);
+PrintCmpnts_("g^2 (Cont)", ead->g[qp].Cont[1]);
+PrintCmpnts_("g^3 (Cont)", ead->g[qp].Cont[2]);
+
+
+PrintMat3_("gm_ij (Cov)", ead->gm[qp].Cov);
+PrintMat3_("gm^ij (Cont)", ead->gm[qp].Cont);
+
+
+/* --- REFERENCE configuration: basis + metrics --- */
+PetscPrintf(PETSC_COMM_SELF, "\n-- REFERENCE (g0, gm0) at qp --\n");
+PrintCmpnts_("g0_1 (Cov)", ead->g0[qp].Cov[0]);
+PrintCmpnts_("g0_2 (Cov)", ead->g0[qp].Cov[1]);
+PrintCmpnts_("g0_3 (Cov)", ead->g0[qp].Cov[2]);
+
+
+PrintCmpnts_("g0^1 (Cont)", ead->g0[qp].Cont[0]);
+PrintCmpnts_("g0^2 (Cont)", ead->g0[qp].Cont[1]);
+PrintCmpnts_("g0^3 (Cont)", ead->g0[qp].Cont[2]);
+
+
+PrintMat3_("gm0_ij (Cov)", ead->gm0[qp].Cov);
+PrintMat3_("gm0^ij (Cont)", ead->gm0[qp].Cont);
+
+
+return ierr;
+}
+
+
 /* Update ead->g, ead->g0, ead->gm, ead->gm0 for all qp using theta[qp]. */
 PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
 {
@@ -738,6 +902,117 @@ static inline void PrintMat3x3(const char *label, PetscReal M[3][3])
     }
 }
 
+/* Helper: Print 2D tensor (both covariant and contravariant) */
+static inline void PrintElem2DTens(const char *label, const Elem2DTens *T)
+{
+    PetscPrintf(PETSC_COMM_WORLD, "%s\n", label);
+    PetscPrintf(PETSC_COMM_WORLD, "  Covariant:\n");
+    for (PetscInt i = 0; i < 3; i++) {
+        PetscPrintf(PETSC_COMM_WORLD, "    [%12.6f  %12.6f  %12.6f]\n",
+                    (double)T->Cov[i][0], (double)T->Cov[i][1], (double)T->Cov[i][2]);
+    }
+    PetscPrintf(PETSC_COMM_WORLD, "  Contravariant:\n");
+    for (PetscInt i = 0; i < 3; i++) {
+        PetscPrintf(PETSC_COMM_WORLD, "    [%12.6f  %12.6f  %12.6f]\n",
+                    (double)T->Cont[i][0], (double)T->Cont[i][1], (double)T->Cont[i][2]);
+    }
+}
+
+/* Print C and C_inv for a specific element ec */
+static PetscErrorCode PrintElemC(FE *fem, PetscInt ec)
+{
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    
+    PetscPrintf(PETSC_COMM_WORLD, "\n========== Element %d: Right Cauchy-Green Tensor ==========\n", ec);
+    
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+        PetscPrintf(PETSC_COMM_WORLD, "\n--- QP %d ---\n", qp);
+        PrintElem2DTens("C (Right Cauchy-Green tensor)", &ead->C[qp]);
+        PrintElem2DTens("C_inv (Inverse)", &ead->C_inv[qp]);
+    }
+    
+    return 0;
+}
+
+/* Print elastic Cauchy-Green tensor Ce and Ce_inv for element ec */
+static PetscErrorCode PrintElemCe(FE *fem, PetscInt ec)
+{
+    if (ec != 100) return 0;
+    
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    
+    PetscPrintf(PETSC_COMM_WORLD, "\n--- After ElemElasCGDefTens ---\n");
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+        PetscPrintf(PETSC_COMM_WORLD, "QP %d:\n", qp);
+        PrintElem2DTens("  Ce (Elastic Cauchy-Green tensor)", &ead->Ce[qp]);
+        PrintElem2DTens("  Ce_inv (Inverse)", &ead->Ce_inv[qp]);
+    }
+    
+    return 0;
+}
+
+/* Print elastic stress Se for element ec */
+static PetscErrorCode PrintElemSe(FE *fem, PetscInt ec)
+{
+    if (ec != 100) return 0;
+    
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    
+    PetscPrintf(PETSC_COMM_WORLD, "\n--- After ElemElasStress ---\n");
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+        PetscPrintf(PETSC_COMM_WORLD, "QP %d:\n", qp);
+        PrintElem2DTens("  Se (Elastic 2nd Piola-Kirchhoff stress)", &ead->Se[qp]);
+    }
+    
+    return 0;
+}
+
+/* Print total stress S for element ec */
+static PetscErrorCode PrintElemS(FE *fem, PetscInt ec)
+{
+    if (ec != 100) return 0;
+    
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    
+    PetscPrintf(PETSC_COMM_WORLD, "\n--- After ElemTotStress ---\n");
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+        PetscPrintf(PETSC_COMM_WORLD, "QP %d:\n", qp);
+        PrintElem2DTens("  S (Total 2nd Piola-Kirchhoff stress)", &ead->S[qp]);
+    }
+    
+    return 0;
+}
+
+/* Print elastic material tangent CCe for element ec */
+static PetscErrorCode PrintElemCCe(FE *fem, PetscInt ec)
+{
+    if (ec != 100) return 0;
+    
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    
+    PetscPrintf(PETSC_COMM_WORLD, "\n--- After ElemElsTangMatTens ---\n");
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+        PetscPrintf(PETSC_COMM_WORLD, "QP %d: CCe[2][2][2][2] = %f\n", qp, (double)ead->CCe[qp].Cont[2][2][2][2]);
+    }
+    
+    return 0;
+}
+
+/* Print total material tangent CC for element ec */
+static PetscErrorCode PrintElemCC(FE *fem, PetscInt ec)
+{
+    if (ec != 100) return 0;
+    
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    
+    PetscPrintf(PETSC_COMM_WORLD, "\n--- After ElemTotTangMatTens ---\n");
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+        PetscPrintf(PETSC_COMM_WORLD, "QP %d: CC[2][2][2][2] = %f\n", qp, (double)ead->CC[qp].Cont[2][2][2][2]);
+    }
+    
+    return 0;
+}
+
 /* Deformation gradient */
 PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
 {
@@ -780,6 +1055,14 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
         // PrintMat3x3("Fa_cart", Fa_cart);
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
     {
+        if (ec == 100) {
+            // PetscPrintf(PETSC_COMM_WORLD, "\n========== EC %d, QP %d ==========\n", ec, qp);
+            
+            // /* Print metric tensors */
+            // PrintElem2DTens("gm0 (reference metric tensor)", &ead->gm0[qp]);
+            // PrintElem2DTens("gm (current metric tensor)", &ead->gm[qp]);
+        }
+        
         /*------------------------------------------------------------*/
         /* 2. Build S: columns = reference covariant basis g0         */
         /*------------------------------------------------------------*/
@@ -822,14 +1105,21 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
                              ead->Fa[qp].Cov,
                              ead->Fa[qp].Cont);
         CHKERRQ(ierr);
-        // PrintMat3x3("ead->Fa[qp].Cov", ead->Fa[qp].Cov);
+        
+        if (ec == 100) {
+            // /* Print Fa after raising indices */
+            // PrintElem2DTens("Fa (active deformation gradient)", &ead->Fa[qp]);
+        }
 
         ierr = RaiseIndices2(ead->gm0[qp].Cont,
                              ead->Fa_inv[qp].Cov,
                              ead->Fa_inv[qp].Cont);
         CHKERRQ(ierr);
-        // PrintMat3x3("ead->Fa_inv[qp].Cov", ead->Fa_inv[qp].Cov);
-
+        
+        if (ec == 100) {
+            // /* Print Fa_inv after raising indices */
+            // PrintElem2DTens("Fa_inv (inverse active deformation gradient)", &ead->Fa_inv[qp]);
+        }
     }
 
     return ierr;
@@ -920,6 +1210,19 @@ PetscErrorCode ElemElasCGDefTens(FE *fem, PetscInt ec)
                 }
             }
         }
+        
+        /* Derive Ce.Cov from Ce_inv.Cont by lowering indices and inverting */
+        /* Step 1: Lower indices to get Ce_inv.Cov from Ce_inv.Cont */
+        ierr = LowerIndices2(ead->gm[qp].Cov, ead->Ce_inv[qp].Cont, ead->Ce_inv[qp].Cov);
+        CHKERRQ(ierr);
+        
+        /* Step 2: Invert to get Ce.Cov from Ce_inv.Cov */
+        ierr = INV(ead->Ce_inv[qp].Cov, ead->Ce[qp].Cov);
+        CHKERRQ(ierr);
+        
+        /* Step 3: Raise indices  to get Ce.Cont from Ce.Cov */
+        ierr = RaiseIndices2(ead->gm[qp].Cont, ead->Ce[qp].Cov, ead->Ce[qp].Cont);
+        CHKERRQ(ierr);
     }
 
     return 0;
@@ -935,6 +1238,11 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
     PetscReal mu = fem->act_data.mu; // shear modulus
     PetscReal K = fem->act_data.K;   // bulk modulus
 
+    if (ec == 100) {
+        PetscPrintf(PETSC_COMM_WORLD, "\n========== ElemElasStress (EC=100) ==========\n");
+        PetscPrintf(PETSC_COMM_WORLD, "mu = %f, K = %f\n", (double)mu, (double)K);
+    }
+
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
     {
 
@@ -942,8 +1250,15 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
          * Compute elastic Jacobian Je = sqrt(det(Ce)/det(g0))
          *-----------------------------------------------------------------*/
         detCe = DET3x3(ead->Ce[qp].Cov);  // determinant of elastic CG (covariant)
+        PetscReal detCecont = DET3x3(ead->Ce[qp].Cont);  // determinant of elastic CG (covariant)
         detG0 = DET3x3(ead->gm0[qp].Cov); // determinant of reference metric
         Je = sqrt(detCe / detG0);
+
+        if (ec == 100) {
+            PetscPrintf(PETSC_COMM_SELF, "\nQP %d:\n", qp);
+            PetscPrintf(PETSC_COMM_SELF, "detCe = %f, detG0 = %f, detCecont = %f\n", (double)detCe, (double)detG0, detCecont);
+            PetscPrintf(PETSC_COMM_SELF, "  Je = %f\n", (double)Je);
+        }
 
         /*------------------------------------------------------------------
          * Compute Neo-Hookean elastic second Piola–Kirchhoff stress
@@ -953,8 +1268,15 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
         {
             for (PetscInt j = 0; j < 3; j++)
             {
-                ead->Se[qp].Cont[i][j] =
-                    mu * (ead->gm0[qp].Cont[i][j] - ead->Ce[qp].Cont[i][j]) + K * ead->Ce[qp].Cont[i][j] * (Je * Je - Je);
+                PetscReal term1 = mu * (ead->gm0[qp].Cont[i][j] - ead->Ce[qp].Cont[i][j]);
+                PetscReal term2 = K * ead->Ce[qp].Cont[i][j] * (Je * Je - Je);
+                
+                ead->Se[qp].Cont[i][j] = term1 + term2;
+                
+                if (ec == 100 && i < 2 && j < 2) {  /* Print only first 2x2 block to avoid clutter */
+                    PetscPrintf(PETSC_COMM_WORLD, "  [%d][%d]: term1 = %f, term2 = %f, Se[%d][%d] = %f\n",
+                                i, j, (double)term1, (double)term2, i, j, (double)ead->Se[qp].Cont[i][j]);
+                }
             }
         }
     }
@@ -1394,12 +1716,21 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
   ead = &fem->act_data.elem_act_data[ec];
 
   for (PetscInt sub_itr = 0; sub_itr < fem->act_data.C33_subitr_nums; sub_itr++){
-
+    
     ElemElasCGDefTens(fem, ec);
+    PrintElemCe(fem, ec);
+    
     ElemElasStress(fem, ec);  
+    // PrintElemSe(fem, ec);
+    
     ElemTotStress(fem, ec);  
+    // PrintElemS(fem, ec);
+    
     ElemElsTangMatTens(fem, ec);  
+    // PrintElemCCe(fem, ec);
+    
     ElemTotTangMatTens(fem, ec); 
+    // PrintElemCC(fem, ec); 
     // if (ec == 10)
     // {
     //   // PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
@@ -1431,8 +1762,11 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
                             ead->C_inv[qp].Cont);
       CHKERRQ(ierr);                           
     }
+        PrintElemCe(fem, ec);
 
-     ElemElasCGDefTens(fem, ec);
+    ElemElasCGDefTens(fem, ec);
+        PrintElemCe(fem, ec);
+
     ElemElasStress(fem, ec);  
     ElemTotStress(fem, ec);  
     if (ec == 10)
@@ -1445,18 +1779,30 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     
     ElemElsTangMatTens(fem, ec);  
     ElemTotTangMatTens(fem, ec); 
-  }    
+  }
+  
+  return ierr;
 }
 
 PetscErrorCode FInternalPreCalc(FE *fem) {
   PetscFunctionBeginUser;
+  
+  PetscErrorCode ierr = 0;
 
   UpdateElements(fem, ElemUpdateGeom0Subdiv);  
   UpdateElements(fem, ElemUpdateGeomSubdiv);  
+  
+  // ierr = DebugPrintGeomForElement(fem, 150); CHKERRQ(ierr);
+
   UpdateElements(fem, ElemUpdateG);  
+  // PetscInt ec = 100;
+  // PetscInt qp = 0; /* choose qp you want to inspect */
+  // PrintElemG_(fem, ec, qp);
+
   UpdateElements(fem, ElemActDefGrad);  
   UpdateElements(fem, ElemCGDefTens);  
-
+  // PrintElemC(fem, 100);  /* uncomment to print element 100's C tensor */
+  
   UpdateElements(fem, ElemC33Solve);
   return 0;
 }
