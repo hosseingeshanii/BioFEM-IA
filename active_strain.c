@@ -1213,15 +1213,15 @@ PetscErrorCode ElemElasCGDefTens(FE *fem, PetscInt ec)
         
         /* Derive Ce.Cov from Ce_inv.Cont by lowering indices and inverting */
         /* Step 1: Lower indices to get Ce_inv.Cov from Ce_inv.Cont */
-        ierr = LowerIndices2(ead->gm[qp].Cov, ead->Ce_inv[qp].Cont, ead->Ce_inv[qp].Cov);
+        ierr = LowerIndices2(ead->gm0[qp].Cov, ead->Ce_inv[qp].Cont, ead->Ce_inv[qp].Cov);
         CHKERRQ(ierr);
         
         /* Step 2: Invert to get Ce.Cov from Ce_inv.Cov */
-        ierr = INV(ead->Ce_inv[qp].Cov, ead->Ce[qp].Cov);
+        ierr = INV(ead->Ce_inv[qp].Cov, ead->Ce[qp].Cont);
         CHKERRQ(ierr);
         
         /* Step 3: Raise indices  to get Ce.Cont from Ce.Cov */
-        ierr = RaiseIndices2(ead->gm[qp].Cont, ead->Ce[qp].Cov, ead->Ce[qp].Cont);
+        ierr = LowerIndices2(ead->gm0[qp].Cov, ead->Ce[qp].Cont, ead->Ce[qp].Cov);
         CHKERRQ(ierr);
     }
 
@@ -1254,11 +1254,11 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
         detG0 = DET3x3(ead->gm0[qp].Cov); // determinant of reference metric
         Je = sqrt(detCe / detG0);
 
-        // if (ec == 100) {
-        //     PetscPrintf(PETSC_COMM_SELF, "\nQP %d:\n", qp);
-        //     PetscPrintf(PETSC_COMM_SELF, "detCe = %f, detG0 = %f, detCecont = %f\n", (double)detCe, (double)detG0, detCecont);
-        //     PetscPrintf(PETSC_COMM_SELF, "  Je = %f\n", (double)Je);
-        // }
+        if (ec == 100) {
+            PetscPrintf(PETSC_COMM_SELF, "\nQP %d:\n", qp);
+            PetscPrintf(PETSC_COMM_SELF, "detCe = %f, detG0 = %f, detCecont = %f\n", (double)detCe, (double)detG0, detCecont);
+            PetscPrintf(PETSC_COMM_SELF, "  Je = %f\n", (double)Je);
+        }
 
         /*------------------------------------------------------------------
          * Compute Neo-Hookean elastic second Piola–Kirchhoff stress
@@ -1268,8 +1268,8 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
         {
             for (PetscInt j = 0; j < 3; j++)
             {
-                PetscReal term1 = mu * (ead->gm0[qp].Cont[i][j] - ead->Ce[qp].Cont[i][j]);
-                PetscReal term2 = K * ead->Ce[qp].Cont[i][j] * (Je * Je - Je);
+                PetscReal term1 = mu * (ead->gm0[qp].Cont[i][j] - ead->Ce_inv[qp].Cont[i][j]);
+                PetscReal term2 = K * ead->Ce_inv[qp].Cont[i][j] * (Je * Je - Je);
                 
                 ead->Se[qp].Cont[i][j] = term1 + term2;
                 
@@ -1312,7 +1312,7 @@ PetscErrorCode ElemTotStress(FE *fem, PetscInt ec)
                             for (PetscInt s = 0; s < 3; s++)
                             {
                                 
-                                ead->S[qp].Cont[i][j] += 0.5 * ead->Fa_inv[qp].Cont[w][p] * ead->Fa_inv[qp].Cont[z][s] * ead->gm0[qp].Cont[s][j] * (ead->Se[qp].Cont[p][z] * ead->gm0[qp].Cont[w][i] + ead->Se[qp].Cont[p][i] * ead->gm0[qp].Cont[w][z]);
+                                ead->S[qp].Cont[i][j] += 0.5 * ead->Fa_inv[qp].Cov[w][p] * ead->Fa_inv[qp].Cov[z][s] * ead->gm0[qp].Cont[s][j] * (ead->Se[qp].Cont[p][z] * ead->gm0[qp].Cont[w][i] + ead->Se[qp].Cont[p][i] * ead->gm0[qp].Cont[w][z]);
                             }
                         }
                     }
@@ -1721,16 +1721,16 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     // PrintElemCe(fem, ec);
     
     ElemElasStress(fem, ec);  
-    // PrintElemSe(fem, ec);
+    PrintElemSe(fem, ec);
     
     ElemTotStress(fem, ec);  
-    // PrintElemS(fem, ec);
+    PrintElemS(fem, ec);
     
     ElemElsTangMatTens(fem, ec);  
-    // PrintElemCCe(fem, ec);
+    PrintElemCCe(fem, ec);
     
     ElemTotTangMatTens(fem, ec); 
-    // PrintElemCC(fem, ec); 
+    PrintElemCC(fem, ec); 
     // if (ec == 10)
     // {
     //   // PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
@@ -1742,29 +1742,37 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
 // PetscPrintf(PETSC_COMM_SELF, "before ModElemC33 on elem = %d \n", ec);
     ModElemC33(fem, ec, &delta);
 
-    // if (ec == 100)
-    // {
-    //   PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
-    //   PetscPrintf(PETSC_COMM_SELF, "sub_itr = %d \n", sub_itr);
-    // }
+    if (ec == 100)
+    {
+      PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
+    }
 
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
-      ierr = RaiseIndices2(ead->gm[qp].Cont,
+      ierr = RaiseIndices2(ead->gm0[qp].Cont,
                             ead->C[qp].Cov,
                             ead->C[qp].Cont);
       CHKERRQ(ierr);
 
-      ierr = INV(ead->C[qp].Cov, ead->C_inv[qp].Cov);
+      ierr = INV(ead->C[qp].Cov, ead->C_inv[qp].Cont);
       CHKERRQ(ierr);                           
 
-      ierr = RaiseIndices2(ead->gm[qp].Cont,
-                            ead->C_inv[qp].Cov,
-                            ead->C_inv[qp].Cont);
+      ierr = LowerIndices2(ead->gm0[qp].Cov,
+                            ead->C_inv[qp].Cont,
+                            ead->C_inv[qp].Cov);
       CHKERRQ(ierr);                           
     }
-        // PrintElemCe(fem, ec);
+
+    if (ec == 100)
+    {
+      PrintElemCe(fem, ec);
+    }
+        
     ElemElasCGDefTens(fem, ec);
-        // PrintElemCe(fem, ec);
+
+    if (ec == 100)
+    {
+      PrintElemCe(fem, ec);
+    }
 
     ElemElasStress(fem, ec);  
     ElemTotStress(fem, ec);  
@@ -1776,8 +1784,8 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     
     // PrintMat3x3(" ead->C[0].Cov after C33 Update", ead->C[0].Cov);
     
-    ElemElsTangMatTens(fem, ec);  
-    ElemTotTangMatTens(fem, ec); 
+    // ElemElsTangMatTens(fem, ec);  
+    // ElemTotTangMatTens(fem, ec); 
 
   }
   
@@ -1801,9 +1809,9 @@ PetscErrorCode FInternalPreCalc(FE *fem) {
 
   UpdateElements(fem, ElemActDefGrad);  
   UpdateElements(fem, ElemCGDefTens);  
-  PrintElemC(fem, 100);  /* uncomment to print element 100's C tensor */
+  // PrintElemC(fem, 100);  /* uncomment to print element 100's C tensor */
   
-  // UpdateElements(fem, ElemC33Solve);
+  UpdateElements(fem, ElemC33Solve);
   return 0;
 }
 
