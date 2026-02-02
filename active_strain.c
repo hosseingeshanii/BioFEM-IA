@@ -974,10 +974,11 @@ static PetscErrorCode PrintElemS(FE *fem, PetscInt ec)
     
     ElemActData *ead = &fem->act_data.elem_act_data[ec];
     
-    PetscPrintf(PETSC_COMM_WORLD, "\n--- After ElemTotStress ---\n");
+    // PetscPrintf(PETSC_COMM_WORLD, "\n--- After ElemTotStress ---\n");
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
         PetscPrintf(PETSC_COMM_WORLD, "QP %d:\n", qp);
-        PrintElem2DTens("  S (Total 2nd Piola-Kirchhoff stress)", &ead->S[qp]);
+        // PrintElem2DTens("  S (Total 2nd Piola-Kirchhoff stress)", &ead->S[qp]);
+        PetscPrintf(PETSC_COMM_WORLD, "  S^[2][2] = %f\n", (double)ead->S[qp].Cont[2][2]);
     }
     
     return 0;
@@ -1256,7 +1257,7 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
 
         if (ec == 100) {
             PetscPrintf(PETSC_COMM_SELF, "\nQP %d:\n", qp);
-            PetscPrintf(PETSC_COMM_SELF, "detCe = %f, detG0 = %f, detCecont = %f\n", (double)detCe, (double)detG0, detCecont);
+            // PetscPrintf(PETSC_COMM_SELF, "detCe = %f, detG0 = %f, detCecont = %f\n", (double)detCe, (double)detG0, detCecont);
             PetscPrintf(PETSC_COMM_SELF, "  Je = %f\n", (double)Je);
         }
 
@@ -1341,6 +1342,12 @@ PetscErrorCode ElemElsTangMatTens(FE *fem, PetscInt ec)
         detCe = DET3x3(ead->Ce[qp].Cov);  // determinant of elastic CG (covariant)
         detG0 = DET3x3(ead->gm0[qp].Cov); // determinant of reference metric
         PetscReal Je = sqrt(detCe / detG0);
+        const PetscReal Je2 = Je * Je;
+
+        const PetscReal alpha = K * (Je2 - Je) - mu;                 // alpha = K(J^2 - J) - mu
+        const PetscReal beta  = 0.5 * K * Je * (2.0 * Je - 1.0);     // beta  = (1/2)K J(2J-1)
+
+
 
         PetscReal (*Ce_bar)[3] = ead->Ce_inv[qp].Cont;
 
@@ -1353,13 +1360,18 @@ PetscErrorCode ElemElsTangMatTens(FE *fem, PetscInt ec)
                     for (PetscInt l = 0; l < 3; l++)
                     {   
                         //CHECK! the formulation
-                        ead->CCe[qp].Cont[i][j][k][l] = 
-                        mu * (Ce_bar[i][k] * Ce_bar[j][l] + Ce_bar[i][l] * Ce_bar[j][k])
-                        + 2 * K * (Ce_bar[i][j] * (Je * Je - 0.5 * Je) * 
-                        // Ce_bar[i][k] * 
-                        Ce_bar[k][l]
-                        - 0.5 * (Je * Je - Je) * (Ce_bar[i][k] * Ce_bar[j][l] + Ce_bar[i][l] * Ce_bar[j][k]));
-
+                        // ead->CCe[qp].Cont[i][j][k][l] = 
+                        // mu * (Ce_bar[i][k] * Ce_bar[l][j] + Ce_bar[i][l] * Ce_bar[k][j])
+                        // + 2 * K * (Ce_bar[i][j] * (Je * Je - 0.5 * Je) * Ce_bar[k][l]
+                        // - 0.5 * (Je * Je - Je) * (Ce_bar[i][k] * Ce_bar[j][l] + Ce_bar[i][l] * Ce_bar[j][k]));
+                      // ead->CCe[qp].Cont[i][j][k][l] =
+                      //   beta * Ce_bar[i][j] * Ce_bar[k][l]
+                      // - 0.5 * alpha * ( Ce_bar[i][k] * Ce_bar[l][j]
+                      //                 + Ce_bar[i][l] * Ce_bar[k][j] );
+                      ead->CCe[qp].Cont[i][j][k][l] =
+                        (2.0 * beta) * Ce_bar[i][j] * Ce_bar[k][l]
+                      - alpha * ( Ce_bar[i][k] * Ce_bar[l][j]
+                                + Ce_bar[i][l] * Ce_bar[k][j] );
                     }
                 }
             }
@@ -1380,7 +1392,7 @@ PetscErrorCode ElemTotTangMatTens(FE *fem, PetscInt ec)
         /* (Optional) If you want to reset CC each qp before accumulating, uncomment:
         
         */
-       for (PetscInt i=0;i<3;i++)
+        for (PetscInt i=0;i<3;i++)
         for (PetscInt j=0;j<3;j++)
         for (PetscInt k=0;k<3;k++)
         for (PetscInt l=0;l<3;l++)
@@ -1458,7 +1470,7 @@ PetscErrorCode ModElemC33(FE *fem, PetscInt ec, PetscReal *delta)
         // PetscPrintf(PETSC_COMM_SELF, "CC3333 before update at qp=%" PetscInt_FMT ": %.6e\n", qp, (double)CC3333);
         /* One Newton update step */
 
-        PetscReal DeltaC33 = -2.0 * S33 / CC3333;
+        PetscReal DeltaC33 = -1.0 * S33 / CC3333;
         *delta  = DeltaC33;
         /* Update C33 (covariant) */
         // PetscPrintf(PETSC_COMM_SELF, "before updating C33 = %f\n", (double)ead->C[qp].Cov[2][2]);
@@ -1721,16 +1733,16 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     // PrintElemCe(fem, ec);
     
     ElemElasStress(fem, ec);  
-    PrintElemSe(fem, ec);
+    // PrintElemSe(fem, ec);
     
     ElemTotStress(fem, ec);  
-    PrintElemS(fem, ec);
+    // PrintElemS(fem, ec);
     
     ElemElsTangMatTens(fem, ec);  
-    PrintElemCCe(fem, ec);
+    // PrintElemCCe(fem, ec);
     
     ElemTotTangMatTens(fem, ec); 
-    PrintElemCC(fem, ec); 
+    // PrintElemCC(fem, ec); 
     // if (ec == 10)
     // {
     //   // PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
@@ -1739,12 +1751,17 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     // PetscPrintf(PETSC_COMM_SELF, "after ElemTotTangMatTens \n");
     // delta = 0.0;
         // PrintMat3x3(" ead->C[0].Cov be C33 Update", ead->C[0].Cov);
-// PetscPrintf(PETSC_COMM_SELF, "before ModElemC33 on elem = %d \n", ec);
-    ModElemC33(fem, ec, &delta);
+    // if (ec == 100)
+    // PetscPrintf(PETSC_COMM_SELF, "before ModElemC33 on elem = %d \n", ec);
+        // PrintElemS(fem, ec);
+
+    ModElemC33(fem, ec, &delta);        
 
     if (ec == 100)
     {
+      // PetscPrintf(PETSC_COMM_SELF, "ModElemC33 completed on elem = %d \n", ec);
       PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
+      PrintElemS(fem, ec);
     }
 
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
@@ -1762,20 +1779,20 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
       CHKERRQ(ierr);                           
     }
 
-    if (ec == 100)
-    {
-      PrintElemCe(fem, ec);
-    }
+    // if (ec == 100)
+    // {
+    //   PrintElemCe(fem, ec);
+    // }
         
-    ElemElasCGDefTens(fem, ec);
+    // ElemElasCGDefTens(fem, ec);
 
-    if (ec == 100)
-    {
-      PrintElemCe(fem, ec);
-    }
+    // if (ec == 100)
+    // {
+    //   PrintElemCe(fem, ec);
+    // }
 
-    ElemElasStress(fem, ec);  
-    ElemTotStress(fem, ec);  
+    // ElemElasStress(fem, ec);  
+    // ElemTotStress(fem, ec);  
     if (ec == 10)
     {
     // PrintMat3x3(" Total S after C33 Update", ead->S[0].Cont);
