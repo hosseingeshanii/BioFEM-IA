@@ -175,11 +175,16 @@ PetscErrorCode FExternal(FE *fem) {
   /* if(ti>6*step && ti<7*step+1) ratio=1.0; */
 
   // EdgeConstPressure(0, -6.e4, 1, fem);
-  EdgeConstPressure(1, 2, 0, fem);
+  // EdgeConstPressure(1, 1.0, 0, fem);
   // EdgeConstPressure(2, 6.e4, 1, fem);
   // EdgeConstPressure(3, -2.e4, 0, fem);
-  EdgeFree(0, fem);
-  
+  // EdgeFree(0, fem);
+
+  // Rectangular Plate Active Strain Test
+  EdgeConstPressure(1, 1.0, 0, fem);
+  EdgeDirectionalFix(0, 0, fem);
+  EdgeDirectionalFix(3, 1, fem);
+
   /* EdgeFree(1, fem); */
   /* EdgeFree(2, fem); */
   /* EdgeFree(3, fem); */

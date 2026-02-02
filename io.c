@@ -591,6 +591,9 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fint float\n");
   for (i=0; i<ibm->n_v; i++){
     PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+    if (i == 100){
+      PetscPrintf(PETSC_COMM_WORLD, "Fint at node 100: %f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+    }
   }
   VecRestoreArray(fem->Fint, &FF);
   
@@ -608,12 +611,12 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
   }
   VecRestoreArray(fem->Fdyn, &FF);
 
-  VecGetArray(fem->Res, &FF);
-  PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Res float\n");
-  for (i=0; i<ibm->n_v; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%.10f %.10f %.10f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-  }
-  VecRestoreArray(fem->Res, &FF);
+  // VecGetArray(fem->Res, &FF);
+  // PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Res float\n");
+  // for (i=0; i<ibm->n_v; i++){
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%.10f %.10f %.10f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+  // }
+  // VecRestoreArray(fem->Res, &FF);
 
   VecGetArray(fem->Fcnt, &FF);
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fcnt float\n");
@@ -691,47 +694,47 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
 
   
   
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS kve float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->kve[i*dof], ibm->kve[i*dof+1], ibm->kve[i*dof+2]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS kve float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->kve[i*dof], ibm->kve[i*dof+1], ibm->kve[i*dof+2]);
+  // }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS nf float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->nf_x[i], ibm->nf_y[i], ibm->nf_z[i]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS nf float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->nf_x[i], ibm->nf_y[i], ibm->nf_z[i]);
+  // }
   
-  if(ConstitutiveLawNonLinear){
-    PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS nfib float\n");
-    for (i=0; i<ibm->n_elmt; i++) {
-      PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->n_fib[i].x, ibm->n_fib[i].y, ibm->n_fib[i].z);
-    }
-  }
+  // if(ConstitutiveLawNonLinear){
+  //   PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS nfib float\n");
+  //   for (i=0; i<ibm->n_elmt; i++) {
+  //     PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->n_fib[i].x, ibm->n_fib[i].y, ibm->n_fib[i].z);
+  //   }
+  // }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StrainM float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainM[i*(dof+2)], fem->StrainM[i*(dof+2)+1], fem->StrainM[i*(dof+2)+2]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StrainM float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainM[i*(dof+2)], fem->StrainM[i*(dof+2)+1], fem->StrainM[i*(dof+2)+2]);
+  // }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS PStrainM float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainM[i*(dof+2)+3], fem->StrainM[i*(dof+2)+4], 0.);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS PStrainM float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainM[i*(dof+2)+3], fem->StrainM[i*(dof+2)+4], 0.);
+  // }
   
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StrainB float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainB[i*dof], fem->StrainB[i*dof+1], fem->StrainB[i*dof+2]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StrainB float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainB[i*dof], fem->StrainB[i*dof+1], fem->StrainB[i*dof+2]);
+  // }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StressM float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StressM[i*dof], fem->StressM[i*dof+1], fem->StressM[i*dof+2]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StressM float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StressM[i*dof], fem->StressM[i*dof+1], fem->StressM[i*dof+2]);
+  // }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StressB float\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StressB[i*dof], fem->StressB[i*dof+1], fem->StressB[i*dof+2]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StressB float\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StressB[i*dof], fem->StressB[i*dof+1], fem->StressB[i*dof+2]);
+  // }
 
 
   PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS dA float\n");
@@ -746,17 +749,17 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
     PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", ibm->dA0[i]);
   }
   
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS El float\n");
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", ibm->El[0][i]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS El float\n");
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", ibm->El[0][i]);
+  // }
 
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS nu float\n");
-  PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
-  for (i=0; i<ibm->n_elmt; i++) {
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", ibm->El[1][i]);
-  }
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS nu float\n");
+  // PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
+  // for (i=0; i<ibm->n_elmt; i++) {
+  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", ibm->El[1][i]);
+  // }
 
   if (ConstitutiveLawNonLinear){
     

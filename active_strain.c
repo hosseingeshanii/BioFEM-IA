@@ -86,81 +86,72 @@ PetscErrorCode GetUserActParams(FE *fem){
 
 PetscErrorCode ActDataAllocate(FE *fem)
 {
-    PetscErrorCode ierr;
-    ActData *act = &fem->act_data;
+  PetscErrorCode ierr;
+  ActData *act = &fem->act_data;
+  PetscInt nelem = fem->ibm->n_elmt;
+  PetscInt n_qp  = act->n_qp;
 
-    PetscInt nelem = fem->ibm->n_elmt;
-    PetscInt n_qp = act->n_qp;
+  /* Always start from a known state */
+  /* If ActData can be re-allocated, consider calling ActDataDestroy(fem) first */
+  act->theta = NULL;
+  act->w = NULL;
+  act->elem_act_data = NULL;
 
-    ierr = PetscMalloc1(n_qp, &act->theta);
-    ierr = PetscMalloc1(n_qp, &act->w);
+  ierr = PetscMalloc1(n_qp, &act->theta); CHKERRQ(ierr);
+  ierr = PetscMalloc1(n_qp, &act->w);     CHKERRQ(ierr);
 
-    /*------------------------------------------------------------*/
-    /* Allocate element-level activation data                     */
-    /*------------------------------------------------------------*/
-    ierr = PetscMalloc1(nelem, &act->elem_act_data);    CHKERRQ(ierr);
+  ierr = PetscMalloc1(nelem, &act->elem_act_data); CHKERRQ(ierr);
+  /* Ensure all pointers inside each ElemActData start as NULL */
+  ierr = PetscMemzero(act->elem_act_data, nelem * sizeof(*act->elem_act_data)); CHKERRQ(ierr);
 
-    for (PetscInt ec = 0; ec < nelem; ec++)
-    {
-        ElemActData *ead = &act->elem_act_data[ec];
+  for (PetscInt ec = 0; ec < nelem; ec++) {
+    ElemActData *ead = &act->elem_act_data[ec];
 
-        /* Kinematics */
-        ierr = PetscMalloc1(n_qp, &ead->Fa);    CHKERRQ(ierr);
-        ierr = PetscMalloc1(n_qp, &ead->Fa_inv);    CHKERRQ(ierr);
+    /* Kinematics */
+    ierr = PetscMalloc1(n_qp, &ead->Fa);     CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->Fa_inv); CHKERRQ(ierr);
 
-        ierr = PetscMalloc1(n_qp, &ead->C); CHKERRQ(ierr);
-        ierr = PetscMalloc1(n_qp, &ead->C_inv); CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->C);     CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->C_inv); CHKERRQ(ierr);
 
-        ierr = PetscMalloc1(n_qp, &ead->Ce);    CHKERRQ(ierr);
-        ierr = PetscMalloc1(n_qp, &ead->Ce_inv);    CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->Ce);     CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->Ce_inv); CHKERRQ(ierr);
 
-        /* Stress */
-        ierr = PetscMalloc1(n_qp, &ead->Se);    CHKERRQ(ierr);
-        ierr = PetscMalloc1(n_qp, &ead->S); CHKERRQ(ierr);
+    /* Stress */
+    ierr = PetscMalloc1(n_qp, &ead->Se); CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->S);  CHKERRQ(ierr);
 
-        /* Metrics */
-        ierr = PetscMalloc1(n_qp, &ead->gm);    CHKERRQ(ierr);
-        ierr = PetscMalloc1(n_qp, &ead->gm0);   CHKERRQ(ierr);
+    /* Metrics */
+    ierr = PetscMalloc1(n_qp, &ead->gm);  CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->gm0); CHKERRQ(ierr);
 
-        /* Tangents */
-        ierr = PetscMalloc1(n_qp, &ead->CCe);   CHKERRQ(ierr);
-        ierr = PetscMalloc1(n_qp, &ead->CC);    CHKERRQ(ierr);
+    /* Tangents */
+    ierr = PetscMalloc1(n_qp, &ead->CCe); CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->CC);  CHKERRQ(ierr);
 
-        /* Bases */
-        ierr = PetscMalloc1(n_qp, &ead->g); CHKERRQ(ierr);
-        ierr = PetscMalloc1(n_qp, &ead->g0);    CHKERRQ(ierr);
+    /* Bases */
+    ierr = PetscMalloc1(n_qp, &ead->g);  CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->g0); CHKERRQ(ierr);
 
-        /* NEW: single midsurface geometry cache (size 1) */
-        ierr = PetscMalloc1(1, &ead->geom);       CHKERRQ(ierr);
-        ierr = PetscMalloc1(1, &ead->geom0); CHKERRQ(ierr);
+    /* Midsurface geometry cache (size 1) */
+    ierr = PetscMalloc1(1, &ead->geom);  CHKERRQ(ierr);
+    ierr = PetscMalloc1(1, &ead->geom0); CHKERRQ(ierr);
 
-        ead->geom[0].nen = 0;
-        ead->geom[0].v = 0;
-        ead->geom[0].is_irregular = 0;
+    /* Must ensure internal pointers inside SubdivGeomQP are NULL */
+    ierr = PetscMemzero(&ead->geom[0],  sizeof(SubdivGeomQP)); CHKERRQ(ierr);
+    ierr = PetscMemzero(&ead->geom0[0], sizeof(SubdivGeomQP)); CHKERRQ(ierr);
+  }
 
-        ead->geom0[0].nen = 0;
-        ead->geom0[0].v = 0;
-        ead->geom0[0].is_irregular = 0;
-
-        // ead->geom[0].INa0  = NULL;
-        // ead->geom[0].INa1  = NULL;
-        // ead->geom[0].INab0 = NULL;
-        // ead->geom[0].INab1 = NULL;
-        // ead->geom[0].INab2 = NULL;
-
-        PetscMemzero(&ead->geom[0],  sizeof(SubdivGeomQP));
-        PetscMemzero(&ead->geom0[0], sizeof(SubdivGeomQP));
-    }
-
-    return 0;
+  return 0;
 }
+
 
 PetscErrorCode SetGaussianQuadrature(FE *fem)
 {
     PetscFunctionBeginUser;
 
     // Initialize all to zero
-    for (PetscInt i = 0; i < 5; i++) {
+    for (PetscInt i = 0; i < fem->act_data.n_qp; i++) {
         fem->act_data.theta[i] = 0.0;
         fem->act_data.w[i] = 0.0;
     }
@@ -230,56 +221,76 @@ static PetscErrorCode SubdivGeomDestroy_(SubdivGeomQP *G)
 
 static PetscErrorCode ElemActDataGeomDestroy_(ElemActData *ead)
 {
-  PetscErrorCode ierr = 0;
+  PetscErrorCode ierr;
   if (!ead) return 0;
 
-  if (ead->geom)  { ierr = SubdivGeomDestroy_(&ead->geom[0]);  CHKERRQ(ierr); ierr = PetscFree(ead->geom);  CHKERRQ(ierr); ead->geom  = NULL; }
-  if (ead->geom0) { ierr = SubdivGeomDestroy_(&ead->geom0[0]); CHKERRQ(ierr); ierr = PetscFree(ead->geom0); CHKERRQ(ierr); ead->geom0 = NULL; }
-
+  noted:
+  if (ead->geom) {
+    ierr = SubdivGeomDestroy_(&ead->geom[0]); CHKERRQ(ierr);
+    ierr = PetscFree(ead->geom); CHKERRQ(ierr);
+    ead->geom = NULL;
+  }
+  if (ead->geom0) {
+    ierr = SubdivGeomDestroy_(&ead->geom0[0]); CHKERRQ(ierr);
+    ierr = PetscFree(ead->geom0); CHKERRQ(ierr);
+    ead->geom0 = NULL;
+  }
   return 0;
 }
 
+
 PetscErrorCode ActDataDestroy(FE *fem)
 {
-    PetscErrorCode ierr;
-    ActData *act = &fem->act_data;
+  PetscErrorCode ierr;
+  ActData *act = &fem->act_data;
+  PetscInt nelem = fem->ibm->n_elmt;
 
-    PetscInt nelem = fem->ibm->n_elmt;
-
-    for (PetscInt ec = 0; ec < nelem; ec++)
-    {
-        ElemActData *ead = &act->elem_act_data[ec];
-
-        /* NEW: free geom cache */
-        ierr = ElemActDataGeomDestroy_(ead); CHKERRQ(ierr);
-
-        ierr = PetscFree(ead->Fa);  CHKERRQ(ierr);
-        ierr = PetscFree(ead->Fa_inv);  CHKERRQ(ierr);
-        ierr = PetscFree(ead->C);   CHKERRQ(ierr);
-        ierr = PetscFree(ead->C_inv);   CHKERRQ(ierr);
-        ierr = PetscFree(ead->Ce);  CHKERRQ(ierr);
-        ierr = PetscFree(ead->Ce_inv);  CHKERRQ(ierr);
-
-        ierr = PetscFree(ead->Se);  CHKERRQ(ierr);
-        ierr = PetscFree(ead->S);   CHKERRQ(ierr);
-
-        ierr = PetscFree(ead->gm);  CHKERRQ(ierr);
-        ierr = PetscFree(ead->gm0); CHKERRQ(ierr);
-
-        ierr = PetscFree(ead->CCe); CHKERRQ(ierr);
-        ierr = PetscFree(ead->CC);  CHKERRQ(ierr);
-
-        ierr = PetscFree(ead->g);   CHKERRQ(ierr);
-        ierr = PetscFree(ead->g0);  CHKERRQ(ierr);
-    }
-
-    ierr = PetscFree(act->elem_act_data);   CHKERRQ(ierr);
-    ierr = PetscFree(act->theta);   CHKERRQ(ierr);
-    ierr = PetscFree(act->w);   CHKERRQ(ierr);
-
-    act->elem_act_data = NULL;
-
+  /* If elem_act_data was never allocated, just free global arrays */
+  if (!act->elem_act_data) {
+    ierr = PetscFree(act->theta); CHKERRQ(ierr);
+    ierr = PetscFree(act->w);     CHKERRQ(ierr);
+    act->theta = NULL;
+    act->w = NULL;
     return 0;
+  }
+
+  for (PetscInt ec = 0; ec < nelem; ec++) {
+    ElemActData *ead = &act->elem_act_data[ec];
+
+    ierr = ElemActDataGeomDestroy_(ead); CHKERRQ(ierr);
+
+    ierr = PetscFree(ead->Fa);     CHKERRQ(ierr);
+    ierr = PetscFree(ead->Fa_inv); CHKERRQ(ierr);
+    ierr = PetscFree(ead->C);      CHKERRQ(ierr);
+    ierr = PetscFree(ead->C_inv);  CHKERRQ(ierr);
+    ierr = PetscFree(ead->Ce);     CHKERRQ(ierr);
+    ierr = PetscFree(ead->Ce_inv); CHKERRQ(ierr);
+
+    ierr = PetscFree(ead->Se); CHKERRQ(ierr);
+    ierr = PetscFree(ead->S);  CHKERRQ(ierr);
+
+    ierr = PetscFree(ead->gm);  CHKERRQ(ierr);
+    ierr = PetscFree(ead->gm0); CHKERRQ(ierr);
+
+    ierr = PetscFree(ead->CCe); CHKERRQ(ierr);
+    ierr = PetscFree(ead->CC);  CHKERRQ(ierr);
+
+    ierr = PetscFree(ead->g);  CHKERRQ(ierr);
+    ierr = PetscFree(ead->g0); CHKERRQ(ierr);
+
+    /* Optional: clear ead (helps catch use-after-free) */
+    ierr = PetscMemzero(ead, sizeof(*ead)); CHKERRQ(ierr);
+  }
+
+  ierr = PetscFree(act->elem_act_data); CHKERRQ(ierr);
+  ierr = PetscFree(act->theta);         CHKERRQ(ierr);
+  ierr = PetscFree(act->w);             CHKERRQ(ierr);
+
+  act->elem_act_data = NULL;
+  act->theta = NULL;
+  act->w = NULL;
+
+  return 0;
 }
 
 
@@ -1255,11 +1266,11 @@ PetscErrorCode ElemElasStress(FE *fem, PetscInt ec)
         detG0 = DET3x3(ead->gm0[qp].Cov); // determinant of reference metric
         Je = sqrt(detCe / detG0);
 
-        if (ec == 100) {
-            PetscPrintf(PETSC_COMM_SELF, "\nQP %d:\n", qp);
-            // PetscPrintf(PETSC_COMM_SELF, "detCe = %f, detG0 = %f, detCecont = %f\n", (double)detCe, (double)detG0, detCecont);
-            PetscPrintf(PETSC_COMM_SELF, "  Je = %f\n", (double)Je);
-        }
+        // if (ec == 100) {
+        //     PetscPrintf(PETSC_COMM_SELF, "\nQP %d:\n", qp);
+        //     // PetscPrintf(PETSC_COMM_SELF, "detCe = %f, detG0 = %f, detCecont = %f\n", (double)detCe, (double)detG0, detCecont);
+        //     PetscPrintf(PETSC_COMM_SELF, "  Je = %f\n", (double)Je);
+        // }
 
         /*------------------------------------------------------------------
          * Compute Neo-Hookean elastic second Piola–Kirchhoff stress
@@ -1760,8 +1771,8 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     if (ec == 100)
     {
       // PetscPrintf(PETSC_COMM_SELF, "ModElemC33 completed on elem = %d \n", ec);
-      PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
-      PrintElemS(fem, ec);
+      // PetscPrintf(PETSC_COMM_SELF, "deltaC33 = %f at sub_itr = %d \n", delta, sub_itr);
+      // PrintElemS(fem, ec);
     }
 
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
@@ -1841,7 +1852,7 @@ PetscErrorCode FInternalAct(FE *fem){
   for (i=0; i<42; i++) {Fb[i]=0.0;}
 
   FInternalPreCalc(fem);
-  PetscPrintf(PETSC_COMM_SELF, "FInternalPreCalc completed\n");
+  // PetscPrintf(PETSC_COMM_SELF, "FInternalPreCalc completed\n");
   PetscReal  *FF;
   VecGetArray(fem->Fint, &FF);
 
@@ -1850,6 +1861,16 @@ PetscErrorCode FInternalAct(FE *fem){
 
     ElemUpdFint(fem, ec, Fb);
 
+
+    /* Debug: print Fb for element 100 */
+    // if (ec == 100) {
+    //   PetscPrintf(PETSC_COMM_SELF, "Fb for ec=100 (dof=%" PetscInt_FMT ", v=%" PetscInt_FMT "):\n", dof, v);
+    //   PetscInt nFb = dof * (v + 6);
+    //   for (PetscInt idx = 0; idx < nFb && idx < (PetscInt)(sizeof(Fb)/sizeof(Fb[0])); idx++) {
+    //     PetscPrintf(PETSC_COMM_SELF, " Fb[%3" PetscInt_FMT "] = % .12e\n", idx, (double)Fb[idx]);
+    //   }
+    // }
+
     for (i=0; i<(v+6); i++) {
       if (ibm->patch[16*ec+i]!=1000000) {
         node = ibm->patch[16*ec+i];
@@ -1857,6 +1878,12 @@ PetscErrorCode FInternalAct(FE *fem){
         FF[dof*node] += Fb[dof*i];
         FF[dof*node+1] += Fb[dof*i+1];
         FF[dof*node+2] += Fb[dof*i+2];
+        
+      //   if (ec == 100) {
+      //   PetscPrintf(PETSC_COMM_SELF, "ec=100 node %" PetscInt_FMT "  FF_after  = [% .12e, % .12e, % .12e]\n",
+      //               node,
+      //               (double)FF[dof*node], (double)FF[dof*node+1], (double)FF[dof*node+2]);
+      // }
         
       }
     } 
