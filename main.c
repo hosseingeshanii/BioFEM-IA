@@ -254,7 +254,7 @@ int main(int argc, char **argv)
 	   -fem_snes_max_it 20
 	   -fem_snes_monitor
 	   #-fem_ksp_type fgmres	 */
-	Vec U;
+	      Vec U;
         PetscErrorCode ierr;
         VecDuplicate(fem[ibi].x, &U);
         VecCopy(fem[ibi].x, U);
@@ -264,13 +264,14 @@ int main(int argc, char **argv)
         SNESSetFunction(snes, fem[ibi].Res, FormFunctionFEM, (void *)&fem[ibi]);
         SNESAppendOptionsPrefix(snes, "fem_");
         MatCreateSNESMF(snes, &J);  //MatrixFree
-        SNESSetJacobian(snes, J, J, MatMFFDComputeJacobian, (void *)&fem[ibi]);
-        SNESSetFromOptions(snes);
+        // SNESSetJacobian(snes, J, J, MatMFFDComputeJacobian, (void *)&fem[ibi]);
+        SNESSetJacobian(snes, J, J, NULL, (void *)&fem[ibi]);
+        SNESSetFromOptions(snes);      
 
         ierr = SNESSolve(snes, PETSC_NULL, U);
         
         VecCopy(U, fem[ibi].x);
-
+        
         /* Only destroy if SNESSolve didn't corrupt the object */
         if (snes != NULL) {
             PetscErrorCode destroy_ierr = SNESDestroy(&snes);
@@ -289,6 +290,8 @@ int main(int argc, char **argv)
       //VecCopy(fem[ibi].xd, fem[ibi].y);  
 
        if (contact==1) {ContactZ(&fem[ibi]);}   
+
+       
     } //ibi
 
     t = dt*(ti);
@@ -299,9 +302,23 @@ int main(int argc, char **argv)
     
     for (ibi=0; ibi<nbody; ibi++) {
 
-      Contact(&fem[ibi]);
+      // Contact(&fem[ibi]);
       VecCopy(fem[ibi].xn, fem[ibi].xnm1);
       VecCopy(fem[ibi].x, fem[ibi].xn);
+
+// {
+//           PetscInt node = 117; /* change as needed */
+//           PetscReal *FF = NULL;
+//           PetscInt n_v = ibm->n_v;
+//           if (node >= 0 && node < n_v) {
+//             VecGetArray(fem[ibi].Fint, &FF);
+//             PetscPrintf(PETSC_COMM_SELF, "Fint af cont at node %d: %le %le %le\n",
+//                         node, FF[dof*node], FF[dof*node+1], FF[dof*node+2]);
+//             VecRestoreArray(fem[ibi].Fint, &FF);
+//           } else {
+//             PetscPrintf(PETSC_COMM_SELF, "requested node %d out of range (n_v=%d)\n", node, n_v);
+//           }
+//         }
 
       PetscReal norm=0.0, normv=0.0, norma=0.0, normfint=0.; 
       VecCopy(fem[ibi].x, fem[ibi].dx);
@@ -319,7 +336,7 @@ int main(int argc, char **argv)
     //if (ti!=0 && ti == (ti/tiout)*tiout){
     if (ti == (ti/tiout)*tiout){
       for (ibi=0; ibi<nbody; ibi++) {
-        Output(&fem[ibi], ti, ibi, subdir);
+        Output(&fem[ibi], ti+1, ibi, subdir);
         
   
 	//LocationOut(&fem[ibi], ti, ibi);
@@ -471,12 +488,16 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
 
   FE         *fem=(FE *)ctx;
   IBMNodes   *ibm=fem->ibm;
+  Mat        Jmat = NULL;
+  PetscErrorCode ierr;
   PetscReal  *xx,*RR, *RRes,*FF;
   PetscInt   nv, ec;
 
  
   //---------Update the location
   VecGetArray(x, &xx);
+
+  
   for (nv=0; nv<ibm->n_v + ibm->n_ghosts; nv++) {
     /* if (ibm->contact[nv]) { // added by Iman 10/12/22 to fix x for nodes in contact as BC */
     /*   xx[nv*dof  ] = ibm->x_bp[nv]; */
@@ -514,23 +535,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
 
   if (muscle_activation){
-    FInternalAct(fem);
-    // PetscPrintf(PETSC_COMM_SELF, "FInternalAct completed\n");
-
-    /* Print internal force for a specific node (node = 100) right after FInternalAct */
-    {
-      PetscInt node = 100; /* change as needed */
-      PetscReal *FF = NULL;
-      PetscInt n_v = ibm->n_v;
-      if (node >= 0 && node < n_v) {
-        VecGetArray(fem->Fint, &FF);
-        PetscPrintf(PETSC_COMM_SELF, "Fint at node %d: %le %le %le\n",
-                    node, FF[dof*node], FF[dof*node+1], FF[dof*node+2]);
-        VecRestoreArray(fem->Fint, &FF);
-      } else {
-        PetscPrintf(PETSC_COMM_SELF, "requested node %d out of range (n_v=%d)\n", node, n_v);
-      }
-    }
+    FInternalAct(fem);    
   }
   else{
     FInternal(fem);
@@ -554,8 +559,15 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     VecRestoreArray(fem->x, &xx);
   }
 
+  PetscReal fext_inf = 0.0, scale = 1.0;
+  ierr = VecNorm(fem->Fext, NORM_INFINITY, &fext_inf); CHKERRQ(ierr);
+
+  /* Avoid dividing by ~0 when load is tiny */
+  scale = 1.0 / PetscMax(fext_inf, 1.0);   /* choose 1.0 as floor (units) */
+
+  ierr = VecScale(R, scale); CHKERRQ(ierr);
+
   //for displacement BCs
-  //MoveBoundary(3, fem);
   //
   
   return(0);

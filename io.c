@@ -591,9 +591,9 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fint float\n");
   for (i=0; i<ibm->n_v; i++){
     PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-    if (i == 100){
-      PetscPrintf(PETSC_COMM_WORLD, "Fint at node 100: %f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-    }
+    // if (i == 100){
+    //   PetscPrintf(PETSC_COMM_WORLD, "Fint at node 100 what: %f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+    // }
   }
   VecRestoreArray(fem->Fint, &FF);
   

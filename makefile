@@ -7,7 +7,8 @@ ifdef TEC360HOME
 CFLAGS       = -I${TEC360HOME}/include/ -DTECIO=1
 LIBS         = ${TEC360HOME}/lib/tecio64.a -lstdc++
 else
-CFLAGS       = -g
+CFLAGS       += -g
+# CFLAGS 		 += -DCHECK_JACOBIAN	
 LIBS         =
 endif
 

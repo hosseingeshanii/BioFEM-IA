@@ -1664,7 +1664,8 @@ PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem) {
 
   for (nbc=start; nbc<end; nbc++) { //fix boundary nodes
     nb=ibm->bnodes[nbc];
-
+    // PetscPrintf(PETSC_COMM_SELF, "EdgeDirectionalFix: nbc=%d nb=%d dir=%d start=%d end=%d\n", nbc, nb, dir, start, end);
+    
     switch (dir) {
 
     case 0:

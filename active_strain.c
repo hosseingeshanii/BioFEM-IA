@@ -1844,12 +1844,14 @@ PetscErrorCode FInternalPreCalc(FE *fem) {
 }
 
 PetscErrorCode FInternalAct(FE *fem){
+  PetscErrorCode ierr = 0;
+
   IBMNodes       *ibm=fem->ibm;
   PetscInt       i, ec;
-  PetscReal      Fm[9], Fb[42], Fint[9];
-  
-  for (i=0; i<9; i++) {Fm[i]=0.0; Fint[i]=0.0;}
-  for (i=0; i<42; i++) {Fb[i]=0.0;}
+  // PetscReal      Fm[9], Fb[42], Fint[9];
+
+  // for (i=0; i<9; i++) {Fm[i]=0.0; Fint[i]=0.0;}
+  // for (i=0; i<42; i++) {Fb[i]=0.0;}
 
   FInternalPreCalc(fem);
   // PetscPrintf(PETSC_COMM_SELF, "FInternalPreCalc completed\n");
@@ -1858,6 +1860,10 @@ PetscErrorCode FInternalAct(FE *fem){
 
   for (ec=0; ec<ibm->n_elmt; ec++) {
     PetscInt  node, v = ibm->val[ec];
+    PetscInt nloc = dof*(v+6);
+
+    PetscReal *Fb;
+    ierr = PetscCalloc1(nloc, &Fb); CHKERRQ(ierr);   // zeroed
 
     ElemUpdFint(fem, ec, Fb);
 

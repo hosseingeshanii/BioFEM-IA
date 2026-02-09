@@ -181,9 +181,9 @@ PetscErrorCode FExternal(FE *fem) {
   // EdgeFree(0, fem);
 
   // Rectangular Plate Active Strain Test
-  EdgeConstPressure(1, 1.0, 0, fem);
-  EdgeDirectionalFix(0, 0, fem);
-  EdgeDirectionalFix(3, 1, fem);
+  EdgeConstPressure(1, 0.0, 0, fem);
+  EdgeDirectionalFix(0, 1, fem);
+  EdgeDirectionalFix(3, 0, fem);
 
   /* EdgeFree(1, fem); */
   /* EdgeFree(2, fem); */
