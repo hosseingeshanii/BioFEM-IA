@@ -3,6 +3,7 @@
 extern const PetscInt   dof;
 extern const PetscReal  h0;
 extern PetscInt         ti;
+extern PetscInt         tisteps;
 extern PetscReal        dt;
 
 extern PetscErrorCode  EdgeFix(PetscInt edge_n, FE *fem);
@@ -180,10 +181,18 @@ PetscErrorCode FExternal(FE *fem) {
   // EdgeConstPressure(3, -2.e4, 0, fem);
   // EdgeFree(0, fem);
 
-  // Rectangular Plate Active Strain Test
-  EdgeConstPressure(1, 0.0, 0, fem);
-  EdgeDirectionalFix(0, 1, fem);
-  EdgeDirectionalFix(3, 0, fem);
+  // Rectangular Plate Active Strain Test - time-varying pressure
+  {
+    PetscReal startP = 1.e5;    /* starting pressure */
+    PetscReal stepP  = 1.e5;    /* increase per interval */
+    PetscInt  interval = 10;    /* timesteps between increases */
+    PetscReal P = startP + (PetscReal)(ti/interval)*stepP;
+    EdgeConstPressure(1, 1e5, 0, fem);
+  }
+  // EdgeConstPressure(3, -9e5, 0, fem);
+
+  // EdgeDirectionalFix(0, 1, fem);
+  // EdgeDirectionalFix(3, 0, fem);
 
   /* EdgeFree(1, fem); */
   /* EdgeFree(2, fem); */

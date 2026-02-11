@@ -525,6 +525,8 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
       GhostLoc(fem);
     } else if (curvature==6) {
       GlobalGhost(ibm);
+      GhostDirectionalFix(ibm, 0, 1);
+      GhostDirectionalFix(ibm, 3, 0);
     }
   }
 
@@ -558,6 +560,12 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     VecRestoreArray(R, &RR);
     VecRestoreArray(fem->x, &xx);
   }
+
+  EdgeDirectionalFix(0, 1, fem, R);
+  EdgeDirectionalFix(3, 0, fem, R);
+  EdgeFreeR(2, fem, R);
+  
+  // GlobalGhost(ibm);
 
   PetscReal fext_inf = 0.0, scale = 1.0;
   ierr = VecNorm(fem->Fext, NORM_INFINITY, &fext_inf); CHKERRQ(ierr);
