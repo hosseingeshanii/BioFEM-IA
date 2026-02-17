@@ -1669,24 +1669,28 @@ PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem, Vec R)
     switch (dir) {
 
     case 0:
-    ibm->x_bp[nb] = ibm->x_bp0[nb]; //for kinematic contact
-    xx[nb*dof] = ibm->x_bp0[nb];
-    xdd[nb*dof] = 0.;
-    RRes[nb*dof] = 0.0;   
+    // ibm->x_bp[nb] = ibm->x_bp0[nb]; //for kinematic contact
+    // xx[nb*dof] = ibm->x_bp0[nb];
+    // xdd[nb*dof] = 0.;
+    // RRes[nb*dof] = 0.0; 
+    RRes[nb*dof] = ibm->x_bp[nb] - ibm->x_bp0[nb];
+
     break;
 
     case 1:
-    ibm->y_bp[nb] = ibm->y_bp0[nb];
-    xx[nb*dof+1] = ibm->y_bp0[nb];
-    xdd[nb*dof+1] = 0.;
-    RRes[nb*dof+1] = 0.0;
+    // ibm->y_bp[nb] = ibm->y_bp0[nb];
+    // xx[nb*dof+1] = ibm->y_bp0[nb];
+    // xdd[nb*dof+1] = 0.;
+    // RRes[nb*dof+1] = 0.0;
+    RRes[nb*dof+1] = ibm->y_bp[nb] - ibm->y_bp0[nb];
     break;
 
     case 2:
-    ibm->z_bp[nb] = ibm->z_bp0[nb];
-    xx[nb*dof+2] = ibm->z_bp0[nb];
-    xdd[nb*dof+2] = 0.;    
-    RRes[nb*dof+2] = 0.0;
+    // ibm->z_bp[nb] = ibm->z_bp0[nb];
+    // xx[nb*dof+2] = ibm->z_bp0[nb];
+    // xdd[nb*dof+2] = 0.;    
+    // RRes[nb*dof+2] = 0.0;
+    RRes[nb*dof+2] = ibm->z_bp[nb] - ibm->z_bp0[nb];
     break;
 
     default:
@@ -1705,14 +1709,14 @@ PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem, Vec R)
   return(0);
 }
 
-PetscErrorCode EdgeFreeR(PetscInt edge_n, FE *fem, Vec R) {
+PetscErrorCode EdgeFreeR(FE *fem, Vec R) {
 
   IBMNodes *ibm=fem->ibm;
   PetscReal *RRes;
   PetscInt  nb;
   
   VecGetArray(R, &RRes);
-
+  
   for (nb=ibm->n_v; nb<ibm->n_v+ibm->n_ghosts; nb++) { //excludes ghost nodes from solver 
     RRes[nb*dof] =0.0;
     RRes[nb*dof+1] =0.0;
@@ -1761,30 +1765,25 @@ PetscErrorCode GhostDirectionalFix(IBMNodes *ibm, PetscInt edge_n, PetscInt dir)
       switch (dir)
       {
       case 0:        
-        // ibm->x_bp[ibm->n_v+count] = - ibm->x_bp[nv1];
+        // ibm->x_bp[ibm->n_v+count] = ibm->x_bp0[ibm->n_v+count];
+        ibm->x_bp[ibm->n_v+count] = ibm->x_bp0[ibm->n_v+count] - (ibm->x_bp[nv3] - ibm->x_bp0[nv3]);
         ibm->y_bp[ibm->n_v+count] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
-        // PetscPrintf(PETSC_COMM_SELF, "GhostDirectionalFix: edge_n=%d dir=%d n_v+count=%d nv1=%d nv2=%d nv3=%d\n", edge_n, dir, ibm->n_v+count, nv1, nv2, nv3);
         ibm->z_bp[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];
         break;
       case 1:
         ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];        
-        // ibm->y_bp[ibm->n_v+count] = - ibm->y_bp[nv1];
-        // PetscPrintf(PETSC_COMM_SELF, "GhostDirectionalFix: edge_n=%d dir=%d n_v+count=%d nv1=%d nv2=%d nv3=%d\n", edge_n, dir, ibm->n_v+count, nv1, nv2, nv3);
+        ibm->y_bp[ibm->n_v+count] = ibm->y_bp0[ibm->n_v+count] - (ibm->y_bp[nv3] - ibm->y_bp0[nv3]);
         ibm->z_bp[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];
         break;
       case 2:
         ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
         ibm->y_bp[ibm->n_v+count] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
-        ibm->z_bp[ibm->n_v+count] = - ibm->z_bp[nv1];        
+        // ibm->z_bp[ibm->n_v+count] = - ibm->z_bp[nv1];        
         break;
       default:
         SETERRQ(PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
                 "Direction must be between 0 and 2");
       }
-      
-      // ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
-      // ibm->y_bp[ibm->n_v+count] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
-      // ibm->z_bp[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];     
       
       count++;      
     }

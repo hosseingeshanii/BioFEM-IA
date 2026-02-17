@@ -1840,6 +1840,27 @@ PetscErrorCode FInternalPreCalc(FE *fem) {
   // PrintElemC(fem, 100);  /* uncomment to print element 100's C tensor */
   
   UpdateElements(fem, ElemC33Solve);
+
+  /* Calculate and print average S33 values */
+  // {
+  //   IBMNodes *ibm = fem->ibm;
+  //   PetscInt n_elmt = ibm->n_elmt;
+  //   PetscInt n_qp = fem->act_data.n_qp;
+  //   PetscReal sum_S33 = 0.0;
+  //   PetscInt total_qp = 0;
+    
+  //   for (PetscInt ec = 0; ec < n_elmt; ec++) {
+  //     ElemActData *ead = &fem->act_data.elem_act_data[ec];
+  //     for (PetscInt qp = 0; qp < n_qp; qp++) {
+  //       sum_S33 += ead->S[qp].Cont[2][2];
+  //       total_qp++;
+  //     }
+  //   }
+    
+  //   PetscReal avg_S33 = (total_qp > 0) ? sum_S33 / total_qp : 0.0;
+  //   PetscPrintf(PETSC_COMM_SELF, "Average S33: %e (over %d QPs in %d elements)\n", avg_S33, total_qp, n_elmt);
+  // }
+  
   return 0;
 }
 

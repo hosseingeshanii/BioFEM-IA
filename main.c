@@ -340,7 +340,7 @@ int main(int argc, char **argv)
         
   
 	//LocationOut(&fem[ibi], ti, ibi);
-	if (outghost) {OutputGhost(&fem[ibi], ti, ibi);}
+	if (outghost) {OutputGhost(&fem[ibi], ti, ibi, subdir);}
       }
     }
   }// ti
@@ -349,7 +349,7 @@ int main(int argc, char **argv)
   for (ibi=0; ibi<nbody; ibi++) {
     // LocationOut(&fem[ibi], ti-1, ibi);
     //Output(&fem[ibi], ti, ibi);
-    if(outghost){OutputGhost(&fem[ibi], ti, ibi);}
+    if(outghost){OutputGhost(&fem[ibi], ti, ibi, subdir);}
     // PetscPrintf(PETSC_COMM_SELF, "Body %d Finished\n", ibi);
     Free(&fem[ibi]);
   }
@@ -524,6 +524,9 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
       PatchLoc(ibm);
       GhostLoc(fem);
     } else if (curvature==6) {
+      // EdgeDirectionalFix(0, 1, fem, R);
+      // EdgeDirectionalFix(3, 0, fem, R);
+      // EdgeFreeR(fem, R);
       GlobalGhost(ibm);
       GhostDirectionalFix(ibm, 0, 1);
       GhostDirectionalFix(ibm, 3, 0);
@@ -543,11 +546,11 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     FInternal(fem);
   }
   
-  if(tisteps>1) {FDynamic(fem);}
+  // if(tisteps>1) {FDynamic(fem);}
   FExternal(fem);
 
   VecWAXPY(R,-1., fem->Fext, fem->Fint);
-  VecAXPY(R,1., fem->Fdyn);
+  // VecAXPY(R,1., fem->Fdyn);
 
   //---------2d case
   if(twod){
@@ -563,7 +566,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
 
   EdgeDirectionalFix(0, 1, fem, R);
   EdgeDirectionalFix(3, 0, fem, R);
-  EdgeFreeR(2, fem, R);
+  EdgeFreeR(fem, R);
   
   // GlobalGhost(ibm);
 
@@ -922,7 +925,7 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
     Output(fem, 0, ibi, subdir);
   }
   
-  if(outghost){OutputGhost(fem, 0, ibi);}
+  if(outghost){OutputGhost(fem, 0, ibi, subdir);}
   
   return(0);
 }

@@ -831,7 +831,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi) {
+PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
 
   PetscInt   n_cells=3, i;
   IBMNodes   *ibm=fem->ibm;
@@ -843,8 +843,17 @@ PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi) {
   FILE  *f;
   char  filen[80];
 
-  sprintf(filen, "surfaceghost%2.2d_%5.5d.vtk", ibi, ti);
-  f = fopen(filen, "w"); // open file
+  // Use current directory if subdir is NULL or empty
+  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Create directory if it doesn't exist
+  mkdir(dir, 0777);
+
+  // Construct the file path
+  snprintf(filen, sizeof(filen), "%s/surfaceghost%2.2d_%5.5d.vtk", dir, ibi, ti);
+  f = fopen(filen, "w"); // open file in specified directory
+  if (!f) {
+      SETERRQ1(PETSC_COMM_WORLD, PETSC_ERR_FILE_OPEN, "Cannot open file: %s", filen);
+  }
 
   PetscFPrintf(PETSC_COMM_WORLD, f, "# vtk DataFile Version 2.0\n");
   PetscFPrintf(PETSC_COMM_WORLD, f, "Surface Grid\n");

@@ -187,7 +187,7 @@ PetscErrorCode FExternal(FE *fem) {
     PetscReal stepP  = 1.e5;    /* increase per interval */
     PetscInt  interval = 10;    /* timesteps between increases */
     PetscReal P = startP + (PetscReal)(ti/interval)*stepP;
-    EdgeConstPressure(1, 1e5, 0, fem);
+    EdgeConstPressure(1, 9e5, 0, fem);
   }
   // EdgeConstPressure(3, -9e5, 0, fem);
 
