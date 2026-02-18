@@ -29,23 +29,47 @@ PetscErrorCode Dimension(IBMNodes *ibm, PetscInt ibi) {
  
   char  string[128];
   FILE  *fd;
-  char  filen[80];
+  char  filen[256];
+
+  // PetscPrintf(PETSC_COMM_SELF, "[Dimension] in_dir = '%s', ibi=%d\n", in_dir, ibi);
 
   ibm->ibi = ibi;
-  sprintf(filen, "nlist%2.2d", ibi);
-  fd = fopen(filen, "r");
-  fscanf(fd, "%i", &ibm->n_v);
+  // PetscPrintf(PETSC_COMM_SELF, "[Dimension] in_dir dsdd= '%s', ibi=%d\n", in_dir, ibi);
 
-  sprintf(filen, "elist%2.2d", ibi);
+  snprintf(filen, sizeof(filen), "%s/nlist%2.2d", in_dir, ibi);
+  // PetscPrintf(PETSC_COMM_SELF, "[Dimension] Reading file '%s'\n", filen);
   fd = fopen(filen, "r");
+  // if (!fd) {
+  //   // PetscPrintf(PETSC_COMM_SELF, "[Dimension] ERROR: Failed to open '%s'\n", filen);
+  //   return PETSC_ERR_FILE_OPEN;
+  // }
+  // PetscPrintf(PETSC_COMM_SELF, "[Dimension] Successfully opened '%s'\n", filen);
+  fscanf(fd, "%i", &ibm->n_v);
+  // PetscPrintf(PETSC_COMM_SELF, "[Dimension] Number of vertices (n_v) = %d\n", ibm->n_v);
+  fclose(fd);
+
+  snprintf(filen, sizeof(filen), "%s/elist%2.2d", in_dir, ibi);
+  // PetscPrintf(PETSC_COMM_SELF, "[Dimension] Reading file '%s'\n", filen);
+
+  fd = fopen(filen, "r");
+  // if (!fd) {
+  //   // PetscPrintf(PETSC_COMM_SELF, "[Dimension] ERROR: Failed to open '%s'\n", filen);
+  //   return PETSC_ERR_FILE_OPEN;
+  // }
   fscanf(fd, "%i", &ibm->n_elmt);
+  fclose(fd);
   
-  sprintf(filen, "blist%2.2d", ibi);
+  snprintf(filen, sizeof(filen), "%s/blist%2.2d", in_dir, ibi);
   fd = fopen(filen, "r");
+  // if (!fd) {
+  //   // PetscPrintf(PETSC_COMM_SELF, "[Dimension] ERROR: Failed to open '%s'\n", filen);
+  //   return PETSC_ERR_FILE_OPEN;
+  // }
   fscanf(fd, "%i", &ibm->n_edge);
 
-  fgets(string,128, fd);// skip line one
+  fgets(string,128, fd);
   fscanf(fd, "%i", &ibm->n_ghosts);
+  fclose(fd);
 
   return(0);
 }

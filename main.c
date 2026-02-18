@@ -2,6 +2,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 
 #include "variables.h"
 #include "math.h"
+#include <stdio.h>
 #include <petscsystypes.h>  // Correct PETSc header for PetscBool type
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -83,6 +84,17 @@ int main(int argc, char **argv)
 {  
   PetscInitialize(&argc, &argv, (char*)0, help);
 
+  /* Try reading control.dat from -in_dir (if provided) and then from current dir */
+  PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-in_dir", in_dir, 255, PETSC_NULL);
+  {
+    char control_path[512];
+    if (in_dir[0] != '\0') {
+      snprintf(control_path, sizeof(control_path), "%s/%s", in_dir, "control.dat");
+      if (access(control_path, F_OK) == 0) {
+        PetscOptionsInsertFile(PETSC_COMM_WORLD, PETSC_NULL, control_path, PETSC_TRUE);
+      }
+    }
+  }
   PetscOptionsInsertFile(PETSC_COMM_WORLD, PETSC_NULL, "control.dat", PETSC_TRUE);
   
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-nbody", &nbody, PETSC_NULL);
@@ -151,8 +163,10 @@ int main(int argc, char **argv)
   PetscMalloc(nbody*sizeof(IBMNodes), &ibm);
     
   for (ibi=0; ibi<nbody; ibi++) { 
+  PetscPrintf(PETSC_COMM_SELF, "Initializing body %d \n", ibi);
   Dimension(&ibm[ibi], ibi);
   Create(&ibm[ibi], &fem[ibi], ibi);
+  PetscPrintf(PETSC_COMM_SELF, "Dimension of body %d is %d \n", ibi, ibm[ibi].n_v);
   Input(&ibm[ibi], ibi);
   Init(&fem[ibi], ibi);
 
