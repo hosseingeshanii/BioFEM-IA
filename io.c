@@ -10,6 +10,8 @@ extern PetscInt   dof, outghost, ConstitutiveLawNonLinear, contact, n_Fung_Coeff
 
 extern PetscReal  dt, char_length_x, char_length_y, char_length_z;
 
+extern char in_dir[256];
+
 extern PetscInt   ressmooth, inverse;
 extern PetscInt   Adam;
 extern PetscInt   par_jac;
@@ -320,10 +322,10 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
   PetscInt  i, ii, nc, ec, n_elmt, n_v=0;
   char      string[128];
   FILE      *fd;
-  char      filen[80];
+  char      filen[256];
   
   //--------------------------------------------Reading nodes list
-  sprintf(filen, "nlist%2.2d", ibi);
+  snprintf(filen, sizeof(filen), "%s/nlist%2.2d", in_dir, ibi);
   fd = fopen(filen, "r");
   fscanf(fd,"%i", &n_v);
   
@@ -360,7 +362,7 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
   PetscPrintf(PETSC_COMM_SELF, "Number of nodes of list (body:%d) %d \n", ibm->ibi, ibm->n_v);
   
   //------------------------------------------Reading elements list
-  sprintf(filen, "elist%2.2d", ibi);
+  snprintf(filen, sizeof(filen), "%s/elist%2.2d", in_dir, ibi);
   fd = fopen(filen, "r"); 
   fscanf(fd, "%i", &n_elmt);
   
@@ -387,7 +389,7 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
   PetscPrintf(PETSC_COMM_SELF, "Number of element of list(body:%d) %d \n", ibi, ibm->n_elmt);
 
   //--------------------------------------Reading Boundary nodes
-  sprintf(filen, "blist%2.2d", ibi);
+  snprintf(filen, sizeof(filen), "%s/blist%2.2d", in_dir, ibi);
   fd = fopen(filen, "r");
   PetscInt  n_edge, *bnodes;
   fscanf(fd, "%i", &n_edge);
@@ -831,7 +833,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
+PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {     
 
   PetscInt   n_cells=3, i;
   IBMNodes   *ibm=fem->ibm;

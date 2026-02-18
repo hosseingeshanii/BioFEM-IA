@@ -28,6 +28,7 @@ PetscInt   muscle_activation = 0;
 
 
 char subdir[256] = {"./"};
+char in_dir[256] = {"./"};
 PetscReal  learning_rate = 0.001;
 
 // Adam optimizer options 
@@ -134,6 +135,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-muscle_activation", &muscle_activation, PETSC_NULL);
   
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-subdir", subdir, 255, PETSC_NULL);
+  PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-in_dir", in_dir, 255, PETSC_NULL);
   
   PetscInt   ibi, k;
   PetscReal  tcyc=0.76, t, alpha[4];  alpha[0] = 0.25;  alpha[1] = 1./3.;  alpha[2] = 0.5;  alpha[3] = 1.0; 
