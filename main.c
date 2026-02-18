@@ -175,7 +175,7 @@ int main(int argc, char **argv)
   if (explicit)  {VecSet(fem[ibi].Mass, 0.0);  VecSet(fem[ibi].Dissip, 0.0);  MassDamp(&fem[ibi]);}
   if (tistart)  {
     
-    LocationIn(&fem[ibi], tistart, ibi);
+    LocationIn(&fem[ibi], tistart, ibi, subdir);
 
     }
   }
@@ -355,7 +355,7 @@ int main(int argc, char **argv)
         Output(&fem[ibi], ti+1, ibi, subdir);
         
   
-	//LocationOut(&fem[ibi], ti, ibi);
+	// LocationOut(&fem[ibi], ti+1, ibi, subdir);
 	if (outghost) {OutputGhost(&fem[ibi], ti, ibi, subdir);}
       }
     }
@@ -363,7 +363,7 @@ int main(int argc, char **argv)
   
   //Finish UP
   for (ibi=0; ibi<nbody; ibi++) {
-    // LocationOut(&fem[ibi], ti-1, ibi);
+    LocationOut(&fem[ibi], ti+1, ibi, subdir);
     //Output(&fem[ibi], ti, ibi);
     if(outghost){OutputGhost(&fem[ibi], ti, ibi, subdir);}
     // PetscPrintf(PETSC_COMM_SELF, "Body %d Finished\n", ibi);

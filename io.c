@@ -975,35 +975,40 @@ PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *subdi
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi) {
+PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
   
   IBMNodes     *ibm=fem->ibm;
   PetscViewer  viewer;
-  char         filen[80];
+  char         filen[256];
   PetscInt     fd;
 
-  sprintf(filen, "x%1.1d_%5.5d.dat", ibi, ti);
+  // Use current directory if subdir is NULL or empty
+  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Create directory if it doesn't exist
+  mkdir(dir, 0777);
+
+  snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->x, viewer);
   
-  sprintf(filen, "xn%1.1d_%5.5d.dat", ibi, ti);
+  snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->xn, viewer);
 
-  sprintf(filen, "xd%1.1d_%5.5d.dat", ibi, ti);
+  snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->xd, viewer);
   
-  sprintf(filen, "xdd%1.1d_%5.5d.dat", ibi, ti);
+  snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->xdd, viewer);
 
   if (contact) {
-    sprintf(filen, "fcnt%1.1d_%5.5d.dat", ibi, ti);
+    snprintf(filen, sizeof(filen), "%s/fcnt%1.1d_%5.5d.dat", dir, ibi, ti);
     PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
     VecView(fem->Fcnt, viewer);
     
-    sprintf(filen, "cnt%1.1d_%5.5d.dat", ibi, ti);
+    snprintf(filen, sizeof(filen), "%s/cnt%1.1d_%5.5d.dat", dir, ibi, ti);
     PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
     PetscViewerBinaryGetDescriptor(viewer,&fd);
     PetscBinaryWrite(fd,ibm->contact,ibm->n_v,PETSC_INT);
@@ -1149,44 +1154,47 @@ PetscErrorCode InverseIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir)
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi) {
+PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
 
   IBMNodes     *ibm=fem->ibm;
   PetscViewer  viewer;
-  char         filen[80];
+  char         filen[256];
   PetscInt     fd;
 
   PetscMPIInt rank;
   MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
 
-  sprintf(filen, "x%1.1d_%5.5d.dat", ibi, ti);
+  // Use current directory if subdir is NULL or empty
+  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+
+  snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
   // PetscPrintf(PETSC_COMM_SELF, "a PetscViewerBinaryOpen fun ran for body:%d on rank %d\n", ibi, rank);
 
   VecLoad(fem->x, viewer);
   // PetscPrintf(PETSC_COMM_SELF, "a VecLoad fun ran for body:%d on rank %d\n", ibi, rank);
 
-  sprintf(filen, "xn%1.1d_%5.5d.dat", ibi, ti);
+  snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
   // PetscPrintf(PETSC_COMM_SELF, "b PetscViewerBinaryOpen fun ran for body:%d on rank %d\n", ibi, rank);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
   // PetscPrintf(PETSC_COMM_SELF, "a PetscViewerBinaryOpen xn fun ran for body:%d on rank %d\n", ibi, rank);
   VecLoad(fem->xn,viewer);
   // PetscPrintf(PETSC_COMM_SELF, "a VecLoad xn fun ran for body:%d on rank %d\n", ibi, rank);
 
-  sprintf(filen, "xd%1.1d_%5.5d.dat", ibi, ti);
+  snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
   VecLoad(fem->xd,viewer);
 
-  sprintf(filen, "xdd%1.1d_%5.5d.dat", ibi, ti);
+  snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
   VecLoad(fem->xdd,viewer);
 
   if (contact) {
-    sprintf(filen, "fcnt%1.1d_%5.5d.dat", ibi, ti);
+    snprintf(filen, sizeof(filen), "%s/fcnt%1.1d_%5.5d.dat", dir, ibi, ti);
     PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
     VecLoad(fem->Fcnt,viewer);
     
-    sprintf(filen, "cnt%1.1d_%5.5d.dat", ibi, ti);
+    snprintf(filen, sizeof(filen), "%s/cnt%1.1d_%5.5d.dat", dir, ibi, ti);
     PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
     PetscViewerBinaryGetDescriptor(viewer,&fd);
     PetscBinaryRead(fd,ibm->contact,ibm->n_v, PETSC_NULL, PETSC_INT);
