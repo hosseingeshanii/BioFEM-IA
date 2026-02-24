@@ -1062,7 +1062,7 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
     {
         Fa_cart[0][0] = 1.0 - gamma;
         Fa_cart[1][1] = 1.0 - gamma;
-        Fa_cart[2][2] = 1.0;
+        Fa_cart[2][2] = 1.0/(Fa_cart[0][0]*Fa_cart[1][1]);
     }
         // PrintMat3x3("Fa_cart", Fa_cart);
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
@@ -1860,7 +1860,24 @@ PetscErrorCode FInternalPreCalc(FE *fem) {
   //   PetscReal avg_S33 = (total_qp > 0) ? sum_S33 / total_qp : 0.0;
   //   PetscPrintf(PETSC_COMM_SELF, "Average S33: %e (over %d QPs in %d elements)\n", avg_S33, total_qp, n_elmt);
   // }
-  
+  {
+    IBMNodes *ibm = fem->ibm;
+    PetscInt n_elmt = ibm->n_elmt;
+    PetscInt n_qp = fem->act_data.n_qp;
+    PetscReal sum_C33 = 0.0;
+    PetscInt total_qp = 0;
+
+    for (PetscInt ec = 0; ec < n_elmt; ec++) {
+      ElemActData *ead = &fem->act_data.elem_act_data[ec];
+      for (PetscInt qp = 0; qp < n_qp; qp++) {
+        sum_C33 += ead->C[qp].Cov[2][2];
+        total_qp++;
+      }
+    }
+
+    PetscReal avg_C33 = (total_qp > 0) ? sum_C33 / total_qp : 0.0;
+    PetscPrintf(PETSC_COMM_SELF, "Average C33: %e (over %d QPs in %d elements)\n", (double)avg_C33, total_qp, n_elmt);
+  }
   return 0;
 }
 
@@ -1914,9 +1931,12 @@ PetscErrorCode FInternalAct(FE *fem){
         
       }
     } 
+    /* free element-local force vector */
+    ierr = PetscFree(Fb); CHKERRQ(ierr);
   }
 
   VecRestoreArray(fem->Fint, &FF); 
+  return(0);
 }
 
 // PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec,

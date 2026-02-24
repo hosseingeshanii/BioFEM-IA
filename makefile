@@ -14,6 +14,7 @@ endif
 
 
 OPENMP_FLAGS = -fopenmp
+SAN_FLAGS    = -O0 -g3 -fno-omit-frame-pointer -fsanitize=address,undefined
 
 CFLAGS      +=  ${OPENMP_FLAGS}
 LIBS        +=  ${OPENMP_FLAGS}
@@ -40,6 +41,10 @@ LIBBASE = libpetscmat
 
 testt: ${OBJSC}
 	-$(CLINKER) -o testt ${CFLAGS} ${OBJSC} ${PETSC_LIB} ${LIBS}
+
+asan: CFLAGS += ${SAN_FLAGS}
+asan: LIBS += -fsanitize=address,undefined
+asan: cleanobj testt
 
 
 cleanobj:

@@ -152,7 +152,7 @@ int main(int argc, char **argv)
   PetscInt   ibi, k;
   PetscReal  tcyc=0.76, t, alpha[4];  alpha[0] = 0.25;  alpha[1] = 1./3.;  alpha[2] = 0.5;  alpha[3] = 1.0; 
   SNES       snes;  
-  Mat        J; 
+  Mat        J = NULL; 
   FE         *fem; 
   IBMNodes   *ibm;
 
@@ -170,7 +170,7 @@ int main(int argc, char **argv)
   Input(&ibm[ibi], ibi);
   Init(&fem[ibi], ibi);
 
-  ContactZ(&fem[ibi]);
+  // ContactZ(&fem[ibi]);
 
   if (explicit)  {VecSet(fem[ibi].Mass, 0.0);  VecSet(fem[ibi].Dissip, 0.0);  MassDamp(&fem[ibi]);}
   if (tistart)  {
@@ -290,13 +290,16 @@ int main(int argc, char **argv)
         
         /* Only destroy if SNESSolve didn't corrupt the object */
         if (snes != NULL) {
-            PetscErrorCode destroy_ierr = SNESDestroy(&snes);
-            if (destroy_ierr != 0) {
-                PetscPrintf(PETSC_COMM_SELF, " WARNING: SNESDestroy failed with ierr = %d\n", destroy_ierr);
-            } else {
-                // PetscPrintf(PETSC_COMM_SELF, " after SNESDestroy\n");
-            }
+          PetscErrorCode destroy_ierr = SNESDestroy(&snes);
+          if (destroy_ierr != 0) {
+            PetscPrintf(PETSC_COMM_SELF, " WARNING: SNESDestroy failed with ierr = %d\n", destroy_ierr);
+          } else {
+            // PetscPrintf(PETSC_COMM_SELF, " after SNESDestroy\n");
+          }
         }
+
+        /* Destroy the Jacobian matrix created by MatCreateSNESMF */
+        MatDestroy(&J);
 
         VecDestroy(&U);
 
@@ -369,6 +372,8 @@ int main(int argc, char **argv)
     // PetscPrintf(PETSC_COMM_SELF, "Body %d Finished\n", ibi);
     Free(&fem[ibi]);
   }
+  PetscFree(fem);
+  PetscFree(ibm);
   // PetscPrintf(PETSC_COMM_SELF, "Parallel Jacobian Computation %d\n", rank);
 
   PetscBarrier(PETSC_NULL);  
@@ -971,7 +976,7 @@ PetscErrorCode Free(FE *fem) {
   PetscFree(ibm->x_bp0);  PetscFree(ibm->y_bp0);  PetscFree(ibm->z_bp0);
   PetscFree(ibm->nv1);  PetscFree(ibm->nv2);  PetscFree(ibm->nv3);
   PetscFree(ibm->nv4);  PetscFree(ibm->nv5);  PetscFree(ibm->nv6);
-  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->kve0); 
+  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->kve0); 
   PetscFree(ibm->kve);  PetscFree(fem->StressM);  PetscFree(fem->StrainM);   PetscFree(fem->IE);  PetscFree(fem->CE);  PetscFree(fem->KE);  PetscFree(ibm->m); 
   PetscFree(fem->FC); 
   PetscFree(fem->StressB);  PetscFree(fem->StrainB);

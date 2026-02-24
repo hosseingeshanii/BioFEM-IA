@@ -113,12 +113,12 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   PetscMalloc((dof + 2)*ibm->n_elmt*sizeof(PetscReal), &(fem->StrainM)); // 2 extra for adding principal in-plane strains 
   PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(fem->StressB)); 
   PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(fem->StrainB));
-  PetscMalloc(ibm->n_v*sizeof(PetscReal), &(fem->IE));
+  PetscCalloc1(ibm->n_v, &(fem->IE));
 
 
-  PetscMalloc(ibm->n_v*sizeof(PetscReal), &(fem->CE));
-  PetscMalloc(ibm->n_v*sizeof(PetscReal), &(ibm->m));
-  PetscMalloc(ibm->n_v*sizeof(PetscReal), &(fem->KE));
+  PetscCalloc1(ibm->n_v, &(fem->CE));
+  PetscCalloc1(ibm->n_v, &(ibm->m));
+  PetscCalloc1(ibm->n_v, &(fem->KE));
   PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(fem->FC));
 
   PetscMalloc((ibm->n_elmt + 2*ibm->n_ghosts)*sizeof(PetscReal), &(ibm->dA0));
@@ -284,7 +284,7 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   PetscMalloc(ibm->n_elmt*sizeof(PetscInt), &(ibm->irv));
   PetscMalloc(ibm->n_elmt*sizeof(PetscInt), &(ibm->val));
 
-  PetscMalloc((ibm->n_v + ibm->n_ghosts)*sizeof(PetscInt), &(ibm->contact));
+  PetscCalloc1(ibm->n_v + ibm->n_ghosts, &(ibm->contact));
 
   PetscMalloc(16*ibm->n_elmt*sizeof(PetscInt), &(ibm->patch));
   PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(ibm->G));
@@ -990,18 +990,22 @@ PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi, const char *subdi
   snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->x, viewer);
+  PetscViewerDestroy(&viewer);
   
   snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->xn, viewer);
+  PetscViewerDestroy(&viewer);
 
   snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->xd, viewer);
+  PetscViewerDestroy(&viewer);
   
   snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
   VecView(fem->xdd, viewer);
+  PetscViewerDestroy(&viewer);
 
   if (contact) {
     snprintf(filen, sizeof(filen), "%s/fcnt%1.1d_%5.5d.dat", dir, ibi, ti);
@@ -1193,11 +1197,13 @@ PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir
     snprintf(filen, sizeof(filen), "%s/fcnt%1.1d_%5.5d.dat", dir, ibi, ti);
     PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
     VecLoad(fem->Fcnt,viewer);
+    PetscViewerDestroy(&viewer);
     
     snprintf(filen, sizeof(filen), "%s/cnt%1.1d_%5.5d.dat", dir, ibi, ti);
     PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
     PetscViewerBinaryGetDescriptor(viewer,&fd);
     PetscBinaryRead(fd,ibm->contact,ibm->n_v, PETSC_NULL, PETSC_INT);
+    PetscViewerDestroy(&viewer);
   }
 
   PetscInt   nv, ec;
