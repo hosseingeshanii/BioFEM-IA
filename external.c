@@ -62,6 +62,7 @@ PetscErrorCode ConstantVel(PetscReal vel, PetscInt dir, FE *fem)
 //------------------------------------------------------------------------------------------------------------
 
 PetscErrorCode EdgeConstPressure(PetscInt edge_n, PetscReal P, PetscInt dir, FE *fem) {
+  PetscFunctionBeginUser;
 
   IBMNodes *ibm=fem->ibm;
   PetscInt start=0, end=0, edge, i, *cbn, *sortbn, nb, ii;
@@ -98,7 +99,7 @@ PetscErrorCode EdgeConstPressure(PetscInt edge_n, PetscReal P, PetscInt dir, FE 
 
   PetscFree(cbn);  PetscFree(sortbn);
 
-  return(0);
+  PetscFunctionReturn(0);
 }
 
 //------------------------------------------------------------------------------------------------------------ 
@@ -182,7 +183,7 @@ PetscErrorCode EdgeFix(PetscInt edge_n, FE *fem) {
   VecRestoreArray(fem->Fext, &FFext);
   VecRestoreArray(fem->x, &xx);
   VecRestoreArray(fem->xd, &xdd);
-  return(0);
+  PetscFunctionReturn(0);
 }
 
 //------------------------------------------------------------------------------------------------------------ 
@@ -1648,7 +1649,7 @@ PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem, Vec R)
   PetscFunctionBeginUser;
 
   IBMNodes   *ibm=fem->ibm;
-  PetscReal  *FFint, *FFext, *FFdyn, *xx, *xdd;
+  PetscErrorCode ierr;
   PetscReal  *RRes;
   PetscInt   start=0, end=0, edge, nbc, nb;
 
@@ -1658,9 +1659,7 @@ PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem, Vec R)
   start = end - ibm->n_bnodes[edge_n];
   
 
-  VecGetArray(R, &RRes);
-  VecGetArray(fem->x, &xx);
-  VecGetArray(fem->xd, &xdd);
+  ierr = VecGetArray(R, &RRes); CHKERRQ(ierr);
 
   for (nbc=start; nbc<end; nbc++) { //fix boundary nodes
     nb=ibm->bnodes[nbc];
@@ -1698,15 +1697,11 @@ PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem, Vec R)
                 "Direction must be between 0 and 2");
     }
 
-    ibm->contact[nb] = 0;
-
   }
 
 
-  VecRestoreArray(R, &RRes);
-  VecRestoreArray(fem->x, &xx);
-  VecRestoreArray(fem->xd, &xdd);
-  return(0);
+  ierr = VecRestoreArray(R, &RRes); CHKERRQ(ierr);
+  PetscFunctionReturn(0);
 }
 
 PetscErrorCode EdgeFreeR(FE *fem, Vec R) {

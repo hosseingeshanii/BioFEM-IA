@@ -183,8 +183,9 @@ int main(int argc, char **argv)
   if (muscle_activation){
 
     for (ibi=0; ibi<nbody; ibi++) { 
+      PetscErrorCode ierr;
       
-      InitActStrainProblem(&fem[ibi]);
+      ierr = InitActStrainProblem(&fem[ibi]); CHKERRQ(ierr);
       PetscPrintf(PETSC_COMM_SELF, "Active-Strain problem got initiliazed. \n");
       
       // ActDataDestroy(&fem[ibi]); // Just to check no memory leak in allocation
@@ -270,8 +271,9 @@ int main(int argc, char **argv)
 	   -fem_snes_max_it 20
 	   -fem_snes_monitor
 	   #-fem_ksp_type fgmres	 */
-	      Vec U;
-        PetscErrorCode ierr;
+		      Vec U;
+	        PetscErrorCode ierr;
+	        SNESConvergedReason reason;
         VecDuplicate(fem[ibi].x, &U);
         VecCopy(fem[ibi].x, U);
         
@@ -284,9 +286,37 @@ int main(int argc, char **argv)
         SNESSetJacobian(snes, J, J, NULL, (void *)&fem[ibi]);
         SNESSetFromOptions(snes);      
 
-        ierr = SNESSolve(snes, PETSC_NULL, U);
-        
-        VecCopy(U, fem[ibi].x);
+	        ierr = SNESSolve(snes, PETSC_NULL, U);
+	        if (ierr) {
+	          PetscPrintf(PETSC_COMM_SELF,
+	                      "SNESSolve failed with ierr=%d for body %d at step %d\n",
+	                      (int)ierr, (int)ibi, (int)ti);
+	          SNESDestroy(&snes);
+	          MatDestroy(&J);
+	          VecDestroy(&U);
+	          PetscFinalize();
+	          return (int)ierr;
+	        }
+
+	        ierr = SNESGetConvergedReason(snes, &reason);
+	        if (ierr) {
+	          PetscPrintf(PETSC_COMM_SELF,
+	                      "SNESGetConvergedReason failed with ierr=%d for body %d at step %d\n",
+	                      (int)ierr, (int)ibi, (int)ti);
+	          SNESDestroy(&snes);
+	          MatDestroy(&J);
+	          VecDestroy(&U);
+	          PetscFinalize();
+	          return (int)ierr;
+	        }
+
+	        if (reason >= 0) {
+	          VecCopy(U, fem[ibi].x);
+	        } else {
+	          PetscPrintf(PETSC_COMM_SELF,
+	                      "Skipping solution update because SNES diverged (reason=%d) for body %d at step %d\n",
+	                      (int)reason, (int)ibi, (int)ti);
+	        }
         
         /* Only destroy if SNESSolve didn't corrupt the object */
         if (snes != NULL) {
@@ -393,6 +423,7 @@ PetscErrorCode FormRK(Vec R, Vec x, Vec xn, Vec y, Vec yn, PetscReal alpha, FE *
 
   //y=dx/dt  
   IBMNodes   *ibm=fem->ibm;
+  PetscErrorCode ierr;
   PetscReal  *xx, *RR, *RRes, *FF;
   PetscInt   nv;
   Vec        w1, w2;
@@ -449,7 +480,7 @@ PetscErrorCode FormRK(Vec R, Vec x, Vec xn, Vec y, Vec yn, PetscReal alpha, FE *
   VecSet(R, 0.0);  VecSet(fem->FJ, 0.0); 
 
   FInternal(fem);
-  FExternal(fem);
+  ierr = FExternal(fem); CHKERRQ(ierr);
 
   VecWAXPY(R, -1., fem->Fint, fem->Fext);
   
@@ -511,12 +542,13 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   IBMNodes   *ibm=fem->ibm;
   Mat        Jmat = NULL;
   PetscErrorCode ierr;
-  PetscReal  *xx,*RR, *RRes,*FF;
+  const PetscReal *xx;
+  PetscReal  *RR, *RRes,*FF;
   PetscInt   nv, ec;
 
  
   //---------Update the location
-  VecGetArray(x, &xx);
+  ierr = VecGetArrayRead(x, &xx); CHKERRQ(ierr);
 
   
   for (nv=0; nv<ibm->n_v + ibm->n_ghosts; nv++) {
@@ -531,7 +563,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
       if(twod){ibm->z_bp[nv] = ibm->z_bp0[nv];}  //2d case
     /* } */
   }
-  VecRestoreArray(x, &xx);
+  ierr = VecRestoreArrayRead(x, &xx); CHKERRQ(ierr);
 
   VecCopy(x, fem->x);
 
@@ -561,33 +593,33 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
 
   if (muscle_activation){
-    FInternalAct(fem);    
+    ierr = FInternalAct(fem); CHKERRQ(ierr);
   }
   else{
     FInternal(fem);
   }
   
   // if(tisteps>1) {FDynamic(fem);}
-  FExternal(fem);
+  ierr = FExternal(fem); CHKERRQ(ierr);
 
   VecWAXPY(R,-1., fem->Fext, fem->Fint);
   // VecAXPY(R,1., fem->Fdyn);
 
   //---------2d case
-  if(twod){
-    VecGetArray(fem->x, &xx);
-    VecGetArray(R, &RR);
-    for (nv=0; nv<ibm->n_v; nv++) {
-      xx[nv*dof+2]=ibm->z_bp0[nv];
-      RR[nv*dof+2]=0.0;
-    }
-    VecRestoreArray(R, &RR);
-    VecRestoreArray(fem->x, &xx);
-  }
+  // if(twod){
+  //   VecGetArray(fem->x, &xx);
+  //   VecGetArray(R, &RR);
+  //   for (nv=0; nv<ibm->n_v; nv++) {
+  //     xx[nv*dof+2]=ibm->z_bp0[nv];
+  //     RR[nv*dof+2]=0.0;
+  //   }
+  //   VecRestoreArray(R, &RR);
+  //   VecRestoreArray(fem->x, &xx);
+  // }
 
-  EdgeDirectionalFix(0, 1, fem, R);
-  EdgeDirectionalFix(3, 0, fem, R);
-  EdgeFreeR(fem, R);
+  ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
+  ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);
   
   // GlobalGhost(ibm);
 
