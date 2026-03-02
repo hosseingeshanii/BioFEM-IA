@@ -822,7 +822,7 @@ PetscErrorCode InvSolver(FE *fem){
   */
 
   PetscInt ibi, epoch;
-  PetscReal best_loss = INFINITY;  // Track the best (lowest) loss
+  PetscReal best_loss = PETSC_MAX_REAL;  // Track the best (lowest) loss
   PetscReal improvement_threshold = 1e-4; // Minimum change in loss to consider as improvement
   PetscInt epochs_no_improvement = 0; // Counter for epochs without improvement
   PetscInt patience = 5;             // Number of epochs with no improvement to wait before decaying

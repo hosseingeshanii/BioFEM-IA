@@ -5,3 +5,8 @@ ml PETSc/3.12.4-Python-3.8.2
 export PATH="/scratch/user/hgeshani/.conda/envs/pyt/bin:$PATH"
 export PYTHONPATH=/scratch/user/hgeshani/.conda/envs/pyt/lib/python3.11/site-packages:$PYTHONPATH
 export LD_LIBRARY_PATH=/scratch/user/hgeshani/.conda/envs/pyt/lib:$LD_LIBRARY_PATH
+
+Build and run:
+
+make testt
+./build/testt

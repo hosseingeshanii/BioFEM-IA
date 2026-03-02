@@ -356,7 +356,7 @@ PetscPrintf(PETSC_COMM_SELF,
 PetscFunctionReturn(ierr);
 }
 
-PetscErrorCode DebugPrintGeomForElement(FE *fem, PetscInt ec)
+static PetscErrorCode DebugPrintGeomForElement(FE *fem, PetscInt ec)
 {
   PetscFunctionBeginUser;
   PetscErrorCode ierr = 0;

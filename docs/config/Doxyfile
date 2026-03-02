@@ -1,0 +1,91 @@
+#------------------------- Project -------------------------
+PROJECT_NAME           = "BioFEM"            # change to your repo name
+PROJECT_NUMBER         = "0.1.0"
+PROJECT_BRIEF          = "Finite-element / biomechanics utilities (PETSc + muscle activation + active strain)"
+
+# Put generated docs here (PICurv-style)
+OUTPUT_DIRECTORY       = ../../docs_build
+CREATE_SUBDIRS         = NO
+OUTPUT_LANGUAGE        = English
+OPTIMIZE_OUTPUT_FOR_C  = YES
+MARKDOWN_SUPPORT       = YES
+USE_MDFILE_AS_MAINPAGE = ../../README
+
+#------------------------- Input ---------------------------
+# Scan source layout directly.
+INPUT                  = ../../README ../../include ../../src ../../examples ../pages
+
+FILE_PATTERNS          = *.h *.hpp *.c *.cc *.cpp *.md *.py *.sh *.txt
+RECURSIVE              = YES
+
+# Don’t scan build artifacts / generated / large output folders
+EXCLUDE_PATTERNS       = */obj/* */bin/* */build/* */docs_build/* */html/* */*.o
+
+# If you have a lot of third-party stuff later, add it here
+EXCLUDE                =
+
+# What to extract
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+
+# Make brief docs easier
+JAVADOC_AUTOBRIEF      = YES
+MULTILINE_CPP_IS_BRIEF = YES
+QT_AUTOBRIEF           = YES
+
+#------------------------- Warnings ------------------------
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_LOGFILE           = ../../docs_build/doxygen.warnings
+
+#------------------------- Diagrams ------------------------
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 4
+CLASS_DIAGRAMS         = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+DOT_MULTI_TARGETS      = YES
+GENERATE_LEGEND        = YES
+DOT_TRANSPARENT        = YES
+DOT_GRAPH_MAX_NODES    = 80
+
+#------------------------- HTML ----------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_DYNAMIC_MENUS     = YES
+SEARCHENGINE           = YES
+
+# Optional theming (only if you create these files)
+# HTML_EXTRA_STYLESHEET  = ../custom.css
+# HTML_EXTRA_FILES       = ../theme-sync.js
+# IMAGE_PATH             = ../assets
+
+#------------------------- LaTeX/PDF (optional) ------------
+GENERATE_LATEX         = NO
+
+#------------------------- Source Browsing -----------------
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+STRIP_CODE_COMMENTS    = NO
+SHOW_FILES             = YES
+SHOW_USED_FILES        = YES
+FULL_PATH_NAMES        = NO
+
+#------------------------- Preprocessor --------------------
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+
+# If PETSc macros confuse parsing, you can add:
+# PREDEFINED            = PETSC_EXTERN= extern "C"
+
+#------------------------- Layout (optional) ----------------
+# If you want PICurv-style nav/layout customization, generate this once:
+# doxygen -l docs/config/DoxygenLayout.xml
+# then:
+# LAYOUT_FILE           = DoxygenLayout.xml

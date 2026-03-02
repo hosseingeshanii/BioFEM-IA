@@ -51,7 +51,7 @@ PetscInt   epoch;
 PetscReal decay_factor = 0.5;    // Factor by which to reduce the learning rate
 PetscInt  patience = 5;             // Number of epochs with no improvement to wait before decaying
 PetscReal improvement_threshold = 1e-4; // Minimum change in loss to consider as improvement
-PetscReal best_loss = INFINITY;  // Track the best (lowest) loss
+PetscReal best_loss = PETSC_MAX_REAL;  // Track the best (lowest) loss
 PetscInt  epochs_no_improvement = 0; // Counter for epochs without improvement
 
 PetscInt fibersmooth = 0;

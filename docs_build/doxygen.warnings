@@ -1,0 +1,9 @@
+warning: source '/scratch/user/hgeshani/Research/BioFEM-IA/examples/mesh_Lx1.2_Ly0.9_nx13_ny10/testt' is not a readable file or directory... skipping.
+warning: source '../pages' is not a readable file or directory... skipping.
+/scratch/user/hgeshani/Research/BioFEM-IA/src/muscle_activation.c:83: warning: Found unknown command '@detailsno'
+/scratch/user/hgeshani/Research/BioFEM-IA/include/active_strain.h:70: warning: argument 'n_elems' of command @param is not found in the argument list of UpdateElements(FE *fem, ElemFunc func)
+/scratch/user/hgeshani/Research/BioFEM-IA/include/muscle_activation.h:36: warning: The following parameter of compute_active_Fa_element(FE *fem, PetscInt ec) is not documented:
+  parameter 'fem'
+/scratch/user/hgeshani/Research/BioFEM-IA/include/muscle_activation.h:42: warning: argument fem from the argument list of update_act_Fa has multiple @param documentation sections
+/scratch/user/hgeshani/Research/BioFEM-IA/include/muscle_activation.h:67: warning: argument fem from the argument list of update_intmd_state_cov_basis has multiple @param documentation sections
+/scratch/user/hgeshani/Research/BioFEM-IA/include/muscle_activation.h:22: warning: argument fem from the argument list of update_user_act_params has multiple @param documentation sections

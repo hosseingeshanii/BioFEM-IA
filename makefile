@@ -1,7 +1,13 @@
 include ${PETSC_DIR}/lib/petsc/conf/variables
 include ${PETSC_DIR}/lib/petsc/conf/rules
 
-ALL: testt 
+SRCDIR      = src
+INCDIR      = include
+BUILDDIR    = build
+OBJDIR      = ${BUILDDIR}/obj
+TEST_EXE    = ${BUILDDIR}/testt
+
+ALL: testt
 
 ifdef TEC360HOME
 CFLAGS       = -I${TEC360HOME}/include/ -DTECIO=1
@@ -18,6 +24,7 @@ SAN_FLAGS    = -O0 -g3 -fno-omit-frame-pointer -fsanitize=address,undefined
 
 CFLAGS      +=  ${OPENMP_FLAGS}
 LIBS        +=  ${OPENMP_FLAGS}
+CFLAGS      += -I${INCDIR}
 
 
 CLINKER     = mpicc
@@ -30,17 +37,33 @@ MANSEC       = SNES
 
 LIBFLAG      =
 
-SOURCEC = main.c io.c membrane.c math.c external.c bending.c material.c bcs.c contact.c inverse.c active_strain.c
+SOURCEC = \
+	${SRCDIR}/main.c \
+	${SRCDIR}/io.c \
+	${SRCDIR}/membrane.c \
+	${SRCDIR}/math.c \
+	${SRCDIR}/external.c \
+	${SRCDIR}/bending.c \
+	${SRCDIR}/material.c \
+	${SRCDIR}/bcs.c \
+	${SRCDIR}/contact.c \
+	${SRCDIR}/inverse.c \
+	${SRCDIR}/active_strain.c
 
-OBJSC = main.o io.o membrane.o math.o external.o bending.o material.o bcs.o contact.o inverse.o active_strain.o
+OBJSC = ${patsubst ${SRCDIR}/%.c,${OBJDIR}/%.o,${SOURCEC}}
 
 LIBBASE = libpetscmat
 
+${OBJDIR}/%.o: ${SRCDIR}/%.c | ${OBJDIR}
+	$(CLINKER) -c ${CFLAGS} ${CPPFLAGS} $< -o $@
 
+${OBJDIR}:
+	mkdir -p ${OBJDIR}
 
+${TEST_EXE}: ${OBJSC}
+	-$(CLINKER) -o ${TEST_EXE} ${CFLAGS} ${OBJSC} ${PETSC_LIB} ${LIBS}
 
-testt: ${OBJSC}
-	-$(CLINKER) -o testt ${CFLAGS} ${OBJSC} ${PETSC_LIB} ${LIBS}
+testt: ${TEST_EXE}
 
 asan: CFLAGS += ${SAN_FLAGS}
 asan: LIBS += -fsanitize=address,undefined
@@ -48,6 +71,6 @@ asan: cleanobj testt
 
 
 cleanobj:
-	rm -f *.o testt
+	rm -rf ${BUILDDIR} *.o testt
 
 include ${PETSC_DIR}/lib/petsc/conf/test
