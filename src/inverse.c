@@ -6,7 +6,7 @@
 extern PetscInt   dof, bending, ConstitutiveLawNonLinear, curvature, manufactured, n_Fung_Coeffs, n_lin_model_coeffs, tisteps, twod, uniform_fiber_dir;
 extern PetscReal  decay_factor, learning_rate;
 extern PetscInt   nbody, tistart, epoch_start, n_epochs, epoch_output, uniform_fung, epoch_update_jacobian, Adam;
-extern char subdir[];
+extern char out_dir[];
 
 extern PetscInt   ressmooth, fibersmooth;
 extern PetscInt   res_smooth_itrs;
@@ -839,7 +839,7 @@ PetscErrorCode InvSolver(FE *fem){
   FILE **fp = malloc(nbody * sizeof(FILE *));  // Allocate memory for file pointers
 
   char filepath[256];  
-  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   
   for (ibi=0; ibi<nbody; ibi++){
 
@@ -896,7 +896,7 @@ PetscErrorCode InvSolver(FE *fem){
       IBMNodes   *ibm=fem[ibi].ibm;    
 
       if (epoch_start != 0){
-        InverseIn(&fem[ibi], tistart+epoch_start, ibi, subdir);
+        InverseIn(&fem[ibi], tistart+epoch_start, ibi, out_dir);
       }
       else{
         if (ConstitutiveLawNonLinear){
@@ -1105,10 +1105,10 @@ PetscErrorCode InvSolver(FE *fem){
         VecRestoreArray(fem[ibi].Res, &RRes);  
 
         if ((epoch%epoch_output==0) && (!rank)){
-          Output(&fem[ibi], tistart+epoch, ibi, subdir);
-          InverseOut(&fem[ibi], tistart+epoch, ibi, subdir);  
+          Output(&fem[ibi], tistart+epoch, ibi, out_dir);
+          InverseOut(&fem[ibi], tistart+epoch, ibi, out_dir);  
           // if (epoch == n_epochs+epoch_start-1){
-            // InverseOut(&fem[ibi], tistart+epoch, ibi, subdir);  
+            // InverseOut(&fem[ibi], tistart+epoch, ibi, out_dir);  
           // }
         }
 

@@ -1,0 +1,782 @@
+active_strain.c:  IBMNodes        *ibm = fem->ibm;
+active_strain.c:  fem->act_data.muscle_act_params.gamma = gamma;
+active_strain.c:  PetscCall(VecGetArray(fem->x, &xx));
+active_strain.c:  PetscCall(VecGetArray(fem->xn, &xxn));
+active_strain.c:  PetscCall(VecGetArray(fem->xnm1, &xxnm1));
+active_strain.c:  PetscCall(VecGetArray(fem->xd, &xxd));
+active_strain.c:  PetscCall(VecGetArray(fem->xdd, &xxdd));
+active_strain.c:  PetscCall(VecGetArray(fem->y, &yy));
+active_strain.c:  PetscCall(VecGetArray(fem->yn, &yyn));
+active_strain.c:  PetscCall(VecGetArray(fem->dx, &dxx));
+active_strain.c:  PetscCall(VecRestoreArray(fem->dx, &dxx));
+active_strain.c:  PetscCall(VecRestoreArray(fem->yn, &yyn));
+active_strain.c:  PetscCall(VecRestoreArray(fem->y, &yy));
+active_strain.c:  PetscCall(VecRestoreArray(fem->xdd, &xxdd));
+active_strain.c:  PetscCall(VecRestoreArray(fem->xd, &xxd));
+active_strain.c:  PetscCall(VecRestoreArray(fem->xnm1, &xxnm1));
+active_strain.c:  PetscCall(VecRestoreArray(fem->xn, &xxn));
+active_strain.c:  PetscCall(VecRestoreArray(fem->x, &xx));
+active_strain.c:    // UserCtx  *userctx = &fem->userctx;    
+active_strain.c:    PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
+active_strain.c:    PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
+active_strain.c:    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);    
+active_strain.c:    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-bulk_modulus", &(fem->act_data.K), PETSC_NULL);
+active_strain.c:    fem->act_data.mu = mu;
+active_strain.c:  ActData *act = &fem->act_data;
+active_strain.c:  PetscInt nelem = fem->ibm->n_elmt;
+active_strain.c:    for (PetscInt i = 0; i < fem->act_data.n_qp; i++) {
+active_strain.c:        fem->act_data.theta[i] = 0.0;
+active_strain.c:        fem->act_data.w[i] = 0.0;
+active_strain.c:    switch (fem->act_data.n_qp) {
+active_strain.c:        fem->act_data.theta[0] = 0.0;
+active_strain.c:        fem->act_data.w[0] = 2.0;
+active_strain.c:        fem->act_data.theta[0] = -0.5773502691896257;  // ±1/sqrt(3)
+active_strain.c:        fem->act_data.theta[1] =  0.5773502691896257;
+active_strain.c:        fem->act_data.w[0] = fem->act_data.w[1] = 1.0;
+active_strain.c:        fem->act_data.theta[0] = -0.7745966692414834;
+active_strain.c:        fem->act_data.theta[1] =  0.0;
+active_strain.c:        fem->act_data.theta[2] =  0.7745966692414834;
+active_strain.c:        fem->act_data.w[0] = fem->act_data.w[2] = 0.5555555555555556;
+active_strain.c:        fem->act_data.w[1] = 0.8888888888888888;
+active_strain.c:        fem->act_data.theta[0] = -0.8611363115940526;
+active_strain.c:        fem->act_data.theta[1] = -0.3399810435848563;
+active_strain.c:        fem->act_data.theta[2] =  0.3399810435848563;
+active_strain.c:        fem->act_data.theta[3] =  0.8611363115940526;
+active_strain.c:        fem->act_data.w[0] = fem->act_data.w[3] = 0.3478548451374538;
+active_strain.c:        fem->act_data.w[1] = fem->act_data.w[2] = 0.6521451548625461;
+active_strain.c:        fem->act_data.theta[0] = -0.9061798459386640;
+active_strain.c:        fem->act_data.theta[1] = -0.5384693101056831;
+active_strain.c:        fem->act_data.theta[2] =  0.0;
+active_strain.c:        fem->act_data.theta[3] =  0.5384693101056831;
+active_strain.c:        fem->act_data.theta[4] =  0.9061798459386640;
+active_strain.c:        fem->act_data.w[0] = fem->act_data.w[4] = 0.2369268850561891;
+active_strain.c:        fem->act_data.w[1] = fem->act_data.w[3] = 0.4786286704993665;
+active_strain.c:        fem->act_data.w[2] = 0.5688888888888889;
+active_strain.c:  ActData *act = &fem->act_data;
+active_strain.c:  PetscInt nelem = fem->ibm->n_elmt;
+active_strain.c:  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:  IBMNodes    *ibm = fem->ibm;
+active_strain.c:  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:  PetscCheck(ibm, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "fem->ibm is NULL");
+active_strain.c:  IBMNodes *ibm = fem->ibm;
+active_strain.c:  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:  IBMNodes *ibm = fem->ibm;
+active_strain.c:  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:ActData *act = &fem->act_data;
+active_strain.c:PetscCheck(ec >= 0 && ec < fem->ibm->n_elmt, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
+active_strain.c:ec, qp, fem->ibm->ire[ec], fem->ibm->val[ec], (double)PetscRealPart(act->theta[qp]));
+active_strain.c:  ActData     *act = &fem->act_data;
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:    IBMNodes *ibm = fem->ibm;
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    PetscReal gamma = fem->act_data.muscle_act_params.gamma;
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    PetscReal mu = fem->act_data.mu; // shear modulus
+active_strain.c:    PetscReal K = fem->act_data.K;   // bulk modulus
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
+active_strain.c:    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    PetscReal K = fem->act_data.K;
+active_strain.c:    PetscReal mu = fem->act_data.mu; // shear modulus
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)    
+active_strain.c:    ElemActData   *ead  = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
+active_strain.c:    ElemActData   *ead  = &fem->act_data.elem_act_data[ec];
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
+active_strain.c:    IBMNodes      *ibm  = fem->ibm;
+active_strain.c:    ElemActData   *ead  = &fem->act_data.elem_act_data[ec];
+active_strain.c:    const PetscInt dof = fem->dof; /* expected to be 3 here */
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:  ibm = fem->ibm;
+active_strain.c:  PetscCheck(ibm, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "fem->ibm is NULL");
+active_strain.c:  ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:  PetscCheck(fem->act_data.w,     PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "act_data.w is NULL");
+active_strain.c:  PetscCheck(fem->act_data.theta, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "act_data.theta is NULL");
+active_strain.c:  PetscCheck(fem->act_data.n_qp > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "n_qp must be > 0");
+active_strain.c:  for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:    const PetscReal w_qp  = PetscRealPart(fem->act_data.w[qp]);      /* weight */
+active_strain.c:    const PetscReal xi_qp = PetscRealPart(fem->act_data.theta[qp]);  /* through-thickness coord */
+active_strain.c:  ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:  for (PetscInt sub_itr = 0; sub_itr < fem->act_data.C33_subitr_nums; sub_itr++){
+active_strain.c:    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c:  //   IBMNodes *ibm = fem->ibm;
+active_strain.c:  //   PetscInt n_qp = fem->act_data.n_qp;
+active_strain.c:  //     ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:    IBMNodes *ibm = fem->ibm;
+active_strain.c:    PetscInt n_qp = fem->act_data.n_qp;
+active_strain.c:      ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c:  IBMNodes       *ibm=fem->ibm;
+active_strain.c:  VecGetArray(fem->Fint, &FF);
+active_strain.c:  VecRestoreArray(fem->Fint, &FF); 
+active_strain.c://   IBMNodes    *ibm = fem->ibm;
+active_strain.c://   ElemActData *ead = &fem->act_data.elem_act_data[ec];
+active_strain.c://   const PetscInt dof = fem->dof; /* expect 3 */
+active_strain.c://   for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+active_strain.c://           fem->FC[dof*ec + i] = Sm[i]*A0*h0 + A0*PetscPowReal(h0,2.0)/2.*S[i];
+active_strain.c://         fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
+active_strain.c://           fem->FC[dof*ec + i] = Sm[i]*A0*h0 + A0*PetscPowReal(h0,2.0)/2.*S[i];
+active_strain.c://         fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
+active_strain.c:    PetscInt n_elems = fem->ibm->n_elmt;
+bcs.c:  IBMNodes   *ibm=fem->ibm;
+bending.c:  IBMNodes       *ibm=fem->ibm;
+bending.c:	fem->FC[dof*ec+i] = Sm[i]*A0*h0 + A0*pow(h0,2.)/2.*S[i];
+bending.c:      fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
+bending.c:	fem->FC[dof*ec+i] = Sm[i]*A0*h0 + A0*pow(h0,2.)/2.*S[i];
+bending.c:      fem->IE[n1e] += sum/3.;  fem->IE[n2e] += sum/3.;  fem->IE[n3e] += sum/3.;
+bending.c:  IBMNodes  *ibm=fem->ibm;
+bending.c:  IBMNodes       *ibm=fem->ibm;
+contact.c:  /* IBMNodes   *ibm=fem->ibm; */
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes  *ibm=fem->ibm;
+external.c:  VecGetArray(fem->xd, &xxd);
+external.c:  /* VecGetArray(fem->xdd, &xxdd); */
+external.c:  /* VecGetArray(fem->xn, &xxn); */
+external.c:  /* VecGetArray(fem->x, &xxnm1); */
+external.c:  VecRestoreArray(fem->xd, &xxd);
+external.c:  /* VecRestoreArray(fem->xdd, &xxdd); */
+external.c:  /* VecRestoreArray(fem->xn, &xxn); */
+external.c:  /* VecRestoreArray(fem->xnm1, &xxnm1); */
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes   *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FFint);
+external.c:  VecGetArray(fem->Fext, &FFext);
+external.c:  VecGetArray(fem->Fdyn, &FFdyn);
+external.c:  VecGetArray(fem->x, &xx);
+external.c:  VecGetArray(fem->xd, &xdd);
+external.c:  VecRestoreArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fint, &FFint);
+external.c:  VecRestoreArray(fem->Fext, &FFext);
+external.c:  VecRestoreArray(fem->x, &xx);
+external.c:  VecRestoreArray(fem->xd, &xdd);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FFint);
+external.c:  VecGetArray(fem->Fext, &FFext);
+external.c:  VecGetArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fint, &FFint);
+external.c:  VecRestoreArray(fem->Fext, &FFext);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->xd, &xdd);
+external.c:  VecRestoreArray(fem->xd, &xdd);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FFint);
+external.c:  VecGetArray(fem->Fext, &FFext);
+external.c:  VecGetArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fint, &FFint);
+external.c:  VecRestoreArray(fem->Fext, &FFext);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->x, &xx);
+external.c:  VecRestoreArray(fem->x, &xx);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FFint);
+external.c:  VecGetArray(fem->Fext, &FFext);
+external.c:  VecGetArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fint, &FFint);
+external.c:  VecRestoreArray(fem->Fext, &FFext);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FFint);
+external.c:  VecGetArray(fem->Fext, &FFext);
+external.c:  VecGetArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fint, &FFint);
+external.c:  VecRestoreArray(fem->Fext, &FFext);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes       *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes   *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fext, &FF);
+external.c:  VecRestoreArray(fem->Fext, &FF);
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FF);
+external.c:  VecGetArray(fem->FJ, &FFJ);
+external.c:  VecRestoreArray(fem->FJ, &FFJ); 
+external.c:  VecRestoreArray(fem->Fint, &FF); 
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  IBMNodes *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FF);
+external.c:  VecGetArray(fem->FJ, &FFJ);
+external.c:  VecRestoreArray(fem->FJ, &FFJ);
+external.c:  VecRestoreArray(fem->Fint, &FF);
+external.c:  IBMNodes   *ibm=fem->ibm;
+external.c:  VecGetArray(fem->Fint, &FFint);
+external.c:  VecGetArray(fem->Fext, &FFext);
+external.c:  VecGetArray(fem->Fdyn, &FFdyn);
+external.c:  VecGetArray(fem->x, &xx);
+external.c:  VecRestoreArray(fem->Fdyn, &FFdyn);
+external.c:  VecRestoreArray(fem->Fint, &FFint);
+external.c:  VecRestoreArray(fem->Fext, &FFext);
+external.c:  VecRestoreArray(fem->x, &xx);
+external.c:  IBMNodes   *ibm=fem->ibm;
+external.c:  IBMNodes *ibm=fem->ibm;
+inverse.c:  IBMNodes  *ibm=fem->ibm;  
+inverse.c:    IBMNodes  *ibm=fem->ibm;  
+inverse.c:  IBMNodes  *ibm=fem->ibm;      
+inverse.c:    IBMNodes  *ibm=fem->ibm;  
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:  VecGetArray(fem->x, &xx);
+inverse.c:  VecRestoreArray(fem->x, &xx);
+inverse.c:  VecSet(fem->Fext, 0.0);  VecSet(fem->Fint, 0.0);  VecSet(fem->Fdyn, 0.0);
+inverse.c:  VecSet(fem->Res, 0.0);  VecSet(fem->FJ, 0.0);  
+inverse.c:  for (nv=0; nv<ibm->n_v; nv++)  fem->IE[nv] = 0.;
+inverse.c:  for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
+inverse.c:  VecWAXPY(fem->Res,-1., fem->Fext, fem->Fint);
+inverse.c:  VecAXPY(fem->Res,1., fem->Fdyn);
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:        fem->dR_dE[nv][ec][k][m] = (residual_array_plus[nv][k] - residual_array_minus[nv][k])/(2*epsilon);          
+inverse.c:    //   fem->dR_dE[nv][ec] = (residual_array_plus[nv] - residual_array_minus[nv])/(2*epsilon);
+inverse.c:    from the last update of distributed fem->Jacobian dense matrix.
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:  MatGetOwnershipRange(fem->Jacobian, &row_start, &row_end);
+inverse.c:    VecGetArray(fem->Res, &RRes);
+inverse.c:    VecRestoreArray(fem->Res, &RRes); 
+inverse.c:    VecGetArray(fem->Res, &RRes);    
+inverse.c:    VecRestoreArray(fem->Res, &RRes); 
+inverse.c:      MatSetValue(fem->Jacobian, i, c_i, val, INSERT_VALUES);
+inverse.c:  MatAssemblyBegin(fem->Jacobian, MAT_FINAL_ASSEMBLY);
+inverse.c:  MatAssemblyEnd(fem->Jacobian, MAT_FINAL_ASSEMBLY);
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:  // MatGetOwnershipRange(fem->Jacobian, &rstart, &rend);
+inverse.c:    MatGetRow(fem->J_Seq, row_i, NULL, NULL, &vals);
+inverse.c:      fem->Jac_Fung[ni][ei][dof_i][mi] = vals[col_i];
+inverse.c:    MatRestoreRow(fem->J_Seq, row_i, NULL, NULL, &vals);
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:      VecGetArray(fem->Res, &RRes);
+inverse.c:      VecRestoreArray(fem->Res, &RRes); 
+inverse.c:      VecGetArray(fem->Res, &RRes);
+inverse.c:      VecRestoreArray(fem->Res, &RRes); 
+inverse.c:          fem->Jac_Fung[nv][ec][k][m] = (residual_array_plus[nv][k] - residual_array_minus[nv][k])/(2*epsilon);          
+inverse.c:          if (isnan(fem->Jac_Fung[nv][ec][k][m])) {
+inverse.c:      VecGetArray(fem->Res, &RRes);
+inverse.c:      VecRestoreArray(fem->Res, &RRes); 
+inverse.c:      VecGetArray(fem->Res, &RRes);
+inverse.c:      VecRestoreArray(fem->Res, &RRes); 
+inverse.c:            fem->Jac_Fung[nv][ec][k][m] = (residual_array_plus[nv][k] - residual_array_minus[nv][k])/(2*epsilon);
+inverse.c:        VecGetArray(fem->Res, &RRes);
+inverse.c:        VecRestoreArray(fem->Res, &RRes); 
+inverse.c:        VecGetArray(fem->Res, &RRes);
+inverse.c:        VecRestoreArray(fem->Res, &RRes); 
+inverse.c:            fem->Jac_Fung[nv][ec][k][m] = (residual_array_plus[nv][k] - residual_array_minus[nv][k])/(2*epsilon);          
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:    VecGetArray(fem->Res, &RRes);
+inverse.c:    VecRestoreArray(fem->Res, &RRes); 
+inverse.c:    VecGetArray(fem->Res, &RRes);
+inverse.c:    VecRestoreArray(fem->Res, &RRes); 
+inverse.c:          fem->Jac_Fung[nv][ec][k][m] = (residual_array_plus[nv][k] - residual_array_minus[nv][k])/(2*epsilon);
+inverse.c:            if (fem->Jac_Fung[nv][ec][k][m] > 0.0){
+inverse.c:              //printf("fem->Jac_Fung %f\n", fem->Jac_Fung[nv][ec][k][m]);  
+inverse.c:          //printf("fem->Jac_Fung %f\n", fem->Jac_Fung[nv][ec][k][m]);
+inverse.c:        VecGetArray(fem->Res, &RRes);
+inverse.c:        VecRestoreArray(fem->Res, &RRes); 
+inverse.c:        VecGetArray(fem->Res, &RRes);
+inverse.c:        VecRestoreArray(fem->Res, &RRes); 
+inverse.c:            fem->Jac_Fung[nv][ec][k][m] = (residual_array_plus[nv][k] - residual_array_minus[nv][k])/(2*epsilon);          
+inverse.c:  IBMNodes *ibm=fem->ibm;
+inverse.c:  VecGetArray(fem->Res, &RRes);
+inverse.c:          ibm->Fung_coeffs[m][ec] = ibm->Fung_coeffs[m][ec] - 2*lr*RRes[nv*dof+k]*(fem->Jac_Fung[nv][ec][k][m]);
+inverse.c:  VecRestoreArray(fem->Res, &RRes);
+inverse.c:  IBMNodes *ibm = fem->ibm;
+inverse.c:  VecGetArray(fem->Res, &RRes);
+inverse.c:              g += RRes[nv * dof + k] * fem->Jac_Fung[nv][ec][k][m];
+inverse.c:              // g += RRes[nv * dof + k] / l(PetscAbsReal(RRes[nv * dof + k])+ epsion ) / ((PetscAbsReal(fem->Jac_Fung[nv][ec][k][m]) + epsilon )) * fem->Jac_Fung[nv][ec][k][m];
+inverse.c:  VecRestoreArray(fem->Res, &RRes);
+inverse.c:  IBMNodes *ibm=fem->ibm;
+inverse.c:  VecGetArray(fem->Res, &RRes);
+inverse.c:          g += RRes[nv*dof+k]*(fem->dR_dE[nv][ec][k][m]);
+inverse.c:          // g += RRes[nv*dof+k] / PetscAbs(fem->dR_dE[nv][ec][k][m]) * (fem->dR_dE[nv][ec][k][m]);
+inverse.c:          ibm->El[0][ec] = ibm->El[0][ec] - 2*learning_rate[0]*RRes[nv*dof+k]*(fem->dR_dE[nv][ec][k][0]);
+inverse.c:  VecRestoreArray(fem->Res, &RRes);
+inverse.c:  IBMNodes   *ibm=fem->ibm;
+inverse.c:  IBMNodes  *ibm=fem->ibm;
+inverse.c:  VecGetArray(fem->Res_smth, &RRes_smth);
+inverse.c:  VecGetArray(fem->Res, &RRes);
+inverse.c:  VecRestoreArray(fem->Res_smth, &RRes_smth);
+inverse.c:  VecRestoreArray(fem->Res, &RRes);
+inverse.c:  IBMNodes  *ibm=fem->ibm;
+inverse.c:  VecGetArray(fem->Res_smth, &RRes_smth);
+inverse.c:  VecGetArray(fem->Res, &RRes);
+inverse.c:  VecRestoreArray(fem->Res_smth, &RRes_smth);
+inverse.c:  VecRestoreArray(fem->Res, &RRes);
+io.c:  fem->ibm=ibm; //link ibm of fem to ibm
+io.c:  PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(fem->StressM)); 
+io.c:  PetscMalloc((dof + 2)*ibm->n_elmt*sizeof(PetscReal), &(fem->StrainM)); // 2 extra for adding principal in-plane strains 
+io.c:  PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(fem->StressB)); 
+io.c:  PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(fem->StrainB));
+io.c:  PetscCalloc1(ibm->n_v, &(fem->IE));
+io.c:  PetscCalloc1(ibm->n_v, &(fem->CE));
+io.c:  PetscCalloc1(ibm->n_v, &(fem->KE));
+io.c:  PetscMalloc(dof*ibm->n_elmt*sizeof(PetscReal), &(fem->FC));
+io.c:  // PetscMalloc(ibm->n_v*sizeof(PetscReal **), &(fem->dR_dE));
+io.c:  //   PetscMalloc(ibm->n_elmt*sizeof(PetscReal *), &(fem->dR_dE[i]));
+io.c:  //     PetscMalloc(dof*sizeof(PetscReal), &(fem->dR_dE[i][j]));
+io.c:    PetscMalloc(ibm->n_v*sizeof(PetscReal ***), &(fem->dR_dE));
+io.c:      PetscMalloc(ibm->n_elmt*sizeof(PetscReal **), &(fem->dR_dE[i]));
+io.c:        PetscMalloc(dof*sizeof(PetscReal *), &(fem->dR_dE[i][j]));
+io.c:          PetscMalloc(2*sizeof(PetscReal), &(fem->dR_dE[i][j][k]));
+io.c:    PetscMalloc(ibm->n_v*sizeof(PetscReal ***), &(fem->Jac_Fung));
+io.c:      PetscMalloc(ibm->n_elmt*sizeof(PetscReal **), &(fem->Jac_Fung[i]));
+io.c:        PetscMalloc(dof*sizeof(PetscReal *), &(fem->Jac_Fung[i][j]));
+io.c:          PetscMalloc(n_Fung_Coeffs*sizeof(PetscReal), &(fem->Jac_Fung[i][j][k]));
+io.c:      MatCreate(PETSC_COMM_WORLD, &fem->Jacobian);
+io.c:      MatSetSizes(fem->Jacobian, PETSC_DECIDE, PETSC_DECIDE, ibm->n_elmt * n_coeffs, ibm->n_v * dof);
+io.c:      MatSetFromOptions(fem->Jacobian);    
+io.c:      MatSetType(fem->Jacobian, MATDENSE);
+io.c:      MatSetUp(fem->Jacobian);
+io.c:      MatZeroEntries(fem->Jacobian);
+io.c:      // MatGetSize(fem->Jacobian, &M, &N);
+io.c:      //   MatCreateSeqDense(PETSC_COMM_SELF, ibm->n_elmt * n_coeffs, ibm->n_v * dof, NULL, &fem->J_seq);
+io.c:  //   ierr = PetscMalloc(ibm->n_elmt * sizeof(ElemActData), &fem->act_data.elem_act_data); CHKERRQ(ierr);
+io.c:  //   VecCreateSeq(PETSC_COMM_SELF, ibm->n_elmt * nBasisVecs * dof, &fem->act_data.g_e_target);
+io.c:  //   VecSet(fem->act_data.g_e_target, 0.0); 
+io.c:  //           fem->act_data.elem_act_data[ec].Fa[i][j] = 0.0;
+io.c:  VecCreateSeq(PETSC_COMM_SELF,dof*(ibm->n_v + ibm->n_ghosts), &(fem->Res));  
+io.c:  VecDuplicate(fem->Res, &(fem->x));
+io.c:  VecDuplicate(fem->Res, &(fem->xn));
+io.c:  VecDuplicate(fem->Res, &(fem->xnm1));
+io.c:  VecDuplicate(fem->Res, &(fem->xd));
+io.c:  VecDuplicate(fem->Res, &(fem->dx));
+io.c:  VecDuplicate(fem->Res, &(fem->xdd));
+io.c:  VecDuplicate(fem->Res, &(fem->y));
+io.c:  VecDuplicate(fem->Res, &(fem->yn));
+io.c:  VecDuplicate(fem->Res, &(fem->Fint));
+io.c:  VecDuplicate(fem->Res, &(fem->Fext));
+io.c:  VecDuplicate(fem->Res, &(fem->Fdyn));
+io.c:  VecDuplicate(fem->Res, &(fem->disp));
+io.c:  VecDuplicate(fem->Res, &(fem->FJ));
+io.c:  VecDuplicate(fem->Res, &(fem->Mass));  
+io.c:  VecDuplicate(fem->Res, &(fem->Dissip));
+io.c:  VecDuplicate(fem->Res, &(fem->Fcnt));
+io.c:  VecSet(fem->Res, 0.0);  VecSet(fem->x, 0.0);  VecSet(fem->xn, 0.0);  VecSet(fem->xnm1, 0.0);
+io.c:  VecSet(fem->xd, 0.0);  VecSet(fem->xdd, 0.0);  VecSet(fem->y, 0.0);  VecSet(fem->yn, 0.0);
+io.c:  VecSet(fem->Fint, 0.0);  VecSet(fem->Fext, 0.0);  VecSet(fem->Fdyn, 0.0);  VecSet(fem->FJ, 0.0); 
+io.c:  VecSet(fem->disp, 0.0);  VecSet(fem->Fcnt, 0.0);
+io.c:  VecSet(fem->Mass, 0.0);  VecSet(fem->Dissip, 0.0);
+io.c:    VecDuplicate(fem->Res, &(fem->Res_smth));  
+io.c:    VecSet(fem->Res_smth, 0.0);
+io.c:  //   VecDuplicate(fem->Res, &(fem->x_intmd));
+io.c:  //   VecSet(fem->x_intmd, 0.0);
+io.c:  IBMNodes  *ibm=fem->ibm;  
+io.c:    PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", fem->CE[i]);
+io.c:    PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", fem->IE[i]);
+io.c:    PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", fem->dR_dE[i][100]);
+io.c:    PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", fem->KE[i]);
+io.c:  VecGetArray(fem->disp, &dd);
+io.c:  VecRestoreArray(fem->disp, &dd);
+io.c:  VecGetArray(fem->Fint, &FF);
+io.c:  VecRestoreArray(fem->Fint, &FF);
+io.c:  VecGetArray(fem->Fext, &FF);
+io.c:  VecRestoreArray(fem->Fext, &FF);
+io.c:  VecGetArray(fem->Fdyn, &FF);
+io.c:  VecRestoreArray(fem->Fdyn, &FF);
+io.c:  // VecGetArray(fem->Res, &FF);
+io.c:  // VecRestoreArray(fem->Res, &FF);
+io.c:  VecGetArray(fem->Fcnt, &FF);
+io.c:  VecRestoreArray(fem->Fcnt, &FF);
+io.c:  VecGetArray(fem->xd, &FF);
+io.c:  VecRestoreArray(fem->xd, &FF);
+io.c:  //     fem->act_data.elem_act_data[i].Fa[0][0], fem->act_data.elem_act_data[i].Fa[0][1], fem->act_data.elem_act_data[i].Fa[0][2], 
+io.c:  //     fem->act_data.elem_act_data[i].Fa[1][0], fem->act_data.elem_act_data[i].Fa[1][1], fem->act_data.elem_act_data[i].Fa[1][2], 
+io.c:  //     fem->act_data.elem_act_data[i].Fa[2][0], fem->act_data.elem_act_data[i].Fa[2][1], fem->act_data.elem_act_data[i].Fa[2][2]);
+io.c:  //     fem->act_data.elem_act_data[i].g_e[0].x, fem->act_data.elem_act_data[i].g_e[0].y, fem->act_data.elem_act_data[i].g_e[0].z);    
+io.c:  //     fem->act_data.elem_act_data[i].g_e[1].x, fem->act_data.elem_act_data[i].g_e[1].y, fem->act_data.elem_act_data[i].g_e[1].z);    
+io.c:  //   VecDuplicate(fem->act_data.g_e_target, &F);
+io.c:  //   calculate_cov_basis(fem->x, F, fem);
+io.c:  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainM[i*(dof+2)], fem->StrainM[i*(dof+2)+1], fem->StrainM[i*(dof+2)+2]);
+io.c:  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainM[i*(dof+2)+3], fem->StrainM[i*(dof+2)+4], 0.);
+io.c:  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StrainB[i*dof], fem->StrainB[i*dof+1], fem->StrainB[i*dof+2]);
+io.c:  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StressM[i*dof], fem->StressM[i*dof+1], fem->StressM[i*dof+2]);
+io.c:  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",fem->StressB[i*dof], fem->StressB[i*dof+1], fem->StressB[i*dof+2]);
+io.c:  IBMNodes   *ibm=fem->ibm;
+io.c:  VecGetArray(fem->disp, &dd);
+io.c:  VecRestoreArray(fem->disp, &dd);
+io.c:  VecGetArray(fem->Fint, &FF);
+io.c:  VecRestoreArray(fem->Fint, &FF);
+io.c:  VecGetArray(fem->Fext, &FF);
+io.c:  VecRestoreArray(fem->Fext, &FF);
+io.c:  VecGetArray(fem->Fdyn, &FF);
+io.c:  VecRestoreArray(fem->Fdyn, &FF);
+io.c:  IBMNodes     *ibm=fem->ibm;
+io.c:  VecView(fem->x, viewer);
+io.c:  VecView(fem->xn, viewer);
+io.c:  VecView(fem->xd, viewer);
+io.c:  VecView(fem->xdd, viewer);
+io.c:    VecView(fem->Fcnt, viewer);
+io.c:  IBMNodes     *ibm=fem->ibm; 
+io.c:  IBMNodes     *ibm=fem->ibm;
+io.c:  IBMNodes     *ibm=fem->ibm;
+io.c:  VecLoad(fem->x, viewer);
+io.c:  VecLoad(fem->xn,viewer);
+io.c:  VecLoad(fem->xd,viewer);
+io.c:  VecLoad(fem->xdd,viewer);
+io.c:    VecLoad(fem->Fcnt,viewer);
+io.c:  VecGetArray(fem->x, &xx);
+io.c:  VecRestoreArray(fem->x, &xx);
+main.c:  IBMNodes   *ibm=fem->ibm;
+main.c:  VecSet(fem->Fext, 0.0);  VecSet(fem->Fint, 0.0); 
+main.c:  VecSet(R, 0.0);  VecSet(fem->FJ, 0.0); 
+main.c:  VecWAXPY(R, -1., fem->Fint, fem->Fext);
+main.c:  VecPointwiseMult(w1, fem->Dissip,y);
+main.c:  VecPointwiseDivide(w2, R, fem->Mass);
+main.c:  IBMNodes   *ibm=fem->ibm;
+main.c:  VecCopy(x, fem->x);
+main.c:  VecSet(fem->Fext, 0.0);  VecSet(fem->Fint, 0.0);  VecSet(fem->Fdyn, 0.0);
+main.c:  VecSet(R, 0.0);  VecSet(fem->FJ, 0.0);  
+main.c:  for (nv=0; nv<ibm->n_v; nv++)  fem->IE[nv] = 0.;
+main.c:  for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
+main.c:  VecWAXPY(R,-1., fem->Fext, fem->Fint);
+main.c:  // VecAXPY(R,1., fem->Fdyn);
+main.c:  //   VecGetArray(fem->x, &xx);
+main.c:  //   VecRestoreArray(fem->x, &xx);
+main.c:  ierr = VecNorm(fem->Fext, NORM_INFINITY, &fext_inf); CHKERRQ(ierr);
+main.c:  IBMNodes       *ibm=fem->ibm;
+main.c:  VecGetArray(fem->Fint, &FF);
+main.c:  VecGetArray(fem->FJ, &FFJ);
+main.c:  VecRestoreArray(fem->FJ, &FFJ); 
+main.c:  VecRestoreArray(fem->Fint, &FF); 
+main.c:  IBMNodes       *ibm=fem->ibm;
+main.c:  VecGetArray(fem->xd, &xxd);
+main.c:  VecGetArray(fem->xdd, &xxdd);
+main.c:  VecGetArray(fem->xn, &xxn);
+main.c:  VecGetArray(fem->xnm1, &xxnm1);
+main.c:  VecGetArray(fem->x, &xx);
+main.c:  VecGetArray(fem->Fdyn, &FF);
+main.c:  VecRestoreArray(fem->x, &xx);
+main.c:  VecRestoreArray(fem->xd, &xxd);
+main.c:  VecRestoreArray(fem->xdd, &xxdd);
+main.c:  VecRestoreArray(fem->xnm1, &xxnm1);
+main.c:  VecRestoreArray(fem->xn, &xxn);
+main.c:  VecRestoreArray(fem->Fdyn, &FF);
+main.c:  IBMNodes       *ibm=fem->ibm;
+main.c:  VecGetArray(fem->xd, &xxd);
+main.c:  VecGetArray(fem->xdd, &xxdd);
+main.c:  VecGetArray(fem->xn, &xxn);
+main.c:  VecGetArray(fem->x, &xx);
+main.c:  VecRestoreArray(fem->x, &xx);
+main.c:  VecRestoreArray(fem->xd, &xxd);
+main.c:  VecRestoreArray(fem->xdd, &xxdd);
+main.c:  VecRestoreArray(fem->xn, &xxn);
+main.c:  if (explicit) {VecCopy(fem->y, fem->yn);}
+main.c:  IBMNodes   *ibm = fem->ibm;
+main.c:  VecGetArray(fem->x, &xx);
+main.c:  VecRestoreArray(fem->x, &xx);
+main.c:  VecCopy(fem->x, fem->xn);
+main.c:  VecCopy(fem->x, fem->xnm1);
+main.c:  IBMNodes  *ibm=fem->ibm;
+main.c:  VecDestroy(&(fem->Res));  VecDestroy(&(fem->x));  VecDestroy(&(fem->xn));  VecDestroy(&(fem->xnm1));
+main.c:  VecDestroy(&(fem->xd));  VecDestroy(&(fem->xdd));  VecDestroy(&(fem->y));  VecDestroy(&(fem->yn)); 
+main.c:  VecDestroy(&(fem->Fext));  VecDestroy(&(fem->Fint));  VecDestroy(&(fem->Fdyn)); VecDestroy(&(fem->Fcnt)); 
+main.c:  VecDestroy(&(fem->disp));  VecDestroy(&(fem->FJ)); 
+main.c:  VecDestroy(&(fem->Mass));  VecDestroy(&(fem->Dissip));  VecDestroy(&(fem->dx)); 
+main.c:    VecDestroy(&(fem->Res_smth));
+main.c:    MatDestroy(&(fem->Jacobian));    
+main.c:    // MatDestroy(&(fem->J_Seq));    
+main.c:  PetscFree(ibm->kve);  PetscFree(fem->StressM);  PetscFree(fem->StrainM);   PetscFree(fem->IE);  PetscFree(fem->CE);  PetscFree(fem->KE);  PetscFree(ibm->m); 
+main.c:  PetscFree(fem->FC); 
+main.c:  PetscFree(fem->StressB);  PetscFree(fem->StrainB);
+main.c:            PetscFree(fem->Jac_Fung[i][j][k]); 
+main.c:        PetscFree(fem->Jac_Fung[i][j]);
+main.c:      PetscFree(fem->Jac_Fung[i]);
+main.c:    PetscFree(fem->Jac_Fung);
+main.c:  //   PetscFree(fem->dR_dE[i]);
+main.c:  // PetscFree(fem->dR_dE);
+main.c:        PetscFree(fem->dR_dE[i][j][k]);
+main.c:      PetscFree(fem->dR_dE[i][j]);  
+main.c:    PetscFree(fem->dR_dE[i]);
+main.c:  PetscFree(fem->dR_dE);
+main.c:  IBMNodes  *ibm=fem->ibm;
+main.c:  IBMNodes   *ibm=fem->ibm;
+main.c:  /* VecSet(fem->Fcnt, 0.0);   */
+main.c:  VecSet(fem->Fint, 0.0);  //VecSet(fem->Fext, 0.0);  //VecSet(fem->Fdyn, 0.0); */
+main.c:    fem->IE[nv] = 0.;
+main.c:  for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
+main.c:  /* VecWAXPY(fem->Fcnt, -1., fem->Fext, fem->Fint); */
+main.c:  /* //VecAXPY(fem->Fcnt, -1., fem->Fext); */
+main.c:  /* //VecAXPY(fem->Fcnt, 1., fem->Fint); */
+main.c:  /* VecAXPY(fem->Fcnt, 1., fem->Fdyn); */
+main.c:  VecGetArray(fem->x, &xx);
+main.c:  VecGetArray(fem->xd, &xxd);
+main.c:  VecGetArray(fem->xn, &xxn);
+main.c:  VecGetArray(fem->xdd, &xxdd);
+main.c:  VecGetArray(fem->y, &yy);
+main.c:  VecGetArray(fem->Fint, &fint);
+main.c:  VecGetArray(fem->Fext, &fext);
+main.c:    if (ti==0) fem->CE[nv] = 0.;
+main.c:    //    fem->CE[nv] = (fint[nv*dof] - fext[nv*dof])*(xx[nv*dof] - yy[nv*dof]) + (fint[nv*dof+1] - fext[nv*dof+1])*(xx[nv*dof+1] - yy[nv*dof+1]) + (fint[nv*dof+2] - fext[nv*dof+2])*(xx[nv*dof+2] - yy[nv*dof+2]);
+main.c:    fem->KE[nv] = 0.5*ibm->m[nv]*(xxd[dof*nv]*xxd[dof*nv] + xxd[dof*nv+1]*xxd[dof*nv+1] +xxd[dof*nv+2]*xxd[dof*nv+2]);// + KEr[nv];
+main.c:    KEsum +=fem->KE[nv];
+main.c:    IEsum +=fem->IE[nv];
+main.c:    //fem->KE[nv] = KEr[nv];
+main.c:    //fem->IE[nv] = fint[nv*dof]*(xx[nv*dof] - ibm->x_bp0[nv]) + fint[nv*dof+1]*(xx[nv*dof+1] - ibm->y_bp0[nv]) + fint[nv*dof+2]*(xx[nv*dof+2] - ibm->z_bp0[nv]);
+main.c:  VecRestoreArray(fem->x, &xx);
+main.c:  VecRestoreArray(fem->xd, &xxd);
+main.c:  VecRestoreArray(fem->xn, &xxn);
+main.c:  VecRestoreArray(fem->xdd, &xxdd);
+main.c:  VecRestoreArray(fem->y, &yy);
+main.c:  VecRestoreArray(fem->Fint, &fint);
+main.c:  VecRestoreArray(fem->Fext, &fext);
+material.c:  IBMNodes   *ibm=fem->ibm;
+material.c:  VecGetArray(fem->Mass, &MMass);
+material.c:  VecGetArray(fem->Dissip, &DDissip);
+material.c:  VecRestoreArray(fem->Mass, &MMass);
+material.c:  VecRestoreArray(fem->Dissip, &DDissip);
+material.c:  IBMNodes *ibm=fem->ibm;
+material.c:  IBMNodes *ibm=fem->ibm;
+material.c:  IBMNodes       *ibm=fem->ibm;
+material.c:    fem->StrainM[ec*(dof+2)] = cart[0];   fem->StrainM[ec*(dof+2)+1] = cart[1];   fem->StrainM[ec*(dof+2)+2] = cart[2];  
+material.c:    fem->StrainM[ec*(dof+2)+3] = (cart[0] + cart[1])/2. + sqrt(pow((cart[0] - cart[1])/2., 2) + pow(cart[2]/2., 2)); //in-plane max Principal Strain 
+material.c:    fem->StrainM[ec*(dof+2)+4] = (cart[0] + cart[1])/2. - sqrt(pow((cart[0] - cart[1])/2., 2) + pow(cart[2]/2., 2)); //in-plane min Principal Strain 
+material.c:    fem->StrainB[ec*dof] = cart[0];   fem->StrainB[ec*dof+1] = cart[1];   fem->StrainB[ec*dof+2] = cart[2];  
+material.c:    fem->StressM[ec*dof] = cart[0];   fem->StressM[ec*dof+1] = cart[1];   fem->StressM[ec*dof+2] = cart[2]; 
+material.c:    fem->StressB[ec*dof] = cart[0];   fem->StressB[ec*dof+1] = cart[1];   fem->StressB[ec*dof+2] = cart[2]; 
+material_NonlinearCantilever.c:  IBMNodes *ibm=fem->ibm;
+material_NonlinearCantilever.c:  VecGetArray(fem->Mass, &MMass);
+material_NonlinearCantilever.c:  VecGetArray(fem->Dissip, &DDissip);
+material_NonlinearCantilever.c:  VecRestoreArray(fem->Mass, &MMass);
+material_NonlinearCantilever.c:  VecRestoreArray(fem->Dissip, &DDissip);
+material_NonlinearCantilever.c:  IBMNodes *ibm=fem->ibm;
+material_NonlinearCantilever.c:   fem->StrainM[ec*dof]=Strainxyz[0];   fem->StrainM[ec*dof+1]=Strainxyz[1];    fem->StrainM[ec*dof+2]=Strainxyz[2];
+material_NonlinearCantilever.c:   fem->StressM[ec*dof]=Stressxyz[0];   fem->StressM[ec*dof+1]=Stressxyz[1];   fem->StressM[ec*dof+2]=Stressxyz[2];
+material_NonlinearCantilever.c:  IBMNodes *ibm=fem->ibm;
+material_NonlinearCantilever.c:   fem->StrainB[ec*dof]=Strainxyz[0];   fem->StrainB[ec*dof+1]=Strainxyz[1];    fem->StrainB[ec*dof+2]=Strainxyz[2];
+material_NonlinearCantilever.c:   fem->StressB[ec*dof]=Stressxyz[0];    fem->StressB[ec*dof+1]=Stressxyz[1];   fem->StressB[ec*dof+2]=Stressxyz[2];
+material_org.c:  IBMNodes *ibm=fem->ibm;
+material_org.c:  VecGetArray(fem->Mass, &MMass);
+material_org.c:  VecGetArray(fem->Dissip, &DDissip);
+material_org.c:  VecRestoreArray(fem->Mass, &MMass);
+material_org.c:  VecRestoreArray(fem->Dissip, &DDissip);
+material_org.c:  IBMNodes *ibm=fem->ibm;
+material_org.c:   fem->StrainM[ec*dof]=Strainxyz[0];   fem->StrainM[ec*dof+1]=Strainxyz[1];    fem->StrainM[ec*dof+2]=Strainxyz[2];
+material_org.c:   fem->StressM[ec*dof]=Stressxyz[0];   fem->StressM[ec*dof+1]=Stressxyz[1];   fem->StressM[ec*dof+2]=Stressxyz[2];
+material_org.c:  IBMNodes *ibm=fem->ibm;
+material_org.c:   fem->StrainB[ec*dof]=Strainxyz[0];   fem->StrainB[ec*dof+1]=Strainxyz[1];    fem->StrainB[ec*dof+2]=Strainxyz[2];
+material_org.c:   fem->StressB[ec*dof]=Stressxyz[0];    fem->StressB[ec*dof+1]=Stressxyz[1];   fem->StressB[ec*dof+2]=Stressxyz[2];
+membrane.c:  IBMNodes       *ibm=fem->ibm;
+muscle_activation.c:    UserCtx  *userctx = &fem->userctx;    
+muscle_activation.c:    IBMNodes *ibm = fem->ibm;
+muscle_activation.c:    UserCtx  userctx = fem->userctx;
+muscle_activation.c:                fem->act_data.elem_act_data[ec].Fa[i][j] = G_contra[i][j]
+muscle_activation.c:                fem->act_data.elem_act_data[ec].Fa[i][j] = G_contra[i][j]
+muscle_activation.c:            // fem->act_data.elem_act_data[ec].Fa[i][j] = 1.0 - gamma * nfiber[i] * nfiber[j];
+muscle_activation.c:            // fem->act_data.elem_act_data[ec].Fa[i][j] = 1.0 - gamma * nfiber[i] * nfiber[j];
+muscle_activation.c:            fem->act_data.elem_act_data[ec].Fa[i][j] = 0.0;
+muscle_activation.c:      fem->act_data.elem_act_data[ec].Fa[0][0] = 1.0 - gamma; fem->act_data.elem_act_data[ec].Fa[1][1] = 1.0 - gamma;
+muscle_activation.c:      fem->act_data.elem_act_data[ec].Fa[2][2] = 1.0;
+muscle_activation.c:    IBMNodes  *ibm=fem->ibm;          
+muscle_activation.c:    IBMNodes *ibm = fem->ibm;
+muscle_activation.c:      fem->act_data.elem_act_data[ec].g_e[m].x = 0.0; 
+muscle_activation.c:      fem->act_data.elem_act_data[ec].g_e[m].y = 0.0; 
+muscle_activation.c:      fem->act_data.elem_act_data[ec].g_e[m].z = 0.0;
+muscle_activation.c:            PetscReal coeff = fem->act_data.elem_act_data[ec].Fa[i][j] * G_cov[j][m];
+muscle_activation.c:            fem->act_data.elem_act_data[ec].g_e[m].x += coeff * g_cov[i].x;
+muscle_activation.c:            fem->act_data.elem_act_data[ec].g_e[m].y += coeff * g_cov[i].y;
+muscle_activation.c:            fem->act_data.elem_act_data[ec].g_e[m].z += coeff * g_cov[i].z;
+muscle_activation.c:      fem->act_data.elem_act_data[ec].g_e[m].x = fem->act_data.elem_act_data[ec].Fa[0][0] * g_cov[m].x 
+muscle_activation.c:                                                + fem->act_data.elem_act_data[ec].Fa[0][1] * g_cov[m].y
+muscle_activation.c:                                                + fem->act_data.elem_act_data[ec].Fa[0][2] * g_cov[m].z;
+muscle_activation.c:      fem->act_data.elem_act_data[ec].g_e[m].y = fem->act_data.elem_act_data[ec].Fa[1][0] * g_cov[m].x 
+muscle_activation.c:                                                + fem->act_data.elem_act_data[ec].Fa[1][1] * g_cov[m].y
+muscle_activation.c:                                                + fem->act_data.elem_act_data[ec].Fa[1][2] * g_cov[m].z;
+muscle_activation.c:      fem->act_data.elem_act_data[ec].g_e[m].z = fem->act_data.elem_act_data[ec].Fa[2][0] * g_cov[m].x 
+muscle_activation.c:                                                + fem->act_data.elem_act_data[ec].Fa[2][1] * g_cov[m].y
+muscle_activation.c:                                                + fem->act_data.elem_act_data[ec].Fa[2][2] * g_cov[m].z;
+muscle_activation.c:  IBMNodes  *ibm=fem->ibm;          
+muscle_activation.c:  VecGetArray(fem->act_data.g_e_target, &garray);
+muscle_activation.c:      garray[ec * nBasisVecs * dof + m * dof + 0] = fem->act_data.elem_act_data[ec].g_e[m].x;      
+muscle_activation.c:      garray[ec * nBasisVecs * dof + m * dof + 1] = fem->act_data.elem_act_data[ec].g_e[m].y;
+muscle_activation.c:      garray[ec * nBasisVecs * dof + m * dof + 2] = fem->act_data.elem_act_data[ec].g_e[m].z; 
+muscle_activation.c:  VecRestoreArray(fem->act_data.g_e_target, &garray);
+muscle_activation.c:  IBMNodes    *ibm=fem->ibm;
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_e[m].x = ndx[m].x;
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_e[m].y = ndx[m].y;
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_e[m].z = ndx[m].z;
+muscle_activation.c:  fem->act_data.elem_act_data[ec].k_e[0] = DOT(Aaa, nn);
+muscle_activation.c:  fem->act_data.elem_act_data[ec].k_e[1] = DOT(Abb, nn);
+muscle_activation.c:  fem->act_data.elem_act_data[ec].k_e[2] = DOT(Aab, nn);
+muscle_activation.c:  fem->act_data.elem_act_data[ec].k_e[0] = DOT(Aaa, nn);
+muscle_activation.c:  fem->act_data.elem_act_data[ec].k_e[1] = DOT(Abb, nn);
+muscle_activation.c:  fem->act_data.elem_act_data[ec].k_e[2] = DOT(Aab, nn);
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:  VecDuplicate(fem->act_data.g_e_target, &F);
+muscle_activation.c:  VecDuplicate(fem->act_data.g_e_target, &diff);
+muscle_activation.c:  VecWAXPY(diff, -1.0, fem->act_data.g_e_target, F); // diff = F - target  
+muscle_activation.c:    VecWAXPY(diff, -1.0, fem->act_data.g_e_target, F);
+muscle_activation.c:    VecWAXPY(diff, -1.0, fem->act_data.g_e_target, F);
+muscle_activation.c:  TaoSetSolution(tao, fem->x);
+muscle_activation.c:  VecDuplicate(fem->act_data.g_e_target, &F);
+muscle_activation.c:  VecDuplicate(fem->act_data.g_e_target, &diff);
+muscle_activation.c:  calculate_cov_basis(fem->x, F, fem);
+muscle_activation.c:  VecWAXPY(diff, -1.0, fem->act_data.g_e_target, F);
+muscle_activation.c:  // VecView(fem->act_data.g_e_target, viewerTarget);
+muscle_activation.c:  IBMNodes   *ibm=fem->ibm;
+muscle_activation.c:  VecGetArray(fem->x, &xx);
+muscle_activation.c:  VecGetArray(fem->x_intmd, &xxi);
+muscle_activation.c:  VecRestoreArray(fem->x, &xx);  
+muscle_activation.c:  VecRestoreArray(fem->x_intmd, &xxi);
+muscle_activation.c:  IBMNodes   *ibm=fem->ibm;
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:    fem->act_data.elem_act_data[ec].act_fib.x = act_fib.x;
+muscle_activation.c:    fem->act_data.elem_act_data[ec].act_fib.y = act_fib.y;
+muscle_activation.c:    fem->act_data.elem_act_data[ec].act_fib.z = act_fib.z;
+muscle_activation.c:  // from fem->x_intmd to fem->x
+muscle_activation.c:  IBMNodes       *ibm=fem->ibm;
+muscle_activation.c:    Em[0] = 0.5*(g[0] - DOT(fem->act_data.elem_act_data[ec].g_e[0], fem->act_data.elem_act_data[ec].g_e[0]));
+muscle_activation.c:    Em[1] = 0.5*(g[1] - DOT(fem->act_data.elem_act_data[ec].g_e[1], fem->act_data.elem_act_data[ec].g_e[1]));
+muscle_activation.c:    Em[2] = g[2] - DOT(fem->act_data.elem_act_data[ec].g_e[0], fem->act_data.elem_act_data[ec].g_e[1]);
+muscle_activation.c:    // printf("ge[0] = %.8f, ge[1] = %.8f, ge[2] = %.8f \n", DOT(fem->act_data.elem_act_data[ec].g_e[0], fem->act_data.elem_act_data[ec].g_e[0]),
+muscle_activation.c:    //  DOT(fem->act_data.elem_act_data[ec].g_e[1], fem->act_data.elem_act_data[ec].g_e[1]), 
+muscle_activation.c:    //  DOT(fem->act_data.elem_act_data[ec].g_e[0], fem->act_data.elem_act_data[ec].g_e[1]));
+muscle_activation.c:    Eb[0] = fem->act_data.elem_act_data[ec].k_e[0] - k[0];
+muscle_activation.c:    Eb[1] = fem->act_data.elem_act_data[ec].k_e[1] - k[1];
+muscle_activation.c:    Eb[2] = 2*(fem->act_data.elem_act_data[ec].k_e[2] - k[2]);
+muscle_activation.c:    Em[0] = 0.5*(g[0] - DOT(fem->act_data.elem_act_data[ec].g_e[0], fem->act_data.elem_act_data[ec].g_e[0]));
+muscle_activation.c:    Em[1] = 0.5*(g[1] - DOT(fem->act_data.elem_act_data[ec].g_e[1], fem->act_data.elem_act_data[ec].g_e[1]));
+muscle_activation.c:    Em[2] = g[2] - DOT(fem->act_data.elem_act_data[ec].g_e[0], fem->act_data.elem_act_data[ec].g_e[1]);
+muscle_activation.c:    Eb[0] = fem->act_data.elem_act_data[ec].k_e[0] - k[0];
+muscle_activation.c:    Eb[1] = fem->act_data.elem_act_data[ec].k_e[1] - k[1];
+muscle_activation.c:    Eb[2] = 2*(fem->act_data.elem_act_data[ec].k_e[2] - k[2]);
+muscle_activation.c:        fem->act_data.theta[i] = 0.0;
+muscle_activation.c:        fem->act_data.w[i] = 0.0;
+muscle_activation.c:        fem->act_data.theta[0] = 0.0;
+muscle_activation.c:        fem->act_data.w[0] = 2.0;
+muscle_activation.c:        fem->act_data.theta[0] = -0.5773502691896257;  // ±1/sqrt(3)
+muscle_activation.c:        fem->act_data.theta[1] =  0.5773502691896257;
+muscle_activation.c:        fem->act_data.w[0] = fem->act_data.w[1] = 1.0;
+muscle_activation.c:        fem->act_data.theta[0] = -0.7745966692414834;
+muscle_activation.c:        fem->act_data.theta[1] =  0.0;
+muscle_activation.c:        fem->act_data.theta[2] =  0.7745966692414834;
+muscle_activation.c:        fem->act_data.w[0] = fem->act_data.w[2] = 0.5555555555555556;
+muscle_activation.c:        fem->act_data.w[1] = 0.8888888888888888;
+muscle_activation.c:        fem->act_data.theta[0] = -0.8611363115940526;
+muscle_activation.c:        fem->act_data.theta[1] = -0.3399810435848563;
+muscle_activation.c:        fem->act_data.theta[2] =  0.3399810435848563;
+muscle_activation.c:        fem->act_data.theta[3] =  0.8611363115940526;
+muscle_activation.c:        fem->act_data.w[0] = fem->act_data.w[3] = 0.3478548451374538;
+muscle_activation.c:        fem->act_data.w[1] = fem->act_data.w[2] = 0.6521451548625461;
+muscle_activation.c:        fem->act_data.theta[0] = -0.9061798459386640;
+muscle_activation.c:        fem->act_data.theta[1] = -0.5384693101056831;
+muscle_activation.c:        fem->act_data.theta[2] =  0.0;
+muscle_activation.c:        fem->act_data.theta[3] =  0.5384693101056831;
+muscle_activation.c:        fem->act_data.theta[4] =  0.9061798459386640;
+muscle_activation.c:        fem->act_data.w[0] = fem->act_data.w[4] = 0.2369268850561891;
+muscle_activation.c:        fem->act_data.w[1] = fem->act_data.w[3] = 0.4786286704993665;
+muscle_activation.c:        fem->act_data.w[2] = 0.5688888888888889;
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:        fem->act_data.elem_act_data[ec].S_m[n][i] = S_m[i];
+muscle_activation.c:        fem->act_data.elem_act_data[ec].S_b[n][i] = S_b[i] * (h0 * 0.5 * fem->act_data.theta[n]);
+muscle_activation.c:        fem->act_data.elem_act_data[ec].S_e[n][i] = S_m[i] + S_b[i] * (h0 * 0.5 * fem->act_data.theta[n]);
+muscle_activation.c:        //   printf("S_m[%d][%d][%d] = %f ", ec, n, i, fem->act_data.elem_act_data[ec].S_m[n][i]);
+muscle_activation.c:  // updates fem->act_data.elem_act_data[ec].g_0[i][0]
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:    b_3_1.x = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_1.x; 
+muscle_activation.c:    b_3_2.x = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_2.x; 
+muscle_activation.c:    b_3_1.y = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_1.y; 
+muscle_activation.c:    b_3_2.y = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_2.y; 
+muscle_activation.c:    b_3_1.z = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_1.z; 
+muscle_activation.c:    b_3_2.z = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_2.z; 
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_0[i][0] = PLUS(a_cov[0], b_3_1);
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_0[i][1] = PLUS(a_cov[1], b_3_2);
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_0[i][2] = a_cov[2]; 
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][0].x,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][0].y,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][0].z);
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][1].x,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][1].y,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][1].z);
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][2].x,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][2].y,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][2].z);
+muscle_activation.c:    b_3_1.x = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_1.x; 
+muscle_activation.c:    b_3_2.x = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_2.x; 
+muscle_activation.c:    b_3_1.y = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_1.y; 
+muscle_activation.c:    b_3_2.y = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_2.y; 
+muscle_activation.c:    b_3_1.z = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_1.z; 
+muscle_activation.c:    b_3_2.z = (h0 * 0.5 * fem->act_data.theta[i]) * a_3_2.z; 
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_0[i][0] = PLUS(a_cov[0], b_3_1);
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_0[i][1] = PLUS(a_cov[1], b_3_2);
+muscle_activation.c:    fem->act_data.elem_act_data[ec].g_0[i][2] = a_cov[2]; 
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][0].x,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][0].y,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][0].z);
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][1].x,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][1].y,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][1].z);
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][2].x,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][2].y,
+muscle_activation.c://        fem->act_data.elem_act_data[ec].g_0[i][2].z);
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:    g_cov[0] = fem->act_data.elem_act_data[ec].g_0[n][0]; 
+muscle_activation.c:    g_cov[1] = fem->act_data.elem_act_data[ec].g_0[n][1]; 
+muscle_activation.c:    g_cov[2] = fem->act_data.elem_act_data[ec].g_0[n][2]; 
+muscle_activation.c:            Fa[i][j] = fem->act_data.elem_act_data[ec].Fa[i][j];
+muscle_activation.c:        fem->act_data.elem_act_data[ec].Fbar[n][i][j] = Fbar[i][j];
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:    g_cov[0] = fem->act_data.elem_act_data[ec].g_0[n][0]; 
+muscle_activation.c:    g_cov[1] = fem->act_data.elem_act_data[ec].g_0[n][1]; 
+muscle_activation.c:    g_cov[2] = fem->act_data.elem_act_data[ec].g_0[n][2]; 
+muscle_activation.c:        Fbar[i][j] = fem->act_data.elem_act_data[ec].Fbar[n][i][j];
+muscle_activation.c:    S_e[0][0] = fem->act_data.elem_act_data[ec].S_e[n][0];
+muscle_activation.c:    S_e[0][1] = fem->act_data.elem_act_data[ec].S_e[n][2];
+muscle_activation.c:    S_e[1][0] = fem->act_data.elem_act_data[ec].S_e[n][2];
+muscle_activation.c:    S_e[1][1] = fem->act_data.elem_act_data[ec].S_e[n][1];
+muscle_activation.c:    fem->act_data.elem_act_data[ec].S[n][0] = S[0][0];
+muscle_activation.c:    fem->act_data.elem_act_data[ec].S[n][2] = S[0][1];
+muscle_activation.c:    // fem->act_data.elem_act_data[ec].S[n][2] = S[1][0];
+muscle_activation.c:    fem->act_data.elem_act_data[ec].S[n][1] = S[1][1];
+muscle_activation.c:  // PetscPrintf(PETSC_COMM_SELF, "Fbar (from fem->act_data.elem_act_data[ec].Fbar):\n");
+muscle_activation.c:  // Updates fem->act_data.elem_act_data[ec].S[n][i]
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:  IBMNodes       *ibm=fem->ibm;    
+muscle_activation.c:        S[i] = fem->act_data.elem_act_data[ec].S[n][i];  
+muscle_activation.c:          sum += Bm[m][i]*S[m]*A0*h0*0.5*fem->act_data.w[n];
+muscle_activation.c:          sum += Bs[m][i] * S[m] * A0 * h0/2. * fem->act_data.w[n] * (h0/2. * fem->act_data.theta[n]);
+muscle_activation.c:        S[i] = fem->act_data.elem_act_data[ec].S[n][i];  
+muscle_activation.c:          sum += Bm[m][i]*S[m]*A0*h0*0.5*fem->act_data.w[n];
+muscle_activation.c:          sum += B4[m][i] * S[m] * A0 * h0/2. * fem->act_data.w[n] * (h0/2. * fem->act_data.theta[n]);
+muscle_activation.c:  IBMNodes *ibm = fem->ibm;
+muscle_activation.c:  VecGetArray(fem->Fint, &FF);
+muscle_activation.c:  VecRestoreArray(fem->Fint, &FF); 

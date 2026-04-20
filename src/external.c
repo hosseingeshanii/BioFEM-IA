@@ -1,8 +1,10 @@
 #include  "variables.h"
+#include  <stdio.h>
 
 extern const PetscInt  dof, nbody;
 extern PetscReal       E, rho, h0, dt;
 extern PetscInt        ti, curvature;
+extern char            in_dir[256];
 
 extern struct Cmpnts  PLUS(struct Cmpnts v1, struct Cmpnts v2);
 extern struct Cmpnts  MINUS(struct Cmpnts v1, struct Cmpnts v2);
@@ -29,7 +31,28 @@ PetscErrorCode NodeForce(PetscInt nv, PetscReal F, PetscInt dir, FE *fem) {
   return(0); 
 }
 
-//------------------------------------------------------------------------------------------------------------ 
+//------------------------------------------------------------------------------------------------------------
+PetscErrorCode FExternalPrescribedForceFieldIn(PetscInt step, FE *fem)
+{
+  IBMNodes    *ibm = fem->ibm;
+  PetscViewer viewer;
+  char        filen[512];
+  FILE        *fd;
+
+  snprintf(filen, sizeof(filen), "%s/fext%1.1d_%5.5d.dat", in_dir, ibm->ibi, step);
+
+  fd = fopen(filen, "r");
+  PetscCheck(fd != NULL, PETSC_COMM_SELF, PETSC_ERR_FILE_OPEN,
+             "Unable to open prescribed external force file '%s'", filen);
+  fclose(fd);
+
+  PetscCall(PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer));
+  PetscCall(VecLoad(fem->Fext, viewer));
+  PetscCall(PetscViewerDestroy(&viewer));
+
+  return(0);
+}
+
 PetscErrorCode ConstantVel(PetscReal vel, PetscInt dir, FE *fem)
 {
 

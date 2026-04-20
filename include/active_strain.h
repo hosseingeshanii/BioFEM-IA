@@ -17,7 +17,7 @@ PetscErrorCode ActDataAllocate(FE *fem);
 PetscErrorCode ActDataDestroy(FE *fem);
 
 /** @brief Initialize active-strain module (options, storage, and quadrature). */
-PetscErrorCode InitActStrainProblem(FE *fem);
+PetscErrorCode InitActStrainProblem(FE *fem, PetscInt ibi);
 
 /** @brief Update reference midsurface geometry cache for one element. */
 PetscErrorCode ElemUpdateGeom0Subdiv(FE *fem, PetscInt ec);

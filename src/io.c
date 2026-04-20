@@ -17,6 +17,7 @@ extern PetscInt   Adam;
 extern PetscInt   par_jac;
 
 extern PetscInt   muscle_activation;
+extern PetscInt   manufactured_fexternal_export, manufactured;
 extern struct Cmpnts PLUS(struct Cmpnts v1, struct Cmpnts v2);
 extern struct Cmpnts MINUS(struct Cmpnts v1, struct Cmpnts v2);
 extern struct Cmpnts CROSS(struct Cmpnts v1, struct Cmpnts v2);
@@ -508,7 +509,7 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
+PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 
   PetscInt  n_cells=3, i;
   IBMNodes  *ibm=fem->ibm;  
@@ -516,8 +517,8 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
   char      filepath[80];
 
 
-  // Use current directory if subdir is NULL or empty
-  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Use current directory if out_dir is NULL or empty
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   // Create directory if it doesn't exist
   mkdir(dir, 0777);
 
@@ -657,6 +658,15 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
     PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
   }
   VecRestoreArray(fem->xd, &FF);
+
+  if (manufactured && muscle_activation){
+    VecGetArray(fem->xdd, &FF);
+    PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS xdd float\n");
+    for (i=0; i<ibm->n_v; i++){
+      PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+    }
+    VecRestoreArray(fem->xdd, &FF);
+  }
 
   PetscFPrintf(PETSC_COMM_WORLD, f, "CELL_DATA %d\n",ibm->n_elmt);
   
@@ -857,7 +867,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {     
+PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {     
 
   PetscInt   n_cells=3, i;
   IBMNodes   *ibm=fem->ibm;
@@ -869,8 +879,8 @@ PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *subdi
   FILE  *f;
   char  filen[80];
 
-  // Use current directory if subdir is NULL or empty
-  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Use current directory if out_dir is NULL or empty
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   // Create directory if it doesn't exist
   mkdir(dir, 0777);
 
@@ -975,15 +985,15 @@ PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *subdi
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
+PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   
   IBMNodes     *ibm=fem->ibm;
   PetscViewer  viewer;
   char         filen[256];
   PetscInt     fd;
 
-  // Use current directory if subdir is NULL or empty
-  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Use current directory if out_dir is NULL or empty
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   // Create directory if it doesn't exist
   mkdir(dir, 0777);
 
@@ -1023,7 +1033,7 @@ PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi, const char *subdi
   return(0);
 }
 
-PetscErrorCode InverseOut(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
+PetscErrorCode InverseOut(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   /*
     Description:
     stores the material properties fields from the inverse problem solver.
@@ -1033,8 +1043,8 @@ PetscErrorCode InverseOut(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir
   char         filen[80], filen_m[80], filen_v[80];
   PetscInt     fd;
 
-  // Use current directory if subdir is NULL or empty
-  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Use current directory if out_dir is NULL or empty
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   // Create directory if it doesn't exist
   mkdir(dir, 0777);
   
@@ -1085,7 +1095,7 @@ PetscErrorCode InverseOut(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir
 }
 
 
-PetscErrorCode InverseIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
+PetscErrorCode InverseIn(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   /*
     Description:
     reads the material properties fields to restart the inverse problem solver.
@@ -1099,8 +1109,8 @@ PetscErrorCode InverseIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir)
   char         filen[80], filen_m[80], filen_v[80];
   PetscInt     fd;
 
-  // Use current directory if subdir is NULL or empty
-  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Use current directory if out_dir is NULL or empty
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   // Create directory if it doesn't exist
   // mkdir(dir, 0777);
   
@@ -1158,7 +1168,7 @@ PetscErrorCode InverseIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir)
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir) {
+PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 
   IBMNodes     *ibm=fem->ibm;
   PetscViewer  viewer;
@@ -1168,8 +1178,8 @@ PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi, const char *subdir
   PetscMPIInt rank;
   MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
 
-  // Use current directory if subdir is NULL or empty
-  const char *dir = (subdir && strlen(subdir) > 0) ? subdir : ".";
+  // Use current directory if out_dir is NULL or empty
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
 
   snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
   PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);

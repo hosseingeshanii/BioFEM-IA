@@ -1,0 +1,42 @@
+Initializing body 0 
+Dimension of body 0 is 132 
+Number of nodes of list (body:0) 132 
+Number of element of list(body:0) 220 
+Number of ghost nodes 42
+Init finished 
+[CUDA host] n_elmt=220 max_node_index=131 coord_count=132
+[CUDA kernel] ec=0 nodes=(1,130,0)
+[CUDA kernel] ec=1 nodes=(130,13,0)
+[CUDA kernel] ec=2 nodes=(1,14,130)
+[CUDA kernel] ec=0 out=((1.100000e+00, 1.000000e+00, 1.000000e+00), (1.050000e+00, 1.050000e+00, 1.000000e+00), (1.000000e+00, 1.000000e+00, 1.000000e+00))
+[CUDA kernel] ec=1 out=((1.050000e+00, 1.050000e+00, 1.000000e+00), (1.000000e+00, 1.100000e+00, 1.000000e+00), (1.000000e+00, 1.000000e+00, 1.000000e+00))
+[CUDA kernel] ec=2 out=((1.100000e+00, 1.000000e+00, 1.000000e+00), (1.100000e+00, 1.100000e+00, 1.000000e+00), (1.050000e+00, 1.050000e+00, 1.000000e+00))
+[CUDA host] ec=0 out=((1.100000e+00, 1.000000e+00, 1.000000e+00), (1.050000e+00, 1.050000e+00, 1.000000e+00), (1.000000e+00, 1.000000e+00, 1.000000e+00))
+[CUDA host] ec=1 out=((1.050000e+00, 1.050000e+00, 1.000000e+00), (1.000000e+00, 1.100000e+00, 1.000000e+00), (1.000000e+00, 1.000000e+00, 1.000000e+00))
+[CUDA host] ec=2 out=((1.100000e+00, 1.000000e+00, 1.000000e+00), (1.100000e+00, 1.100000e+00, 1.000000e+00), (1.050000e+00, 1.050000e+00, 1.000000e+00))
+CUDA element-coordinate copy kernel finished successfully for body 0.
+WARNING! There are options you set that were not used!
+WARNING! could be spelling mistake, etc!
+There are 22 unused database options. They are:
+Option left: name:-bulk_modulus value: 74450000.0 source: file
+Option left: name:-C33_subitr_nums value: 50 source: file
+Option left: name:-cart_fib_act value: 1 source: file
+Option left: name:-curv_based_act_coeffs value: 0 source: file
+Option left: name:-e_coefficient_restitution value: 1.0 source: file
+Option left: name:-fem_ksp_converged_reason (no value) source: file
+Option left: name:-fem_ksp_max_it value: 15 source: file
+Option left: name:-fem_ksp_monitor (no value) source: file
+Option left: name:-fem_ksp_rtol value: 7e-1 source: file
+Option left: name:-fem_snes_converged_reason (no value) source: file
+Option left: name:-fem_snes_linesearch_monitor (no value) source: file
+Option left: name:-fem_snes_linesearch_type value: none source: file
+Option left: name:-fem_snes_mf (no value) source: file
+Option left: name:-fem_snes_monitor (no value) source: file
+Option left: name:-fem_snes_rtol value: 7e-1 source: file
+Option left: name:-fem_snes_type value: newtonls source: file
+Option left: name:-fiber_based_act_coeff value: 0 source: file
+Option left: name:-manufactured_fexternal_export value: 0 source: file
+Option left: name:-manufactured_gamma0 value: 0.2 source: file
+Option left: name:-muscle_act_gamma value: 0.2 source: file
+Option left: name:-newmark value: 1 source: file
+Option left: name:-num_gaussian_quad_points value: 1 source: file

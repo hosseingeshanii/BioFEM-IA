@@ -10,6 +10,8 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include <stdbool.h>  
 #include <stdlib.h>
 #include "active_strain.h"
+#include "cuda_bridge.h"
+#include "manufactured_active_strain.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
@@ -22,13 +24,16 @@ PetscInt   par_jac = 0, progress_bar_show = 0;
 PetscReal  fib_smth_factor = 0.001, res_smth_factor = 0.001;
 
 PetscInt   muscle_activation = 0; 
+PetscInt   manufactured_fexternal_export = 0;
+PetscInt   prescribed_force_field = 0;
+PetscInt   cuda_elem_coord_copy = 0;
 
 
 
 
 
 
-char subdir[256] = {"./"};
+char out_dir[256] = {"./"};
 char in_dir[256] = {"./"};
 PetscReal  learning_rate = 0.001;
 
@@ -79,6 +84,17 @@ extern PetscErrorCode FungUniJacobian(PetscInt ibi, FE* fem, PetscReal epsilon);
 // IBMNodes   *ibm;
    
 // PyObject *pModule = NULL;
+
+static void CleanupAndFinalize(FE *fem, IBMNodes *ibm, PetscInt n_initialized) {
+  PetscInt ibi;
+  for (ibi = 0; ibi < n_initialized; ibi++) {
+    Free(&fem[ibi]);
+  }
+  PetscFree(fem);
+  PetscFree(ibm);
+  PetscBarrier(PETSC_NULL);
+  PetscFinalize();
+}
 
 int main(int argc, char **argv)
 {  
@@ -145,11 +161,13 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-progress_bar_show", &progress_bar_show, PETSC_NULL);
 
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-muscle_activation", &muscle_activation, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cuda_elem_coord_copy", &cuda_elem_coord_copy, PETSC_NULL);
   
-  PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-subdir", subdir, 255, PETSC_NULL);
+  PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-out_dir", out_dir, 255, PETSC_NULL);
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-in_dir", in_dir, 255, PETSC_NULL);
   
   PetscInt   ibi, k;
+  PetscErrorCode ierr;
   PetscReal  tcyc=0.76, t, alpha[4];  alpha[0] = 0.25;  alpha[1] = 1./3.;  alpha[2] = 0.5;  alpha[3] = 1.0; 
   SNES       snes;  
   Mat        J = NULL; 
@@ -169,15 +187,26 @@ int main(int argc, char **argv)
   PetscPrintf(PETSC_COMM_SELF, "Dimension of body %d is %d \n", ibi, ibm[ibi].n_v);
   Input(&ibm[ibi], ibi);
   Init(&fem[ibi], ibi);
-
+  PetscPrintf(PETSC_COMM_SELF, "Init finished \n");
   // ContactZ(&fem[ibi]);
 
   if (explicit)  {VecSet(fem[ibi].Mass, 0.0);  VecSet(fem[ibi].Dissip, 0.0);  MassDamp(&fem[ibi]);}
   if (tistart)  {
     
-    LocationIn(&fem[ibi], tistart, ibi, subdir);
+    LocationIn(&fem[ibi], tistart, ibi, out_dir);
 
     }
+  }
+  if (cuda_elem_coord_copy) {
+    for (ibi = 0; ibi < nbody; ibi++) {
+      ierr = RunCudaElementCoordKernel(&fem[ibi]); CHKERRQ(ierr);
+      PetscPrintf(PETSC_COMM_SELF,
+            "CUDA element-coordinate copy kernel finished successfully for body %d.\n",
+            ibi);
+    }
+    /* exit early after processing initialized bodies only */
+    CleanupAndFinalize(fem, ibm, nbody);
+    return 0;
   }
 
   if (muscle_activation){
@@ -185,60 +214,22 @@ int main(int argc, char **argv)
     for (ibi=0; ibi<nbody; ibi++) { 
       PetscErrorCode ierr;
       
-      ierr = InitActStrainProblem(&fem[ibi]); CHKERRQ(ierr);
+      ierr = InitActStrainProblem(&fem[ibi], ibi); CHKERRQ(ierr);
       PetscPrintf(PETSC_COMM_SELF, "Active-Strain problem got initiliazed. \n");
-      
-      // ActDataDestroy(&fem[ibi]); // Just to check no memory leak in allocation
-      // PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy for body %d\n", ibi);
-      
-      
-      // ti = 0;
-      // InitMuscleActProblem(&fem[ibi]);
-      // update_user_act_params(&fem[ibi]);      
-      // update_act_Fa(&fem[ibi]);
-      // update_intmd_state_cov_basis(&fem[ibi]);
-      // Output(&fem[ibi], ti+1, ibi, subdir);
-
-      // // PetscViewer viewerF, viewerDiff, viewerTarget;
-      // // PetscViewerASCIIOpen(PETSC_COMM_SELF, "g_e_targetttt.txt", &viewerTarget);
-      // // VecView(fem[ibi].act_data.g_e_target, viewerTarget);
-      // // PetscViewerDestroy(&viewerTarget);
-
-      // find_intmd_coords(&fem[ibi]);
-      // update_intmd_ibm_coords(&fem[ibi]);      
-      // Output(&fem[ibi], ti+2, ibi, subdir);
-      
-
-      // SetGaussianQuadrature(&fem[ibi]);
-      // printf("a SetGaussianQuadrature\n");
-      // CompInitCovBasisVecs(&fem[ibi]);
-      // printf("a CompInitCovBasisVecs\n");
-      // UpdateFbar(&fem[ibi]);
-      // printf("a UpdateFbar\n");
-      
-
-      // // printf("JUST FOR TEST!!\n");
-      // // Input(&ibm[ibi], ibi);
-      // // printf("JUST FOR TEST!!\n");
-
-      // initialize_elasticity(&fem[ibi], initial_elas, initial_poisson);
-      // printf("a initialize_elasticity\n");      
-
-      // update_mid_surf_elastic_stress(&fem[ibi]);
-      // printf("a update_mid_surf_elastic_stress\n");      
-
-      
-      // UpdateTotalStressAftAct(&fem[ibi]);
-      // printf("a UpdateTotalStressAftAct\n");
-
-      // UpdateFInternalAftAct(&fem[ibi]);
-      // printf("a UpdateFInternalAftAct\n");
-
-      // Output(&fem[ibi], ti+3, ibi, subdir);
 
     }    
   }
 
+  if (manufactured_fexternal_export) {
+    PetscCheck(muscle_activation && manufactured, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+               "-manufactured_fexternal_export requires both -manufactured 1 and -muscle_activation 1");
+
+    for (ibi = 0; ibi < nbody; ibi++) {
+      PetscCall(GenerateManufacturedFExternalAndKinematicsAllTimeSteps(&fem[ibi], ibi));
+    }
+    CleanupAndFinalize(fem, ibm, nbody);
+    return 0;
+  }
 
   
   if(inverse){        
@@ -248,22 +239,24 @@ int main(int argc, char **argv)
   }
   
   if (tistart) tistart++;
+  PetscPrintf(PETSC_COMM_SELF, "Starting time-stepping loop from tistart = %d for %d steps \n", tistart, tisteps);
+  
   // if (tistart==0) tisteps ++;
 
   for (ti=tistart; ti<tistart+tisteps; ti++) {
 
-    for (ibi=0; ibi<nbody; ibi++) {
-      PetscPrintf(PETSC_COMM_WORLD, "body:%d Time(%d)=%le\n", ibi, ti, ti*dt);
-      // if (contact==1) {ContactZ(&fem[ibi]);}   
+  for (ibi=0; ibi<nbody; ibi++) {
+    PetscPrintf(PETSC_COMM_WORLD, "body:%d Time(%d)=%le\n", ibi, ti, ti*dt);
+    // if (contact==1) {ContactZ(&fem[ibi]);}   
       
 
-      if (explicit) {
-	//------------------Explicit RK Solver
-	for (k=0; k<4; k++) {	  
-	  FormRK(fem[ibi].Res, fem[ibi].x, fem[ibi].xn, fem[ibi].y, fem[ibi].yn, alpha[k], &fem[ibi]);
-	}
+    if (explicit) {
+      //------------------Explicit RK Solver
+      for (k=0; k<4; k++) {	  
+      FormRK(fem[ibi].Res, fem[ibi].x, fem[ibi].xn, fem[ibi].y, fem[ibi].yn, alpha[k], &fem[ibi]);
+      }
 	
-      } else {  
+      } else { 
 	//------------------Implicit SNES solver
 	/* Typical options
 	   -fem_snes_mf
@@ -271,9 +264,10 @@ int main(int argc, char **argv)
 	   -fem_snes_max_it 20
 	   -fem_snes_monitor
 	   #-fem_ksp_type fgmres	 */
-		      Vec U;
-	        PetscErrorCode ierr;
-	        SNESConvergedReason reason;
+
+        Vec U;
+        PetscErrorCode ierr;
+        SNESConvergedReason reason;
         VecDuplicate(fem[ibi].x, &U);
         VecCopy(fem[ibi].x, U);
         
@@ -385,31 +379,21 @@ int main(int argc, char **argv)
     //if (ti!=0 && ti == (ti/tiout)*tiout){
     if (ti == (ti/tiout)*tiout){
       for (ibi=0; ibi<nbody; ibi++) {
-        Output(&fem[ibi], ti+1, ibi, subdir);
+        Output(&fem[ibi], ti, ibi, out_dir);
         
   
-	// LocationOut(&fem[ibi], ti+1, ibi, subdir);
-	if (outghost) {OutputGhost(&fem[ibi], ti, ibi, subdir);}
+	// LocationOut(&fem[ibi], ti+1, ibi, out_dir);
+	if (outghost) {OutputGhost(&fem[ibi], ti, ibi, out_dir);}
       }
     }
   }// ti
   
   //Finish UP
   for (ibi=0; ibi<nbody; ibi++) {
-    LocationOut(&fem[ibi], ti+1, ibi, subdir);
-    //Output(&fem[ibi], ti, ibi);
-    if(outghost){OutputGhost(&fem[ibi], ti, ibi, subdir);}
-    // PetscPrintf(PETSC_COMM_SELF, "Body %d Finished\n", ibi);
-    Free(&fem[ibi]);
+    LocationOut(&fem[ibi], ti+1, ibi, out_dir);
+    if(outghost){OutputGhost(&fem[ibi], ti, ibi, out_dir);}    
   }
-  PetscFree(fem);
-  PetscFree(ibm);
-  // PetscPrintf(PETSC_COMM_SELF, "Parallel Jacobian Computation %d\n", rank);
-
-  PetscBarrier(PETSC_NULL);  
-  // PetscPrintf(PETSC_COMM_SELF, "Before PetscFinalize %d\n", rank);
-  PetscFinalize();
-  
+  CleanupAndFinalize(fem, ibm, nbody);
   return(0);
 }
 
@@ -599,11 +583,11 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     FInternal(fem);
   }
   
-  // if(tisteps>1) {FDynamic(fem);}
+  if(tisteps>1) {FDynamic(fem);}
   ierr = FExternal(fem); CHKERRQ(ierr);
 
   VecWAXPY(R,-1., fem->Fext, fem->Fint);
-  // VecAXPY(R,1., fem->Fdyn);
+  VecAXPY(R,1., fem->Fdyn);
 
   //---------2d case
   // if(twod){
@@ -852,6 +836,7 @@ PetscErrorCode xAccVel(FE *fem) {
   PetscReal      M1, C1, M2, C2, M3, C3, M[9], C[9];
   PetscReal      *xx, *xxn, *xxd, *xxdd;
   PetscReal      xxddn1, xxddn2, xxddn3;
+  PetscReal      xxdn1, xxdn2, xxdn3;
   PetscReal      Gama=0.5, Beta=0.25;
   PetscInt       nv;
   
@@ -865,6 +850,9 @@ PetscErrorCode xAccVel(FE *fem) {
   VecGetArray(fem->x, &xx);
 
   for (nv=0; nv<ibm->n_v+ibm->n_ghosts; nv++) {
+    xxdn1 = xxd[dof*nv  ];
+    xxdn2 = xxd[dof*nv+1];
+    xxdn3 = xxd[dof*nv+2];
     xxddn1= xxdd[dof*nv  ];
     xxddn2= xxdd[dof*nv+1];
     xxddn3= xxdd[dof*nv+2];
@@ -882,6 +870,26 @@ PetscErrorCode xAccVel(FE *fem) {
     xxd[dof*nv  ] = xxd[nv*dof  ] + C2*xxddn1 + C3*xxdd[nv*dof  ];
     xxd[dof*nv+1] = xxd[nv*dof+1] + C2*xxddn2 + C3*xxdd[nv*dof+1];
     xxd[dof*nv+2] = xxd[nv*dof+2] + C2*xxddn3 + C3*xxdd[nv*dof+2];
+
+    if (nv == 75) {
+      PetscPrintf(PETSC_COMM_SELF,
+                  "[xAccVel] ti=%d nv=%d\n"
+                  "  coeffs: M1=% .6e  M2=% .6e  M3=% .6e\n"
+                  "  acc_x: M1*(x-xn)=% .6e  -M2*xd_old=% .6e  -M3*xdd_old=% .6e  => xdd_new=% .6e\n"
+                  "  acc_y: M1*(x-xn)=% .6e  -M2*xd_old=% .6e  -M3*xdd_old=% .6e  => xdd_new=% .6e\n"
+                  "  acc_z: M1*(x-xn)=% .6e  -M2*xd_old=% .6e  -M3*xdd_old=% .6e  => xdd_new=% .6e\n"
+                  "  vel_x: xd_old=% .6e  +(1-gamma)dt*xdd_old=% .6e  +gamma dt*xdd_new=% .6e  => xd_new=% .6e\n"
+                  "  vel_y: xd_old=% .6e  +(1-gamma)dt*xdd_old=% .6e  +gamma dt*xdd_new=% .6e  => xd_new=% .6e\n"
+                  "  vel_z: xd_old=% .6e  +(1-gamma)dt*xdd_old=% .6e  +gamma dt*xdd_new=% .6e  => xd_new=% .6e\n",
+                  ti, nv,
+                  M1, M2, M3,
+                  M1*(xx[nv*dof  ] - xxn[nv*dof  ]), -M2*xxdn1, -M3*xxddn1, xxdd[dof*nv  ],
+                  M1*(xx[nv*dof+1] - xxn[nv*dof+1]), -M2*xxdn2, -M3*xxddn2, xxdd[dof*nv+1],
+                  M1*(xx[nv*dof+2] - xxn[nv*dof+2]), -M2*xxdn3, -M3*xxddn3, xxdd[dof*nv+2],
+                  xxdn1, C2*xxddn1, C3*xxdd[dof*nv  ], xxd[dof*nv  ],
+                  xxdn2, C2*xxddn2, C3*xxdd[dof*nv+1], xxd[dof*nv+1],
+                  xxdn3, C2*xxddn3, C3*xxdd[dof*nv+2], xxd[dof*nv+2]);
+    }
     
     //  }     
   }
@@ -975,10 +983,10 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   PetscMPIInt rank;
   MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
   if(!rank){
-    Output(fem, 0, ibi, subdir);
+    Output(fem, 0, ibi, out_dir);
   }
   
-  if(outghost){OutputGhost(fem, 0, ibi, subdir);}
+  if(outghost){OutputGhost(fem, 0, ibi, out_dir);}
   
   return(0);
 }

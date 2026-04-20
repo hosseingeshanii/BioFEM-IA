@@ -6,7 +6,13 @@
 #include  <petscvec.h>
 #include  "act_variables.h"
 
-typedef struct {
+#ifdef __cplusplus
+/* 'explicit' is a C++ keyword; when this header is included from C++ files
+  (e.g., cuda_wrapper.cpp) rename the identifier to avoid syntax errors. */
+#define explicit explicit_
+#endif
+
+typedef struct node {
   PetscInt     Node;
   struct node  *next;
 } node;
@@ -91,4 +97,8 @@ typedef struct {
   // UserCtx    userctx;
 } FE;
 
+#endif
+
+#ifdef __cplusplus
+#undef explicit
 #endif

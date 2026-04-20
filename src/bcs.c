@@ -4,6 +4,7 @@ extern const PetscInt   dof;
 extern const PetscReal  h0;
 extern PetscInt         ti;
 extern PetscInt         tisteps;
+extern PetscInt         prescribed_force_field;
 extern PetscReal        dt;
 
 extern PetscErrorCode  EdgeFix(PetscInt edge_n, FE *fem);
@@ -20,6 +21,7 @@ extern PetscErrorCode  GhostFree(PetscInt edge_n, FE *fem);
 extern PetscErrorCode  ModifyGhostFix(PetscInt edge_n, FE *fem);
 extern PetscErrorCode  ModifyGhostFree(PetscInt edge_n, FE *fem);
 extern PetscErrorCode  SurfaceGravity(PetscReal P, FE *fem);
+extern PetscErrorCode  FExternalPrescribedForceFieldIn(PetscInt step, FE *fem);
 
 
 PetscErrorCode GhostLoc(FE *fem) {
@@ -95,6 +97,10 @@ PetscErrorCode FExternal(FE *fem) {
   PetscReal  f, t;
   IBMNodes   *ibm=fem->ibm;
   PetscInt   ibi=ibm->ibi;
+
+  if (prescribed_force_field) {
+    PetscCall(FExternalPrescribedForceFieldIn(ti, fem));
+  }
   
   /* //patch test */
   // EdgeFix(0, fem);
@@ -182,13 +188,13 @@ PetscErrorCode FExternal(FE *fem) {
   // EdgeFree(0, fem);
 
   // Rectangular Plate Active Strain Test - time-varying pressure
-  {
-    PetscReal startP = 1.e5;    /* starting pressure */
-    PetscReal stepP  = 1.e5;    /* increase per interval */
-    PetscInt  interval = 10;    /* timesteps between increases */
-    PetscReal P = startP + (PetscReal)(ti/interval)*stepP;
-    EdgeConstPressure(1, 9e5, 0, fem);
-  }
+  // {
+  //   PetscReal startP = 1.e5;    /* starting pressure */
+  //   PetscReal stepP  = 1.e5;    /* increase per interval */
+  //   PetscInt  interval = 10;    /* timesteps between increases */
+  //   PetscReal P = startP + (PetscReal)(ti/interval)*stepP;
+  //   EdgeConstPressure(1, 9e5, 0, fem);
+  // }
   // EdgeConstPressure(3, -9e5, 0, fem);
 
   // EdgeDirectionalFix(0, 1, fem);

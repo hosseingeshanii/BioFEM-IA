@@ -23,8 +23,11 @@
 #include <petsctao.h>
 #include <petscviewer.h>
 #include "variables.h" /* Project-local header */
+#include "manufactured_active_strain.h"
 #include <petscsys.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
 
 /*--------------------------------------------------------------------------------------------------
@@ -46,8 +49,18 @@ PetscInt cart_fib_act;
 
 /* External globals from the rest of the code */
 extern PetscInt dof, curvature, ConstitutiveLawNonLinear;
-extern PetscReal E, mu, rho, h0;
+extern PetscInt ti, manufactured, manufactured_fexternal_export, prescribed_force_field;
+extern PetscInt tistart, tisteps;
+extern PetscReal E, mu, rho, h0, dt;
 extern PetscReal initial_elas, initial_poisson;
+extern PetscErrorCode FDynamic(FE *fem);
+extern PetscErrorCode xAccVel(FE *fem);
+extern PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir);
+
+extern char           in_dir[256];
+extern char           out_dir[256];
+
+
 
 /* Shape function derivatives at element center (subdivision surface) */
 static const PetscReal Na_center[2][12] = {
@@ -71,7 +84,6 @@ static const PetscReal Nab_center[3][12] = {
    -0.4444, -0.4444, -0.0556,  0.0556,  0.5556,  0.0556}
 };
 
-
 PetscErrorCode GetUserActParams(FE *fem){
     PetscFunctionBeginUser;
     // UserCtx  *userctx = &fem->userctx;    
@@ -79,6 +91,8 @@ PetscErrorCode GetUserActParams(FE *fem){
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);    
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_gamma0", &manufactured_gamma0, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_T", &manufactured_T, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-bulk_modulus", &(fem->act_data.K), PETSC_NULL);
 
     fem->act_data.mu = mu;
@@ -93,8 +107,7 @@ PetscErrorCode ActDataAllocate(FE *fem)
   PetscInt nelem = fem->ibm->n_elmt;
   PetscInt n_qp  = act->n_qp;
 
-  /* Always start from a known state */
-  /* If ActData can be re-allocated, consider calling ActDataDestroy(fem) first */
+  
   act->theta = NULL;
   act->w = NULL;
   act->elem_act_data = NULL;
@@ -1082,9 +1095,23 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
     }
     else
     {
-        Fa_cart[0][0] = 1.0 - gamma;
-        Fa_cart[1][1] = 1.0 - gamma;
-        Fa_cart[2][2] = 1.0/(Fa_cart[0][0]*Fa_cart[1][1]);
+        if (manufactured) {
+            PetscReal t = ti * dt;
+            PetscReal lambda;
+
+            gamma  = manufactured_gamma0 * PetscPowReal(PetscSinReal(PETSC_PI * t / manufactured_T), 2.0);
+            lambda = 1.0 - gamma;
+            (void)lambda;
+
+            Fa_cart[0][0] = lambda;
+            Fa_cart[1][1] = 1.0;
+            Fa_cart[2][2] = 1.0;
+        } else {
+            Fa_cart[0][0] = 1.0 - gamma;
+            Fa_cart[1][1] = 1.0 - gamma;
+            Fa_cart[2][2] = 1.0/(Fa_cart[0][0]*Fa_cart[1][1]);
+        }
+        
     }
         // PrintMat3x3("Fa_cart", Fa_cart);
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
@@ -1749,12 +1776,20 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
   PetscFunctionReturn(ierr);
 }
 
-PetscErrorCode InitActStrainProblem(FE *fem){
+PetscErrorCode InitActStrainProblem(FE *fem, PetscInt ibi){
   PetscFunctionBeginUser;
+
+  if (manufactured){
+    PetscCall(GetManufacturedActiveStrainOptions());
+  }
 
   PetscCall(GetUserActParams(fem));
   PetscCall(ActDataAllocate(fem));
   PetscCall(SetGaussianQuadrature(fem));
+  if (prescribed_force_field && !manufactured_fexternal_export) {
+    // PetscCall(ManufacturedInitialKinematicsIn(tistart, fem));
+    PetscCall(ManufacturedKinematicsAndFExternalSetInitial(fem, ibi, tistart));
+  }
   
   PetscFunctionReturn(0);
 }

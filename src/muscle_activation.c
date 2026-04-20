@@ -2360,7 +2360,7 @@ PetscErrorCode InitMuscleActProblem(FE *fem){
   // PetscCall(update_user_act_params(fem));
   // update_act_Fa(fem);
   // update_intmd_state_cov_basis(fem);
-  // // Output(fem, ti+1, ibi, subdir);
+  // // Output(fem, ti+1, ibi, out_dir);
 
   // // PetscViewer viewerF, viewerDiff, viewerTarget;
   // // PetscViewerASCIIOpen(PETSC_COMM_SELF, "g_e_targetttt.txt", &viewerTarget);
@@ -2369,7 +2369,7 @@ PetscErrorCode InitMuscleActProblem(FE *fem){
 
   // find_intmd_coords(fem);
   // update_intmd_ibm_coords(fem);      
-  // // Output(fem, ti+2, ibi, subdir);
+  // // Output(fem, ti+2, ibi, out_dir);
   
 
   // SetGaussianQuadrature(fem);
