@@ -11,6 +11,9 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include <stdlib.h>
 #include "active_strain.h"
 #include "cuda_bridge.h"
+#include "kokkos_bridge.h"
+#include "cuda_processes.h"
+#include "kokkos_processes.h"
 #include "manufactured_active_strain.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
@@ -26,7 +29,8 @@ PetscReal  fib_smth_factor = 0.001, res_smth_factor = 0.001;
 PetscInt   muscle_activation = 0; 
 PetscInt   manufactured_fexternal_export = 0;
 PetscInt   prescribed_force_field = 0;
-PetscInt   cuda_elem_coord_copy = 0;
+PetscInt   cuda_process = 0;
+PetscInt   kokkos_process = 0;
 
 
 
@@ -90,6 +94,8 @@ static void CleanupAndFinalize(FE *fem, IBMNodes *ibm, PetscInt n_initialized) {
   for (ibi = 0; ibi < n_initialized; ibi++) {
     Free(&fem[ibi]);
   }
+  if (cuda_process) DestroyCudaWorkspace();
+  if (kokkos_process) DestroyKokkosWorkspace();
   PetscFree(fem);
   PetscFree(ibm);
   PetscBarrier(PETSC_NULL);
@@ -161,7 +167,8 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-progress_bar_show", &progress_bar_show, PETSC_NULL);
 
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-muscle_activation", &muscle_activation, PETSC_NULL);
-  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cuda_elem_coord_copy", &cuda_elem_coord_copy, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cuda_process", &cuda_process, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-kokkos_process", &kokkos_process, PETSC_NULL);
   
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-out_dir", out_dir, 255, PETSC_NULL);
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-in_dir", in_dir, 255, PETSC_NULL);
@@ -197,21 +204,11 @@ int main(int argc, char **argv)
 
     }
   }
-  if (cuda_elem_coord_copy) {
-    for (ibi = 0; ibi < nbody; ibi++) {
-      ierr = RunCudaElementCoordKernel(&fem[ibi]); CHKERRQ(ierr);
-      PetscPrintf(PETSC_COMM_SELF,
-            "CUDA element-coordinate copy kernel finished successfully for body %d.\n",
-            ibi);
-    }
-    /* exit early after processing initialized bodies only */
-    CleanupAndFinalize(fem, ibm, nbody);
-    return 0;
-  }
+
 
   if (muscle_activation){
-
     for (ibi=0; ibi<nbody; ibi++) { 
+
       PetscErrorCode ierr;
       
       ierr = InitActStrainProblem(&fem[ibi], ibi); CHKERRQ(ierr);
@@ -219,6 +216,25 @@ int main(int argc, char **argv)
 
     }    
   }
+
+  if (kokkos_process) {
+
+    ierr = RunKokkosProcesses(fem); CHKERRQ(ierr);
+
+    CleanupAndFinalize(fem, ibm, nbody);
+    return 0;
+  }
+
+  if (cuda_process) {
+
+    ierr = RunCudaProcesses(fem); CHKERRQ(ierr);
+    /* exit early after processing initialized bodies only */
+    CleanupAndFinalize(fem, ibm, nbody);
+    return 0;
+
+  }
+
+
 
   if (manufactured_fexternal_export) {
     PetscCheck(muscle_activation && manufactured, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
@@ -1123,7 +1139,7 @@ PetscErrorCode Free(FE *fem) {
 
   if(muscle_activation){
     ActDataDestroy(fem); // Just to check no memory leak in allocation
-    PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy\n");
+    // PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy\n");
   }
   
   return(0);

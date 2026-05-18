@@ -1,5 +1,16 @@
-#ifndef MATH_H
-#define MATH_H
+#ifndef BIOFEM_MATH_H
+#define BIOFEM_MATH_H
+
+/*
+ * This project header is named math.h, so -Iinclude can shadow the system
+ * <math.h>. Forward to the real C math header first; CUDA/CCCL expects
+ * symbols such as ::fpclassify, ::isgreater, and friends to be available.
+ */
+#if defined(__GNUC__)
+#include_next <math.h>
+#else
+#include <math.h>
+#endif
 
 #include <petscsys.h>
 

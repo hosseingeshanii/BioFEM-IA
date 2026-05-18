@@ -38,6 +38,22 @@ man/
 *.err
 surface*
 
+# Example run outputs / profiling artifacts
+examples/cuda_mesh_sweep/
+examples/kokkos_cuda_mesh_sweep/
+examples/kokkos_cuda_test/
+examples/kokkos_openmp_mesh_sweep/
+examples/kokkos_openmp_test/
+examples/**/out*
+examples/**/*.nsys-rep
+examples/**/*.sqlite
+examples/**/nsys_*.txt
+examples/**/*_stats.txt
+examples/**/*scaling*.csv
+examples/**/*scaling*.png
+examples/**/*scaling*.svg
+examples/**/__pycache__/
+
 # Mesh / list files
 blist*
 elist*
