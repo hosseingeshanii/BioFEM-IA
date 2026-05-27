@@ -5,7 +5,7 @@ Use `CONFIG=...` to select a repeatable build mode:
 ```bash
 make cleanobj
 make CONFIG=config/direct-cuda.mk
-make CONFIG=config/cpu.mk
+make CONFIG=config/dmplex.mk
 make CONFIG=config/kokkos-openmp.mk
 make CONFIG=config/kokkos-cuda.mk KOKKOS_CXX=nvcc_wrapper CUDA_ARCH=sm_80
 ```

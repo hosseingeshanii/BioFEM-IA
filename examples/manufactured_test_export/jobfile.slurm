@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=testt_1core        # job name
+#SBATCH --job-name=testt_cpu_1core        # job name
 #SBATCH --time=02:00:00               # wall time (HH:MM:SS)
 #SBATCH --ntasks=1                    # total MPI tasks (== cores here)
 #SBATCH --mem=100G                     # memory per node
@@ -19,8 +19,8 @@ module load PETSc/3.20.3-debug       # if your app needs PETSc
 # --- Launch the job ---
 
 # Option A (recommended on Slurm): use srun (automatically matches allocation)
-# srun --mpi=pmix ./testt
+# srun --mpi=pmix ./testt-cpu
 
 # Option B: if you specifically want mpirun:
-# mpirun  ./testt
-mpirun   -mca pml ucx   -mca btl '^uct,ofi'   -mca mtl '^ofi'   ./testt
+# mpirun  ./testt-cpu
+mpirun   -mca pml ucx   -mca btl '^uct,ofi'   -mca mtl '^ofi'   ./testt-cpu

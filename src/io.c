@@ -148,6 +148,7 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   //   }
   // }
   
+  if (inverse) {
     PetscMalloc(ibm->n_v*sizeof(PetscReal ***), &(fem->dR_dE));
     for(int i=0; i<ibm->n_v; i++){
       PetscMalloc(ibm->n_elmt*sizeof(PetscReal **), &(fem->dR_dE[i]));
@@ -158,6 +159,7 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
         }
       }
     }
+  }
 
   
   if (Adam){
@@ -384,7 +386,7 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
     /* ibm->x_bp0[nc] = x_bp[nc]/char_length_x + xd[0];  ibm->y_bp0[nc] = y_bp[nc]/char_length_y + xd[1];  ibm->z_bp0[nc] = z_bp[nc]/char_length_z + xd[2]; */
     ibm->x_bp0[nc] = ibm->x_bp[nc];  ibm->y_bp0[nc] =  ibm->y_bp[nc];  ibm->z_bp0[nc] = ibm->z_bp[nc];  }
 
-  PetscPrintf(PETSC_COMM_SELF, "Number of nodes of list (body:%d) %d \n", ibm->ibi, ibm->n_v);
+  PetscPrintf(PETSC_COMM_WORLD, "Number of nodes of list (body:%d) %d \n", ibm->ibi, ibm->n_v);
   
   //------------------------------------------Reading elements list
   snprintf(filen, sizeof(filen), "%s/elist%2.2d", in_dir, ibi);
@@ -411,7 +413,7 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
   for (ec=0; ec<n_elmt; ec++) {
     ibm->nv1[ec] = nv1[ec];  ibm->nv2[ec] = nv2[ec];  ibm->nv3[ec] = nv3[ec]; 
   }
-  PetscPrintf(PETSC_COMM_SELF, "Number of element of list(body:%d) %d \n", ibi, ibm->n_elmt);
+  PetscPrintf(PETSC_COMM_WORLD, "Number of element of list(body:%d) %d \n", ibi, ibm->n_elmt);
 
   //--------------------------------------Reading Boundary nodes
   snprintf(filen, sizeof(filen), "%s/blist%2.2d", in_dir, ibi);

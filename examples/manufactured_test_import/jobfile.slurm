@@ -20,8 +20,8 @@ ml PETSc/3.22.5
 # --- Launch the job ---
 
 # Option A (recommended on Slurm): use srun (automatically matches allocation)
-# srun --mpi=pmix ./testt
+# srun --mpi=pmix ./testt-cpu
 
 # Option B: if you specifically want mpirun:
-# mpirun  ./testt
-mpirun   -mca pml ucx   -mca btl '^uct,ofi'   -mca mtl '^ofi'   ./testt
+# mpirun  ./testt-cpu
+mpirun   -mca pml ucx   -mca btl '^uct,ofi'   -mca mtl '^ofi'   ./testt-cpu

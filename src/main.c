@@ -15,6 +15,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include "cuda_processes.h"
 #include "kokkos_processes.h"
 #include "manufactured_active_strain.h"
+#include "dmplex_geom.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
@@ -31,6 +32,7 @@ PetscInt   manufactured_fexternal_export = 0;
 PetscInt   prescribed_force_field = 0;
 PetscInt   cuda_process = 0;
 PetscInt   kokkos_process = 0;
+PetscInt   dmplex_geom_process = 0;
 
 
 
@@ -82,6 +84,8 @@ extern PetscErrorCode updateFungAdam(PetscReal *learning_rate, FE *fem, PetscInt
 
 extern PetscErrorCode FungJacobian(PetscInt ibi, FE* fem, PetscReal epsilon);
 extern PetscErrorCode FungUniJacobian(PetscInt ibi, FE* fem, PetscReal epsilon);
+extern PetscErrorCode IrrVer(IBMNodes *ibm);
+extern PetscErrorCode Patch(IBMNodes *ibm);
 
 
 // FE         *fem; 
@@ -169,6 +173,24 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-muscle_activation", &muscle_activation, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cuda_process", &cuda_process, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-kokkos_process", &kokkos_process, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-dmplex_geom_process", &dmplex_geom_process, PETSC_NULL);
+
+  PetscCheck(!(cuda_process && kokkos_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+             "-cuda_process and -kokkos_process are mutually exclusive; choose one preprocessing backend");
+  PetscCheck(!((cuda_process || kokkos_process) && dmplex_geom_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+             "-dmplex_geom_process is mutually exclusive with -cuda_process and -kokkos_process");
+#if defined(BIOFEM_BACKEND_CUDA)
+  PetscCheck(!kokkos_process, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+             "This executable was built for direct CUDA; use -cuda_process 1 -kokkos_process 0");
+#elif defined(BIOFEM_BACKEND_KOKKOS)
+  PetscCheck(!cuda_process, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+             "This executable was built for Kokkos; use -kokkos_process 1 -cuda_process 0");
+#else
+  PetscCheck(!cuda_process, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+             "This executable was built without direct CUDA; rebuild with USE_CUDA=1");
+  PetscCheck(!kokkos_process, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+             "This executable was built without Kokkos; rebuild with USE_KOKKOS=1");
+#endif
   
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-out_dir", out_dir, 255, PETSC_NULL);
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-in_dir", in_dir, 255, PETSC_NULL);
@@ -188,13 +210,13 @@ int main(int argc, char **argv)
   PetscMalloc(nbody*sizeof(IBMNodes), &ibm);
     
   for (ibi=0; ibi<nbody; ibi++) { 
-  PetscPrintf(PETSC_COMM_SELF, "Initializing body %d \n", ibi);
+  PetscPrintf(PETSC_COMM_WORLD, "Initializing body %d \n", ibi);
   Dimension(&ibm[ibi], ibi);
   Create(&ibm[ibi], &fem[ibi], ibi);
-  PetscPrintf(PETSC_COMM_SELF, "Dimension of body %d is %d \n", ibi, ibm[ibi].n_v);
+  PetscPrintf(PETSC_COMM_WORLD, "Dimension of body %d is %d \n", ibi, ibm[ibi].n_v);
   Input(&ibm[ibi], ibi);
   Init(&fem[ibi], ibi);
-  PetscPrintf(PETSC_COMM_SELF, "Init finished \n");
+  PetscPrintf(PETSC_COMM_WORLD, "Init finished \n");
   // ContactZ(&fem[ibi]);
 
   if (explicit)  {VecSet(fem[ibi].Mass, 0.0);  VecSet(fem[ibi].Dissip, 0.0);  MassDamp(&fem[ibi]);}
@@ -206,15 +228,21 @@ int main(int argc, char **argv)
   }
 
 
-  if (muscle_activation){
+  if (muscle_activation || dmplex_geom_process){
     for (ibi=0; ibi<nbody; ibi++) { 
 
       PetscErrorCode ierr;
-      
+
       ierr = InitActStrainProblem(&fem[ibi], ibi); CHKERRQ(ierr);
-      PetscPrintf(PETSC_COMM_SELF, "Active-Strain problem got initiliazed. \n");
+      PetscPrintf(PETSC_COMM_WORLD, "Active-Strain geometry/basis storage got initiliazed. \n");
 
     }    
+  }
+
+  if (dmplex_geom_process) {
+    ierr = RunDMPlexGeomProcesses(fem); CHKERRQ(ierr);
+    CleanupAndFinalize(fem, ibm, nbody);
+    return 0;
   }
 
   if (kokkos_process) {
@@ -1114,16 +1142,18 @@ PetscErrorCode Free(FE *fem) {
   // }
   // PetscFree(fem->dR_dE);
 
-  for (int i = 0; i < ibm->n_v; i++) {
-    for (int j = 0; j < ibm->n_elmt; j++) {
-      for (int k=0; k<dof; k++){
-        PetscFree(fem->dR_dE[i][j][k]);
-      }        
-      PetscFree(fem->dR_dE[i][j]);  
+  if (inverse) {
+    for (int i = 0; i < ibm->n_v; i++) {
+      for (int j = 0; j < ibm->n_elmt; j++) {
+        for (int k=0; k<dof; k++){
+          PetscFree(fem->dR_dE[i][j][k]);
+        }        
+        PetscFree(fem->dR_dE[i][j]);  
+      }
+      PetscFree(fem->dR_dE[i]);
     }
-    PetscFree(fem->dR_dE[i]);
+    PetscFree(fem->dR_dE);
   }
-  PetscFree(fem->dR_dE);
 
   if(bending){
     PetscFree(ibm->belmtsedge);  PetscFree(ibm->belmts);  PetscFree(ibm->edgefrontnodes);
@@ -1137,7 +1167,7 @@ PetscErrorCode Free(FE *fem) {
     PetscFree(ibm->p6x0);  PetscFree(ibm->p6y0);  PetscFree(ibm->p6z0);
   }
 
-  if(muscle_activation){
+  if(muscle_activation || dmplex_geom_process){
     ActDataDestroy(fem); // Just to check no memory leak in allocation
     // PetscPrintf(PETSC_COMM_SELF, "After ActDataDestroy\n");
   }

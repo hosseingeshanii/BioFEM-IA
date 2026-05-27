@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="620" viewBox="0 0 980 620">
+<rect width="100%" height="100%" fill="white"/>
+<text x="95" y="30" font-family="Arial, sans-serif" font-size="20" font-weight="700">Backend per-iteration geometry kernel comparison across meshes</text>
+<line x1="95" y1="50" x2="95" y2="530" stroke="#111827" stroke-width="1.2"/>
+<line x1="95" y1="530" x2="720" y2="530" stroke="#111827" stroke-width="1.2"/>
+<line x1="95.0" y1="530" x2="95.0" y2="536" stroke="#111827"/>
+<text x="95.0" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">334</text>
+<line x1="96.8" y1="530" x2="96.8" y2="536" stroke="#111827"/>
+<text x="96.8" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">1434</text>
+<line x1="99.7" y1="530" x2="99.7" y2="536" stroke="#111827"/>
+<text x="99.7" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">3294</text>
+<line x1="103.9" y1="530" x2="103.9" y2="536" stroke="#111827"/>
+<text x="103.9" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">5926</text>
+<line x1="116.0" y1="530" x2="116.0" y2="536" stroke="#111827"/>
+<text x="116.0" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">13496</text>
+<line x1="133.0" y1="530" x2="133.0" y2="536" stroke="#111827"/>
+<text x="133.0" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">24132</text>
+<line x1="154.9" y1="530" x2="154.9" y2="536" stroke="#111827"/>
+<text x="154.9" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">37846</text>
+<line x1="250.1" y1="530" x2="250.1" y2="536" stroke="#111827"/>
+<text x="250.1" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">97414</text>
+<line x1="445.8" y1="530" x2="445.8" y2="536" stroke="#111827"/>
+<text x="445.8" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">219848</text>
+<line x1="720.0" y1="530" x2="720.0" y2="536" stroke="#111827"/>
+<text x="720.0" y="554" text-anchor="middle" font-family="Arial, sans-serif" font-size="11">391434</text>
+<line x1="95" y1="530.0" x2="720" y2="530.0" stroke="#e5e7eb"/>
+<text x="85" y="534.0" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0</text>
+<line x1="95" y1="434.0" x2="720" y2="434.0" stroke="#e5e7eb"/>
+<text x="85" y="438.0" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0.0724</text>
+<line x1="95" y1="338.0" x2="720" y2="338.0" stroke="#e5e7eb"/>
+<text x="85" y="342.0" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0.145</text>
+<line x1="95" y1="242.0" x2="720" y2="242.0" stroke="#e5e7eb"/>
+<text x="85" y="246.0" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0.217</text>
+<line x1="95" y1="146.0" x2="720" y2="146.0" stroke="#e5e7eb"/>
+<text x="85" y="150.0" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0.289</text>
+<line x1="95" y1="50.0" x2="720" y2="50.0" stroke="#e5e7eb"/>
+<text x="85" y="54.0" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0.362</text>
+<polyline points="116.0,376.8 133.0,253.1 154.9,85.5" fill="none" stroke="#2563eb" stroke-width="2"/>
+<circle cx="116.0" cy="376.8" r="4" fill="#2563eb"/>
+<circle cx="133.0" cy="253.1" r="4" fill="#2563eb"/>
+<circle cx="154.9" cy="85.5" r="4" fill="#2563eb"/>
+<circle cx="755.0" cy="66.0" r="4" fill="#2563eb"/>
+<line x1="740" y1="66.0" x2="770" y2="66.0" stroke="#2563eb" stroke-width="2"/>
+<text x="780" y="70.0" font-family="Arial, sans-serif" font-size="12">Kokkos openmp (c12)</text>
+<polyline points="95.0,529.6 96.8,528.9 99.7,526.6 103.9,525.7 116.0,519.5 133.0,511.0 154.9,501.0 250.1,453.6 445.8,361.0 720.0,228.9" fill="none" stroke="#dc2626" stroke-width="2"/>
+<rect x="91.0" y="525.6" width="8" height="8" fill="#dc2626"/>
+<rect x="92.8" y="524.9" width="8" height="8" fill="#dc2626"/>
+<rect x="95.7" y="522.6" width="8" height="8" fill="#dc2626"/>
+<rect x="99.9" y="521.7" width="8" height="8" fill="#dc2626"/>
+<rect x="112.0" y="515.5" width="8" height="8" fill="#dc2626"/>
+<rect x="129.0" y="507.0" width="8" height="8" fill="#dc2626"/>
+<rect x="150.9" y="497.0" width="8" height="8" fill="#dc2626"/>
+<rect x="246.1" y="449.6" width="8" height="8" fill="#dc2626"/>
+<rect x="441.8" y="357.0" width="8" height="8" fill="#dc2626"/>
+<rect x="716.0" y="224.9" width="8" height="8" fill="#dc2626"/>
+<rect x="751.0" y="82.0" width="8" height="8" fill="#dc2626"/>
+<line x1="740" y1="86.0" x2="770" y2="86.0" stroke="#dc2626" stroke-width="2"/>
+<text x="780" y="90.0" font-family="Arial, sans-serif" font-size="12">direct_CUDA</text>
+<text x="407.5" y="590" text-anchor="middle" font-family="Arial, sans-serif" font-size="14">Mesh elements</text>
+<text x="22" y="290.0" transform="rotate(-90 22 290.0)" text-anchor="middle" font-family="Arial, sans-serif" font-size="14">Seconds</text>
+</svg>

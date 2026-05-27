@@ -3,7 +3,7 @@ ifneq (${CONFIG},)
 include ${CONFIG}
 endif
 
-WRAPPER_GOALS = cpu cpu-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean
+WRAPPER_GOALS = dmplex dmplex-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean
 NO_PETSC_GOALS = cleanobj ${WRAPPER_GOALS}
 SKIP_PETSC_CONF = $(if ${MAKECMDGOALS},$(if $(filter-out ${NO_PETSC_GOALS},${MAKECMDGOALS}),,1))
 
@@ -78,6 +78,7 @@ SOURCEC = \
 	${SRCDIR}/contact.c \
 	${SRCDIR}/inverse.c \
 	${SRCDIR}/active_strain.c \
+	${SRCDIR}/dmplex_geom.c \
 	${SRCDIR}/manufactured_active_strain.c \
 	${SRCDIR}/cuda_processes.c \
 	${SRCDIR}/kokkos_processes.c \
@@ -91,8 +92,8 @@ ifeq (${USE_CUDA},1)
 SOURCEC := $(filter-out ${SRCDIR}/cuda_stub.c,${SOURCEC})
 SOURCECPP += ${SRCDIR}/cuda_wrapper.cpp
 SOURCECU  += ${SRCDIR}/cuda_kernel.cu
-CFLAGS    += -DUSE_CUDA
-CPPFLAGS  += -DUSE_CUDA
+CFLAGS    += -DUSE_CUDA -DBIOFEM_BACKEND_CUDA
+CPPFLAGS  += -DUSE_CUDA -DBIOFEM_BACKEND_CUDA
 LIBS      += -lstdc++
 CUDA_ARCH ?=
 CUDAFLAGS += -I${INCDIR} -Xcompiler -fPIC
@@ -109,8 +110,8 @@ endif
 ifeq (${USE_KOKKOS},1)
 SOURCEC := $(filter-out ${SRCDIR}/kokkos_stub.c,${SOURCEC})
 SOURCECPP += ${SRCDIR}/kokkos_geom.cpp
-CFLAGS    += -DUSE_KOKKOS
-CPPFLAGS  += -DUSE_KOKKOS
+CFLAGS    += -DUSE_KOKKOS -DBIOFEM_BACKEND_KOKKOS
+CPPFLAGS  += -DUSE_KOKKOS -DBIOFEM_BACKEND_KOKKOS
 KOKKOS_CXXFLAGS ?=
 KOKKOS_LDFLAGS ?=
 KOKKOS_LIBS ?= -lkokkoscore -lkokkoscontainers -lkokkosalgorithms
@@ -146,16 +147,16 @@ asan: CFLAGS += ${SAN_FLAGS}
 asan: LIBS += -fsanitize=address,undefined
 asan: cleanobj testt
 
-.PHONY: testt asan cleanobj cpu cpu-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean
+.PHONY: testt asan cleanobj dmplex dmplex-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean
 
 cleanobj:
 	rm -rf ${BUILDDIR} *.o testt testt-*
 
-cpu:
-	$(MAKE) CONFIG=config/cpu.mk testt
+dmplex:
+	$(MAKE) CONFIG=config/dmplex.mk testt
 
-cpu-clean:
-	$(MAKE) CONFIG=config/cpu.mk cleanobj testt
+dmplex-clean:
+	$(MAKE) CONFIG=config/dmplex.mk cleanobj testt
 
 direct-cuda:
 	$(MAKE) CONFIG=config/direct-cuda.mk testt

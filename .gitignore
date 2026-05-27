@@ -28,6 +28,10 @@ html/
 latex/
 xml/
 man/
+docs/doxygen/
+
+# Claude Code memory
+.claude/
 
 
 # Runtime output / data files

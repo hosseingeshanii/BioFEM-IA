@@ -1,0 +1,44 @@
+PROJECT_NAME           = "BioFEM-IA"
+PROJECT_BRIEF          = "Biological Finite Element with Immersed Boundary and Active Strain"
+PROJECT_NUMBER         = ""
+
+OUTPUT_DIRECTORY       = /scratch/user/hgeshani/Research/BioFEM-IA/docs/doxygen
+
+INPUT                  = /scratch/user/hgeshani/Research/BioFEM-IA/src \
+                         /scratch/user/hgeshani/Research/BioFEM-IA/include
+FILE_PATTERNS          = *.c *.h
+RECURSIVE              = YES
+
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+EXTRACT_PRIVATE        = YES
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_COLORSTYLE        = LIGHT
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+
+GENERATE_LATEX         = NO
+
+OPTIMIZE_OUTPUT_FOR_C  = YES
+JAVADOC_AUTOBRIEF      = NO
+QT_AUTOBRIEF           = NO
+
+WARN_IF_UNDOCUMENTED   = NO
+QUIET                  = NO
+WARNINGS               = YES
+
+SHOW_INCLUDE_FILES     = YES
+SHOW_USED_FILES        = YES
+
+HAVE_DOT               = NO
+
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+
+TYPEDEF_HIDES_STRUCT   = YES
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO

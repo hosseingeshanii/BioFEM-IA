@@ -4,6 +4,7 @@ Number of nodes of list (body:0) 132
 Number of element of list(body:0) 220 
 Number of ghost nodes 42
 Init finished 
+Active-Strain problem got initiliazed. 
 [CUDA host] n_elmt=220 max_node_index=131 coord_count=132
 [CUDA kernel] ec=0 nodes=(1,130,0)
 [CUDA kernel] ec=1 nodes=(130,13,0)
@@ -15,11 +16,45 @@ Init finished
 [CUDA host] ec=1 out=((1.050000e+00, 1.050000e+00, 1.000000e+00), (1.000000e+00, 1.100000e+00, 1.000000e+00), (1.000000e+00, 1.000000e+00, 1.000000e+00))
 [CUDA host] ec=2 out=((1.100000e+00, 1.000000e+00, 1.000000e+00), (1.100000e+00, 1.100000e+00, 1.000000e+00), (1.050000e+00, 1.050000e+00, 1.000000e+00))
 CUDA element-coordinate copy kernel finished successfully for body 0.
+[CUDA geom kernel] ec=0 irregular v=4 nen=10 ndx21=(-3.858750e-02, -5.294250e-02, 0.000000e+00)
+[CUDA geom kernel] ec=1 irregular v=4 nen=10 ndx21=(-5.572125e-02, 3.827875e-02, 0.000000e+00)
+[CUDA geom kernel] ec=2 irregular v=4 nen=10 ndx21=(6.683500e-02, -5.001000e-02, 0.000000e+00)
+CUDA subdivision-geometry kernel finished successfully for body 0 using current coordinates.
+[CUDA geom kernel] ec=0 irregular v=4 nen=10 ndx21=(-3.858750e-02, -5.294250e-02, 0.000000e+00)
+[CUDA geom kernel] ec=1 irregular v=4 nen=10 ndx21=(-5.572125e-02, 3.827875e-02, 0.000000e+00)
+[CUDA geom kernel] ec=2 irregular v=4 nen=10 ndx21=(6.683500e-02, -5.001000e-02, 0.000000e+00)
+CUDA subdivision-geometry kernel finished successfully for body 0 using reference coordinates.
+CUDA metric-tensor kernel finished successfully for body 0.
+
+CUDA preprocess timing for body 0 (host end-to-end)
+  task                         CPU (s)      CUDA (s)     CPU/CUDA
+  geom0/reference           1.992903e-03   3.590250e-04   5.551 x
+  geom/current             1.964853e-03   5.071330e-04   3.874 x
+  geom total               3.957756e-03   8.661580e-04   4.569 x
+  metric tensor            1.453240e-04   4.312390e-04   0.337 x
+  CUDA coord copy          0.000000e+00   1.009221e+00   0.000 x
+  preprocess total         4.103080e-03   1.010519e+00   0.004 x
+
+CPU vs CUDA metric comparison for body 0 (first 3 elements)
+  elem 0: max|g|= 7.105e-15 max|g0|= 7.105e-15 max|gm|= 1.137e-13 max|gm0|= 1.137e-13 -> MATCH
+  elem 1: max|g|= 8.882e-15 max|g0|= 8.882e-15 max|gm|= 1.137e-13 max|gm0|= 1.137e-13 -> MATCH
+  elem 2: max|g|= 7.105e-15 max|g0|= 7.105e-15 max|gm|= 1.990e-13 max|gm0|= 1.990e-13 -> MATCH
+
+CPU vs CUDA sample metric values for body 0
+  elem 0, qp 0
+    CPU gm.Cov = [[ 4.291903e-03  1.484570e-03  0.000000e+00] [ 1.484570e-03  5.097388e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+    CUDA gm.Cov = [[ 4.291903e-03  1.484570e-03  0.000000e+00] [ 1.484570e-03  5.097388e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+    CPU gm0.Cov = [[ 4.291903e-03  1.484570e-03  0.000000e+00] [ 1.484570e-03  5.097388e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+    CUDA gm0.Cov = [[ 4.291903e-03  1.484570e-03  0.000000e+00] [ 1.484570e-03  5.097388e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+  elem 1, qp 0
+    CPU gm.Cov = [[ 4.570120e-03  1.483712e-03  0.000000e+00] [ 1.483712e-03  4.405706e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+    CUDA gm.Cov = [[ 4.570120e-03  1.483712e-03  0.000000e+00] [ 1.483712e-03  4.405706e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+    CPU gm0.Cov = [[ 4.570120e-03  1.483712e-03  0.000000e+00] [ 1.483712e-03  4.405706e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+    CUDA gm0.Cov = [[ 4.570120e-03  1.483712e-03  0.000000e+00] [ 1.483712e-03  4.405706e-03  0.000000e+00] [ 0.000000e+00  0.000000e+00  1.000000e+00]]
+After ActDataDestroy
 WARNING! There are options you set that were not used!
 WARNING! could be spelling mistake, etc!
-There are 22 unused database options. They are:
-Option left: name:-bulk_modulus value: 74450000.0 source: file
-Option left: name:-C33_subitr_nums value: 50 source: file
+There are 17 unused database options. They are:
 Option left: name:-cart_fib_act value: 1 source: file
 Option left: name:-curv_based_act_coeffs value: 0 source: file
 Option left: name:-e_coefficient_restitution value: 1.0 source: file
@@ -36,7 +71,9 @@ Option left: name:-fem_snes_rtol value: 7e-1 source: file
 Option left: name:-fem_snes_type value: newtonls source: file
 Option left: name:-fiber_based_act_coeff value: 0 source: file
 Option left: name:-manufactured_fexternal_export value: 0 source: file
-Option left: name:-manufactured_gamma0 value: 0.2 source: file
-Option left: name:-muscle_act_gamma value: 0.2 source: file
 Option left: name:-newmark value: 1 source: file
-Option left: name:-num_gaussian_quad_points value: 1 source: file
+Collecting data...
+Generating '/tmp/job.18478998/nsys-report-1fc4.qdstrm'
+[1/1] [0%                          ] tApr30_nsys_cuda_report.nsys-rep[1/1] [0%                          ] tApr30_nsys_cuda_report.nsys-rep[1/1] [==21%                       ] tApr30_nsys_cuda_report.nsys-rep[1/1] [===23%                      ] tApr30_nsys_cuda_report.nsys-rep[1/1] [====26%                     ] tApr30_nsys_cuda_report.nsys-rep[1/1] [====27%                     ] tApr30_nsys_cuda_report.nsys-rep[1/1] [====28%                     ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=====29%                    ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=====30%                    ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=====31%                    ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=====32%                    ] tApr30_nsys_cuda_report.nsys-rep[1/1] [======33%                   ] tApr30_nsys_cuda_report.nsys-rep[1/1] [======34%                   ] tApr30_nsys_cuda_report.nsys-rep[1/1] [======35%                   ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=======36%                  ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=======37%                  ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=======38%                  ] tApr30_nsys_cuda_report.nsys-rep[1/1] [=======39%                  ] tApr30_nsys_cuda_report.nsys-rep[1/1] [==========49%               ] tApr30_nsys_cuda_report.nsys-rep[1/1] [===========50%              ] tApr30_nsys_cuda_report.nsys-rep[1/1] [===========53%              ] tApr30_nsys_cuda_report.nsys-rep[1/1] [============56%             ] tApr30_nsys_cuda_report.nsys-rep[1/1] [==============64%           ] tApr30_nsys_cuda_report.nsys-rep[1/1] [===============65%          ] tApr30_nsys_cuda_report.nsys-rep[1/1] [===============66%          ] tApr30_nsys_cuda_report.nsys-rep[1/1] [===============67%          ] tApr30_nsys_cuda_report.nsys-rep[1/1] [================69%         ] tApr30_nsys_cuda_report.nsys-rep[1/1] [================71%         ] tApr30_nsys_cuda_report.nsys-rep[1/1] [==================75%       ] tApr30_nsys_cuda_report.nsys-rep[1/1] [========================100%] tApr30_nsys_cuda_report.nsys-rep[1/1] [========================100%] tApr30_nsys_cuda_report.nsys-rep
+Generated:
+	/scratch/user/hgeshani/Research/BioFEM-IA/examples/cuda_test/tApr30_nsys_cuda_report.nsys-rep
