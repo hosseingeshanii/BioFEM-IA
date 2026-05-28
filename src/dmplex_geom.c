@@ -163,18 +163,18 @@ static PetscErrorCode DMPlexPatchExchangeDestroy_(DMPlexPatchExchange *exchange)
  *
  * @details
  * Only rank 0 populates the cell and coordinate arrays; all other ranks pass
- * empty arrays.  DMPlexCreateFromCellListPetsc is called collectively and
- * internally interpolates edges from the triangle connectivity, producing a
- * complete topological DAG (vertices → edges → faces).
+ * empty arrays.  DMPlexCreateFromCellListPetsc is called with
+ * @c interpolate=PETSC_FALSE so no edges are created; only cells and vertices
+ * are stored.  This avoids PETSc's O(N^{3+}) serial edge-interpolation path
+ * that dominates cost for large meshes.
  *
- * This function produces a <em>serial</em> (undistributed) DM on every rank,
- * with the full mesh residing only on rank 0.  Call CreateDistributedDMPlex_()
- * to obtain the distributed version.
- *
- * @param[in]  ibm  IBM surface mesh (read on rank 0 only).
- * @param[out] dm   New serial DMPlex (caller must DMDestroy).
+ * @param[in]  ibm       IBM surface mesh (read on rank 0 only).
+ * @param[out] dm        New serial DMPlex (caller must DMDestroy).
+ * @param[out] cStartOut First cell point index in the serial DM chart.
+ * @param[out] vStartOut First vertex point index in the serial DM chart.
  */
-static PetscErrorCode BuildSerialDMPlex_(IBMNodes *ibm, DM *dm)
+static PetscErrorCode BuildSerialDMPlex_(IBMNodes *ibm, DM *dm,
+                                         PetscInt *cStartOut, PetscInt *vStartOut)
 {
   PetscMPIInt rank;
   PetscInt    dim = 2, spaceDim = 3, corners = 3;
@@ -202,82 +202,116 @@ static PetscErrorCode BuildSerialDMPlex_(IBMNodes *ibm, DM *dm)
     }
   }
 
+  /* PETSC_FALSE: do NOT interpolate edges on the serial mesh.
+     Edge interpolation is O(N^{3+}) for large meshes; we distribute first
+     and let per-rank interpolation (if needed) happen on small subsets. */
   PetscCall(DMPlexCreateFromCellListPetsc(PETSC_COMM_WORLD, dim, nCells, nVerts, corners,
-                                          PETSC_TRUE, cells, spaceDim, coords, dm));
+                                          PETSC_FALSE, cells, spaceDim, coords, dm));
   PetscCall(PetscFree(cells));
   PetscCall(PetscFree(coords));
-  PetscFunctionReturn(0);
-}
 
-/**
- * @brief Stamp every cell and vertex in a serial DM with its original index.
- *
- * @details
- * Creates two integer DMLabels on the serial (pre-distribution) DM:
- *   - @c "biofem_orig_cell":   maps DM cell point p → original cell index (p - cStart).
- *   - @c "biofem_orig_vertex": maps DM vertex point p → original vertex index (p - vStart).
- *
- * Only rank 0 performs the labelling because the serial DM holds the full mesh
- * only on rank 0.  After DMPlexDistribute() the labels migrate with the points,
- * so every distributed point retains its original index across ranks.
- *
- * @param[in,out] dm Serial DM (before distribution).
- */
-static PetscErrorCode LabelOriginalPoints_(DM dm)
-{
-  PetscMPIInt rank;
-  PetscInt    cStart, cEnd, vStart, vEnd;
-
-  PetscFunctionBeginUser;
-  PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
-  PetscCall(DMCreateLabel(dm, "biofem_orig_cell"));
-  PetscCall(DMCreateLabel(dm, "biofem_orig_vertex"));
-  if (rank == 0) {
-    PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
-    PetscCall(DMPlexGetDepthStratum(dm, 0, &vStart, &vEnd));
-    for (PetscInt c = cStart; c < cEnd; ++c) {
-      PetscCall(DMSetLabelValue(dm, "biofem_orig_cell", c, c - cStart));
-    }
-    for (PetscInt v = vStart; v < vEnd; ++v) {
-      PetscCall(DMSetLabelValue(dm, "biofem_orig_vertex", v, v - vStart));
-    }
+  /* Record chart offsets on rank 0 (other ranks have empty DMs). */
+  {
+    PetscInt cS = 0, cE = 0, vS = 0, vE = 0;
+    PetscCall(DMPlexGetHeightStratum(*dm, 0, &cS, &cE));
+    PetscCall(DMPlexGetDepthStratum(*dm, 0, &vS, &vE));
+    /* Broadcast from rank 0 so every rank knows the serial offsets. */
+    PetscCallMPI(MPI_Bcast(&cS, 1, MPIU_INT, 0, PETSC_COMM_WORLD));
+    PetscCallMPI(MPI_Bcast(&vS, 1, MPIU_INT, 0, PETSC_COMM_WORLD));
+    *cStartOut = cS;
+    *vStartOut = vS;
   }
   PetscFunctionReturn(0);
 }
 
 /**
- * @brief Build, label, and distribute a DMPlex across all MPI ranks.
+ * @brief Distribute the serial DMPlex and return per-rank original-index arrays.
  *
  * @details
- * Combines BuildSerialDMPlex_() and LabelOriginalPoints_() with
- * DMPlexDistribute() to produce a distributed DM with @p overlap ghost layers.
- * The migration Star Forest is discarded; only the distributed DM is returned.
+ * Builds a serial (uninterpolated) DMPlex on rank 0, distributes it with
+ * overlap=0, and extracts per-rank @c origCell[] / @c origVert[] arrays directly
+ * from the migration Star Forest.  No DMLabels are used: label stratification
+ * was the previous O(N^2) bottleneck.
  *
- * After this call:
- *   - Each rank owns a contiguous subdomain of triangles plus @p overlap layers
- *     of ghost cells needed to evaluate boundary stencils.
- *   - Every distributed point carries its original index in the biofem labels,
- *     enabling mapping back to IBMNodes arrays on any rank.
+ * After this call every rank holds:
+ *   - A distributed DM (no ghost cells; overlap=0)
+ *   - origCell[lc]: original IBMNodes cell index for local cell lc, or -1
+ *   - origVert[lv]: original IBMNodes vertex index for local vertex lv, or -1
  *
- * @param[in]  ibm      IBM surface mesh (read on rank 0 only).
- * @param[in]  overlap  Number of ghost cell layers for the distributed partition.
- * @param[out] dmDist   Distributed DM (caller must DMDestroy).
+ * @param[in]  ibm         IBM surface mesh.
+ * @param[out] dmDist      Distributed DM (caller must DMDestroy).
+ * @param[out] origCellOut Per-rank original cell index array (size cEnd-cStart).
+ * @param[out] origVertOut Per-rank original vertex index array (size vEnd-vStart).
  */
-static PetscErrorCode CreateDistributedDMPlex_(IBMNodes *ibm, PetscInt overlap, DM *dmDist)
+static PetscErrorCode CreateDistributedDMPlex_(IBMNodes *ibm,
+                                               DM *dmDist,
+                                               PetscInt **origCellOut,
+                                               PetscInt **origVertOut)
 {
   DM      dm = NULL, distributed = NULL;
   PetscSF migrationSF = NULL;
+  PetscInt serial_cStart = 0, serial_vStart = 0;
+  double  t0, t_build, t_dist;
 
   PetscFunctionBeginUser;
-  PetscCall(BuildSerialDMPlex_(ibm, &dm));
-  PetscCall(LabelOriginalPoints_(dm));
-  PetscCall(DMPlexDistribute(dm, overlap, &migrationSF, &distributed));
+  t0 = MPI_Wtime();
+  PetscCall(BuildSerialDMPlex_(ibm, &dm, &serial_cStart, &serial_vStart));
+  t_build = MPI_Wtime() - t0;
+
+  /* overlap=0: no ghost cells.  DMPlex with uninterpolated serial DM supports
+     overlap=0 distribution without requiring pre-existing edge topology.      */
+  t0 = MPI_Wtime();
+  PetscCall(DMPlexDistribute(dm, 0, &migrationSF, &distributed));
+  t_dist = MPI_Wtime() - t0;
+
   if (distributed) {
     PetscCall(DMDestroy(&dm));
     dm = distributed;
   }
-  PetscCall(PetscSFDestroy(&migrationSF));
   *dmDist = dm;
+
+  /* Build origCell[] and origVert[] from the migration SF.
+     migrationSF leaf i: local point ilocal[i] came from serial point iremote[i].index.
+     For np=1, migrationSF is NULL and the local DM is the serial DM. */
+  PetscInt cStart, cEnd, vStart, vEnd;
+  PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
+  PetscCall(DMPlexGetDepthStratum(dm, 0, &vStart, &vEnd));
+
+  PetscInt *origCell = NULL, *origVert = NULL;
+  PetscCall(PetscMalloc1(PetscMax(1, cEnd - cStart), &origCell));
+  PetscCall(PetscMalloc1(PetscMax(1, vEnd - vStart), &origVert));
+  for (PetscInt lc = 0; lc < cEnd - cStart; ++lc) origCell[lc] = -1;
+  for (PetscInt lv = 0; lv < vEnd - vStart; ++lv) origVert[lv] = -1;
+
+  if (migrationSF) {
+    PetscInt           nroots, nleaves;
+    const PetscInt    *ilocal;
+    const PetscSFNode *iremote;
+    PetscCall(PetscSFGetGraph(migrationSF, &nroots, &nleaves, &ilocal, &iremote));
+    for (PetscInt i = 0; i < nleaves; ++i) {
+      const PetscInt p    = ilocal ? ilocal[i] : i;
+      const PetscInt orig = iremote[i].index;
+      if (p >= cStart && p < cEnd) {
+        origCell[p - cStart] = orig - serial_cStart;
+      } else if (p >= vStart && p < vEnd) {
+        origVert[p - vStart] = orig - serial_vStart;
+      }
+    }
+    PetscCall(PetscSFDestroy(&migrationSF));
+  } else {
+    /* np=1: distributed == NULL, local DM = serial DM, identity mapping. */
+    for (PetscInt lc = 0; lc < cEnd - cStart; ++lc) origCell[lc] = lc;
+    for (PetscInt lv = 0; lv < vEnd - vStart; ++lv) origVert[lv] = lv;
+  }
+
+  *origCellOut = origCell;
+  *origVertOut = origVert;
+
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                        "  CreateDistributedDMPlex breakdown:\n"
+                        "    BuildSerialDMPlex (no interpolation) % .6e s\n"
+                        "    DMPlexDistribute (overlap=0)         % .6e s\n",
+                        t_build, t_dist));
   PetscFunctionReturn(0);
 }
 
@@ -285,28 +319,23 @@ static PetscErrorCode CreateDistributedDMPlex_(IBMNodes *ibm, PetscInt overlap, 
  * @brief Build a global table mapping each original vertex index to its owning MPI rank.
  *
  * @details
- * After distribution, the same original vertex may appear as a ghost on multiple
- * ranks, but it is <em>owned</em> by exactly one.  This function determines
- * ownership by:
+ * Uses the pre-built @p origVert array (from the migration SF) and the DM's
+ * point SF to determine which local vertices are ghost copies.  Non-ghost
+ * vertices are owned by this rank; ghost vertices are owned by another.
  *
- *   1. Reading the DM's point Star Forest (DMGetPointSF) to identify ghost points.
- *      In a PetscSF the <em>leaves</em> are the ghost copies; marking them gives
- *      an O(nLeaves) ghost lookup table indexed by local chart position.
- *
- *   2. Iterating over every local vertex (DMPlexGetDepthStratum, depth=0),
- *      reading its original index from the @c "biofem_orig_vertex" label, and
- *      recording @c localOwner[origIdx] = myRank for non-ghost vertices.
- *
- *   3. Calling MPI_Allreduce(MPI_MAX) so every rank receives the same
- *      @c ownerRank[0..n_v) table.  Non-owners contribute -1; MPI_MAX selects
- *      the one rank that contributed its rank ID.
+ *   1. Mark ghost vertices using DMGetPointSF (leaves = ghost copies).
+ *   2. For each non-ghost local vertex, record localOwner[origVert[lv]] = myRank.
+ *   3. MPI_Allreduce(MPI_MAX): the owning rank's entry beats every -1.
  *
  * @param[in]  dm            Distributed DM.
- * @param[in]  ibm           IBM mesh (only ibm->n_v is read).
- * @param[out] ownerRankOut  Allocated array of size ibm->n_v; ownerRank[i] is the
- *                           MPI rank that owns original vertex i.  Caller must PetscFree.
+ * @param[in]  ibm           IBM mesh (ibm->n_v used as array size).
+ * @param[in]  origVert      origVert[lv] = original vertex index for local vertex lv.
+ *                           Size: vEnd - vStart.  -1 for vertices with no original.
+ * @param[out] ownerRankOut  Allocated array of size ibm->n_v.  Caller must PetscFree.
  */
-static PetscErrorCode BuildOriginalVertexOwnerTable_(DM dm, IBMNodes *ibm, PetscMPIInt **ownerRankOut)
+static PetscErrorCode BuildOriginalVertexOwnerTable_(DM dm, IBMNodes *ibm,
+                                                     const PetscInt *origVert,
+                                                     PetscMPIInt **ownerRankOut)
 {
   PetscMPIInt  rank;
   PetscInt     pStart, pEnd, vStart, vEnd;
@@ -314,16 +343,13 @@ static PetscErrorCode BuildOriginalVertexOwnerTable_(DM dm, IBMNodes *ibm, Petsc
   PetscMPIInt *localOwner = NULL;
   PetscMPIInt *ownerRank = NULL;
   PetscSF      pointSF = NULL;
-  DMLabel      vertexLabel = NULL;
 
   PetscFunctionBeginUser;
   PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
   PetscCall(DMPlexGetChart(dm, &pStart, &pEnd));
   PetscCall(PetscCalloc1(pEnd - pStart, &isGhost));
 
-  /* Mark ghost points using the DM's point SF.
-     SF leaves are the ghost copies; ilocal[i] is the local chart index of leaf i.
-     If ilocal is NULL the leaves are packed at positions 0,1,2,... */
+  /* Mark ghost points using the DM's point SF. */
   PetscCall(DMGetPointSF(dm, &pointSF));
   if (pointSF) {
     PetscInt           nroots, nleaves;
@@ -342,19 +368,14 @@ static PetscErrorCode BuildOriginalVertexOwnerTable_(DM dm, IBMNodes *ibm, Petsc
   PetscCall(PetscMalloc1(ibm->n_v, &ownerRank));
   for (PetscInt i = 0; i < ibm->n_v; ++i) localOwner[i] = -1;
 
-  PetscCall(DMGetLabel(dm, "biofem_orig_vertex", &vertexLabel));
-  PetscCheck(vertexLabel, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "Missing biofem_orig_vertex label");
   PetscCall(DMPlexGetDepthStratum(dm, 0, &vStart, &vEnd));
   for (PetscInt v = vStart; v < vEnd; ++v) {
-    PetscInt orig = -1;
-    PetscCall(DMLabelGetValue(vertexLabel, v, &orig));
+    const PetscInt orig = origVert[v - vStart];
     if (orig >= 0 && orig < ibm->n_v && !isGhost[v - pStart]) {
       localOwner[orig] = rank;
     }
   }
 
-  /* MPI_MAX collapses the per-rank tables: the owning rank's entry (>= 0) beats
-     every non-owner's -1, giving a consistent global table on all ranks. */
   PetscCallMPI(MPI_Allreduce(localOwner, ownerRank, ibm->n_v, MPI_INT, MPI_MAX, PETSC_COMM_WORLD));
   PetscCall(PetscFree(localOwner));
   PetscCall(PetscFree(isGhost));
@@ -395,23 +416,23 @@ static PetscErrorCode BuildOriginalVertexOwnerTable_(DM dm, IBMNodes *ibm, Petsc
  */
 static PetscErrorCode BuildPatchCoordinateExchange_(const DMPlexPatchLayout *layout,
                                                     IBMNodes *ibm,
+                                                    const PetscInt *origVert,
                                                     const PetscMPIInt *ownerRank,
                                                     DMPlexPatchExchange *exchange)
 {
   PetscInt     maxNeeded;
-  PetscSFNode *remote      = NULL;
-  PetscBool   *isLocalOrig = NULL;
+  PetscSFNode *remote       = NULL;
+  PetscBool   *isLocalOrig  = NULL;
   PetscBool   *alreadyAdded = NULL;
-  PetscBool   *isGhost     = NULL;
-  PetscSF      pointSF     = NULL;
-  DMLabel      vertexLabel = NULL;
+  PetscBool   *isGhost      = NULL;
+  PetscSF      pointSF      = NULL;
   PetscInt     pStart, pEnd, vStart, vEnd;
 
   PetscFunctionBeginUser;
   PetscCall(PetscMemzero(exchange, sizeof(*exchange)));
 
-  /* Build isLocalOrig[n_v]: true if original vertex i is a non-ghost local vertex
-     on this rank. One O(nLocalVerts) walk replaces O(nLocalVerts) per patch-node call. */
+  /* Build isLocalOrig[n_v] from origVert[] + DMGetPointSF ghost marks.
+     One O(nLocalVerts) walk; no DMLabel lookups. */
   PetscCall(DMPlexGetChart(layout->dm, &pStart, &pEnd));
   PetscCall(PetscCalloc1(pEnd - pStart, &isGhost));
   PetscCall(DMGetPointSF(layout->dm, &pointSF));
@@ -428,12 +449,9 @@ static PetscErrorCode BuildPatchCoordinateExchange_(const DMPlexPatchLayout *lay
     }
   }
   PetscCall(PetscCalloc1(ibm->n_v, &isLocalOrig));
-  PetscCall(DMGetLabel(layout->dm, "biofem_orig_vertex", &vertexLabel));
-  PetscCheck(vertexLabel, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "Missing biofem_orig_vertex label");
   PetscCall(DMPlexGetDepthStratum(layout->dm, 0, &vStart, &vEnd));
   for (PetscInt v = vStart; v < vEnd; ++v) {
-    PetscInt orig = -1;
-    PetscCall(DMLabelGetValue(vertexLabel, v, &orig));
+    const PetscInt orig = origVert[v - vStart];
     if (orig >= 0 && orig < ibm->n_v && !isGhost[v - pStart]) isLocalOrig[orig] = PETSC_TRUE;
   }
   PetscCall(PetscFree(isGhost));
@@ -547,23 +565,19 @@ static PetscErrorCode UpdatePatchRemoteCoordinates_(IBMNodes *ibm, DMPlexPatchEx
  * @brief Copy Loop subdivision patch stencil data from IBMNodes to a local layout.
  *
  * @details
- * After DMPlex distribution each rank owns a subset of cells.  This function
- * maps every distributed cell back to its original IBMNodes index via the
- * @c "biofem_orig_cell" label, then copies ire/irv/val and the 16-slot patch
- * array into the local DMPlexPatchLayout.
+ * Uses the pre-built @p origCell array (from the migration SF) to map each
+ * local cell to its original IBMNodes index in O(nLocalCells) without any
+ * DMLabel lookups.
  *
- * Ghost cells (whose label value is -1 or outside [0, n_elmt)) receive
- * DMPLEX_GEOM_PATCH_MISSING in all patch slots and zeroed stencil flags;
- * they are skipped in the geometry kernel.
- *
- * @param[in]  dm     Distributed DM.
- * @param[in]  ibm    IBM mesh (source of stencil data).
- * @param[out] layout Initialised layout (caller must call DMPlexPatchLayoutDestroy_).
+ * @param[in]  dm       Distributed DM.
+ * @param[in]  ibm      IBM mesh (source of stencil data).
+ * @param[in]  origCell origCell[lc] = original cell index for local cell lc; -1 if unknown.
+ * @param[out] layout   Initialised layout (caller must call DMPlexPatchLayoutDestroy_).
  */
-static PetscErrorCode DMPlexPatchLayoutCreate_(DM dm, IBMNodes *ibm, DMPlexPatchLayout *layout)
+static PetscErrorCode DMPlexPatchLayoutCreate_(DM dm, IBMNodes *ibm,
+                                               const PetscInt *origCell,
+                                               DMPlexPatchLayout *layout)
 {
-  DMLabel cellLabel = NULL;
-
   PetscFunctionBeginUser;
   PetscCall(PetscMemzero(layout, sizeof(*layout)));
   PetscCall(PetscObjectReference((PetscObject)dm));
@@ -577,13 +591,8 @@ static PetscErrorCode DMPlexPatchLayoutCreate_(DM dm, IBMNodes *ibm, DMPlexPatch
   PetscCall(PetscMalloc1(layout->nLocalCells, &layout->val));
   PetscCall(PetscMalloc1(16 * layout->nLocalCells, &layout->patch));
 
-  PetscCall(DMGetLabel(dm, "biofem_orig_cell", &cellLabel));
-  PetscCheck(cellLabel, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "Missing biofem_orig_cell label");
-
-  for (PetscInt c = layout->cStart; c < layout->cEnd; ++c) {
-    const PetscInt lc = c - layout->cStart;
-    PetscInt       ec = -1;
-    PetscCall(DMLabelGetValue(cellLabel, c, &ec));
+  for (PetscInt lc = 0; lc < layout->nLocalCells; ++lc) {
+    const PetscInt ec = origCell[lc];
     layout->orig_cell[lc] = ec;
     if (ec >= 0 && ec < ibm->n_elmt) {
       layout->ire[lc] = ibm->ire[ec];
@@ -614,14 +623,15 @@ static PetscErrorCode DMPlexPatchLayoutCreate_(DM dm, IBMNodes *ibm, DMPlexPatch
  * @param[in] layout    Local patch layout.
  * @param[in] nVertices Total number of original vertices (ibm->n_v).
  */
-static PetscErrorCode ReportPatchHalo_(const DMPlexPatchLayout *layout, PetscInt nVertices)
+static PetscErrorCode ReportPatchHalo_(const DMPlexPatchLayout *layout,
+                                       const PetscInt *origVert,
+                                       PetscInt nVertices)
 {
   PetscInt  localComplete = 0, localIncomplete = 0;
   PetscInt  totalComplete = 0, totalIncomplete = 0;
   PetscBool *isLocalOrig  = NULL;
   PetscBool *isGhost      = NULL;
   PetscSF    pointSF      = NULL;
-  DMLabel    vertexLabel  = NULL;
   PetscInt   pStart, pEnd, vStart, vEnd;
 
   PetscFunctionBeginUser;
@@ -642,12 +652,9 @@ static PetscErrorCode ReportPatchHalo_(const DMPlexPatchLayout *layout, PetscInt
     }
   }
   PetscCall(PetscCalloc1(nVertices, &isLocalOrig));
-  PetscCall(DMGetLabel(layout->dm, "biofem_orig_vertex", &vertexLabel));
-  PetscCheck(vertexLabel, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "Missing biofem_orig_vertex label");
   PetscCall(DMPlexGetDepthStratum(layout->dm, 0, &vStart, &vEnd));
   for (PetscInt v = vStart; v < vEnd; ++v) {
-    PetscInt orig = -1;
-    PetscCall(DMLabelGetValue(vertexLabel, v, &orig));
+    const PetscInt orig = origVert[v - vStart];
     if (orig >= 0 && orig < nVertices && !isGhost[v - pStart]) isLocalOrig[orig] = PETSC_TRUE;
   }
   PetscCall(PetscFree(isGhost));
@@ -741,42 +748,51 @@ static PetscErrorCode RunLocalGeometry_(FE *fem, const DMPlexPatchLayout *layout
  */
 PetscErrorCode RunDMPlexGeomProcesses(FE *fem)
 {
-  PetscInt           overlap = 2;
   PetscInt           nbody = 1;
   DMPlexPatchLayout  layout;
 
   PetscFunctionBeginUser;
-  PetscCall(PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-dmplex_geom_overlap", &overlap, PETSC_NULL));
   PetscCall(PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-nbody", &nbody, PETSC_NULL));
 
   PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                        "Running experimental DMPLex subdivision geometry path with overlap=%" PetscInt_FMT ".\n",
-                        overlap));
+                        "Running experimental DMPLex subdivision geometry path (overlap=0, no serial interpolation).\n"));
 
   for (PetscInt ibi = 0; ibi < nbody; ++ibi) {
     DM              dm = NULL;
     PetscMPIInt    *ownerRank = NULL;
+    PetscInt       *origCell = NULL, *origVert = NULL;
     DMPlexPatchExchange exchange;
-    double          t0, t1;
+    double          t0;
     double          setup_time;
     const PetscInt  n_repeat = 3;
     double          geom_times[3] = {0};
 
-    t0 = MPI_Wtime();
-    PetscCall(CreateDistributedDMPlex_(fem[ibi].ibm, overlap, &dm));
-    PetscCall(BuildOriginalVertexOwnerTable_(dm, fem[ibi].ibm, &ownerRank));
-    PetscCall(DMPlexPatchLayoutCreate_(dm, fem[ibi].ibm, &layout));
-    PetscCall(BuildPatchCoordinateExchange_(&layout, fem[ibi].ibm, ownerRank, &exchange));
-    t1 = MPI_Wtime();
-    setup_time = t1 - t0;
+    double t_dmplex, t_owner, t_layout, t_exchange;
 
-    PetscCall(ReportPatchHalo_(&layout, fem[ibi].ibm->n_v));
+    t0 = MPI_Wtime();
+    PetscCall(CreateDistributedDMPlex_(fem[ibi].ibm, &dm, &origCell, &origVert));
+    t_dmplex = MPI_Wtime() - t0;
+
+    t0 = MPI_Wtime();
+    PetscCall(BuildOriginalVertexOwnerTable_(dm, fem[ibi].ibm, origVert, &ownerRank));
+    t_owner = MPI_Wtime() - t0;
+
+    t0 = MPI_Wtime();
+    PetscCall(DMPlexPatchLayoutCreate_(dm, fem[ibi].ibm, origCell, &layout));
+    t_layout = MPI_Wtime() - t0;
+
+    t0 = MPI_Wtime();
+    PetscCall(BuildPatchCoordinateExchange_(&layout, fem[ibi].ibm, origVert, ownerRank, &exchange));
+    t_exchange = MPI_Wtime() - t0;
+
+    setup_time = t_dmplex + t_owner + t_layout + t_exchange;
+
+    PetscCall(ReportPatchHalo_(&layout, origVert, fem[ibi].ibm->n_v));
 
     for (PetscInt iter = 0; iter < n_repeat; ++iter) {
       t0 = MPI_Wtime();
       PetscCall(RunLocalGeometry_(&fem[ibi], &layout, &exchange));
-      t1 = MPI_Wtime();
-      geom_times[iter] = t1 - t0;
+      geom_times[iter] = MPI_Wtime() - t0;
 
       PetscCall(PetscPrintf(PETSC_COMM_WORLD,
                             "[iter %" PetscInt_FMT "] DMPlexGeomKernel: wall=%.6e s%s\n",
@@ -792,16 +808,23 @@ PetscErrorCode RunDMPlexGeomProcesses(FE *fem)
                           "\nDMPlex geometry timing for body %d (MPI wall-clock)\n"
                           "  task                         time (s)\n"
                           "  setup (SF + DMPlex)       % .6e\n"
+                          "    CreateDistributedDMPlex % .6e\n"
+                          "    BuildOwnerTable         % .6e\n"
+                          "    PatchLayoutCreate       % .6e\n"
+                          "    BuildCoordExchange      % .6e\n"
                           "  geom kernel iter-0         % .6e\n"
                           "  geom kernel avg repeat     % .6e\n",
                           (int)ibi,
                           setup_time,
+                          t_dmplex, t_owner, t_layout, t_exchange,
                           geom_times[0],
                           geom_avg_repeat));
 
     PetscCall(DMPlexPatchExchangeDestroy_(&exchange));
     PetscCall(DMPlexPatchLayoutDestroy_(&layout));
     PetscCall(PetscFree(ownerRank));
+    PetscCall(PetscFree(origCell));
+    PetscCall(PetscFree(origVert));
     PetscCall(DMDestroy(&dm));
   }
   PetscFunctionReturn(0);
