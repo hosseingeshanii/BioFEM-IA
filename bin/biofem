@@ -1,0 +1,578 @@
+#!/usr/bin/env python3
+"""biofem - BioFEM-IA solver CLI.
+
+Subcommands:
+  build   compile solver backends
+  run     run solver (submits to SLURM when on a cluster)
+  sweep   generate mesh cases and submit parameter sweep jobs
+"""
+__version__ = "0.1.0"
+
+import argparse
+import configparser
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Paths — detect whether running from source tree or installed location
+#
+#   Source tree:  bin/biofem  →  ../CMakeLists.txt exists
+#   Installed:    ~/.local/bin/biofem  →  no CMakeLists.txt above us
+# ---------------------------------------------------------------------------
+_HERE      = Path(__file__).resolve().parent
+_REPO_ROOT = _HERE.parent
+
+_IN_SOURCE = (_REPO_ROOT / "CMakeLists.txt").exists()
+
+if _IN_SOURCE:
+    REPO_ROOT  = _REPO_ROOT
+    BUILD_DIR  = REPO_ROOT / "build"
+    CONFIG_DIR = REPO_ROOT / "config"
+    # In the source tree executables may be named either way:
+    #   cmake --build  → biofem-dmplex  (new)
+    #   make dmplex    → testt-dmplex   (legacy)
+    def _exe(cmake_name, legacy_name):
+        p = BUILD_DIR / cmake_name
+        return p if p.exists() else BUILD_DIR / legacy_name
+else:
+    REPO_ROOT  = None
+    BUILD_DIR  = None
+    CONFIG_DIR = _HERE.parent / "etc" / "biofem"   # optional installed config
+    # Installed: executables are siblings in the same bin dir
+    def _exe(cmake_name, _legacy):
+        return _HERE / cmake_name
+
+SITE_CFG = CONFIG_DIR / "site.cfg"
+
+BACKENDS = {
+    "dmplex":        {"exe": _exe("biofem-dmplex",        "testt-dmplex"),        "gpu": False},
+    "cuda":          {"exe": _exe("biofem-cuda",          "testt-cuda"),          "gpu": True},
+    "kokkos-cuda":   {"exe": _exe("biofem-kokkos-cuda",   "testt-kokkos-cuda"),   "gpu": True},
+    "kokkos-openmp": {"exe": _exe("biofem-kokkos-openmp", "testt-kokkos-openmp"), "gpu": False},
+}
+
+# Lazy-guard numpy/scipy so build/run work without them installed.
+try:
+    import numpy as np
+    from scipy.spatial import Delaunay as _Delaunay
+    HAS_MESH_DEPS = True
+except ImportError:
+    HAS_MESH_DEPS = False
+
+
+# ---------------------------------------------------------------------------
+# Site config (config/site.cfg, gitignored, created by setup.sh)
+# ---------------------------------------------------------------------------
+def load_site_config() -> configparser.ConfigParser:
+    cfg = configparser.ConfigParser()
+    cfg.read_dict({
+        "slurm":   {"account": "", "partition": ""},
+        "modules": {"base": "", "petsc": "", "cuda": ""},
+        "mpi":     {"extra_flags": ""},
+    })
+    if SITE_CFG.exists():
+        cfg.read(SITE_CFG)
+    return cfg
+
+
+def _module_lines(cfg: configparser.ConfigParser, *, cuda: bool) -> str:
+    mods = []
+    for key in ("base", "petsc"):
+        val = cfg.get("modules", key, fallback="").strip()
+        if val:
+            mods.extend(val.split())
+    if cuda:
+        val = cfg.get("modules", "cuda", fallback="").strip()
+        if val:
+            mods.extend(val.split())
+    if not mods:
+        return ""
+    return "module purge\n" + "\n".join(f"ml {m}" for m in mods)
+
+
+# ---------------------------------------------------------------------------
+# Cluster detection
+# ---------------------------------------------------------------------------
+def detect_cluster() -> dict:
+    return {
+        "has_slurm":      shutil.which("sbatch") is not None,
+        "in_allocation":  bool(os.environ.get("SLURM_JOB_ID")),
+        "has_gpu":        (
+            bool(os.environ.get("CUDA_VISIBLE_DEVICES"))
+            or shutil.which("nvidia-smi") is not None
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Jobfile builders
+# ---------------------------------------------------------------------------
+def _run_jobfile(
+    *, backend, executable, run_dir, np, time, account,
+    mpi_flags, module_lines, gpu,
+) -> str:
+    acct_line = f"#SBATCH --account={account}" if account else ""
+    gpu_line  = "#SBATCH --gpus=1" if gpu else ""
+    ntasks    = 1 if gpu else np
+    if gpu:
+        mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {executable}'
+    else:
+        mpi_extra = f" {mpi_flags}" if mpi_flags.strip() else ""
+        mpi_cmd = (
+            f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n'
+            f'  mpirun -np "${{SLURM_NTASKS:-{np}}}"{mpi_extra} {executable}'
+        )
+    return (
+        f"#!/bin/bash\n"
+        f"#SBATCH --job-name=biofem-{backend}\n"
+        f"#SBATCH --time={time}\n"
+        f"#SBATCH --ntasks={ntasks}\n"
+        f"#SBATCH --cpus-per-task=1\n"
+        f"#SBATCH --mem=8G\n"
+        f"#SBATCH --output=biofem_{backend}_%j.out\n"
+        f"{gpu_line}\n"
+        f"{acct_line}\n"
+        f"\nset -euo pipefail\n"
+        f"\n{module_lines}\n"
+        f'\ncd "{run_dir}" || exit 1\n'
+        f"\n{mpi_cmd}\n"
+    )
+
+
+def _sweep_jobfile(
+    *, backend, executable, case_dir, nx, ny, ntasks, nnodes, nelems,
+    time, memory, account, mpi_flags, module_lines, gpu,
+) -> str:
+    acct_line = f"#SBATCH --account={account}" if account else ""
+    gpu_line  = "#SBATCH --gpus=1" if gpu else ""
+    if gpu:
+        mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {executable}'
+    else:
+        mpi_extra = f" {mpi_flags}" if mpi_flags.strip() else ""
+        mpi_cmd = (
+            f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n'
+            f'  mpirun -np "${{SLURM_NTASKS:-{ntasks}}}"{mpi_extra} {executable}'
+        )
+    return (
+        f"#!/bin/bash\n"
+        f"#SBATCH --job-name={backend}_mesh_nx{nx}_ny{ny}_np{ntasks}\n"
+        f"#SBATCH --time={time}\n"
+        f"#SBATCH --ntasks={ntasks}\n"
+        f"#SBATCH --cpus-per-task=1\n"
+        f"#SBATCH --mem={memory}\n"
+        f"#SBATCH --output=out_{backend}_nx{nx}_ny{ny}_np{ntasks}\n"
+        f"{gpu_line}\n"
+        f"{acct_line}\n"
+        f"\nset -euo pipefail\n"
+        f"\n{module_lines}\n"
+        f'\ncd "{case_dir}" || exit 1\n'
+        f'\necho "BENCH_BACKEND={backend}"\n'
+        f'echo "BENCH_MESH_NX={nx}"\n'
+        f'echo "BENCH_MESH_NY={ny}"\n'
+        f'echo "BENCH_NODES={nnodes}"\n'
+        f'echo "BENCH_ELEMENTS={nelems}"\n'
+        f'echo "BENCH_NTASKS=${{SLURM_NTASKS:-{ntasks}}}"\n'
+        f'echo "BENCH_JOB_ID=${{SLURM_JOB_ID:-local}}"\n'
+        f"\n{mpi_cmd}\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# run
+# ---------------------------------------------------------------------------
+def cmd_run(args):
+    info = BACKENDS[args.backend]
+    executable = info["exe"]
+    if not executable.exists():
+        print(f"[biofem] Executable not found: {executable}", file=sys.stderr)
+        print(f"         Run: biofem build --backend {args.backend}", file=sys.stderr)
+        sys.exit(1)
+
+    run_dir = Path.cwd()
+    if not (run_dir / "control.dat").exists():
+        print("[biofem] No control.dat found in current directory.", file=sys.stderr)
+        print("         cd into a case directory before running.", file=sys.stderr)
+        sys.exit(1)
+
+    cfg          = load_site_config()
+    cluster      = detect_cluster()
+    account      = args.account or cfg.get("slurm", "account", fallback="")
+    mpi_flags    = cfg.get("mpi", "extra_flags", fallback="")
+    module_lines = _module_lines(cfg, cuda=info["gpu"])
+
+    if cluster["has_slurm"] and not account:
+        print("[biofem] Warning: no SLURM account set. Job may be rejected.", file=sys.stderr)
+        print("         Pass --account YOUR_ACCOUNT, or set it in config/site.cfg", file=sys.stderr)
+
+    # On a cluster: submit via sbatch when not already in an allocation,
+    # or when the backend needs a GPU (must be a dedicated node).
+    use_sbatch = cluster["has_slurm"] and (info["gpu"] or not cluster["in_allocation"])
+
+    if use_sbatch:
+        jf = _run_jobfile(
+            backend=args.backend, executable=executable, run_dir=run_dir,
+            np=args.np, time=args.time, account=account,
+            mpi_flags=mpi_flags, module_lines=module_lines, gpu=info["gpu"],
+        )
+        if args.dry_run:
+            print(jf)
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".slurm", delete=False, dir=run_dir) as f:
+            f.write(jf)
+            tmp = Path(f.name)
+        try:
+            subprocess.run(["sbatch", str(tmp)], cwd=run_dir, check=True)
+        finally:
+            tmp.unlink(missing_ok=True)
+    else:
+        cmd = ["mpirun", "-np", str(args.np)] + mpi_flags.split() + [str(executable)]
+        if args.dry_run:
+            print(" ".join(str(c) for c in cmd))
+            return
+        subprocess.run(cmd, cwd=run_dir, check=True)
+
+
+# ---------------------------------------------------------------------------
+# sweep
+# ---------------------------------------------------------------------------
+FAIL_PATTERNS = ("PETSC ERROR", "Killed", "signal 9", "non-zero exit code")
+_ITER1_RE     = re.compile(r"\[iter\s+1\]")
+
+
+def _sweep_resources(nx: int, ny: int) -> tuple[str, str]:
+    n = nx * ny
+    if n <= 48  * 36:  return "00:30:00", "4G"
+    if n <= 128 * 96:  return "01:00:00", "8G"
+    if n <= 256 * 192: return "02:00:00", "16G"
+    if n <= 384 * 288: return "04:00:00", "32G"
+    if n <= 512 * 384: return "06:00:00", "64G"
+    return "08:00:00", "128G"
+
+
+def _out_failed(case_dir, backend, nx, ny, ntasks) -> bool:
+    p = case_dir / f"out_{backend}_nx{nx}_ny{ny}_np{ntasks}"
+    return p.exists() and any(pat in p.read_text(errors="replace") for pat in FAIL_PATTERNS)
+
+
+def _out_done(case_dir, backend, nx, ny, ntasks) -> bool:
+    p = case_dir / f"out_{backend}_nx{nx}_ny{ny}_np{ntasks}"
+    return p.exists() and bool(_ITER1_RE.search(p.read_text(errors="replace")))
+
+
+def cmd_sweep(args):
+    if not HAS_MESH_DEPS:
+        print("[biofem] numpy and scipy are required for sweep mesh generation.", file=sys.stderr)
+        print("         Load the python/scipy module or: pip install numpy scipy", file=sys.stderr)
+        sys.exit(1)
+
+    info = BACKENDS[args.backend]
+    executable = info["exe"]
+    if not executable.exists():
+        print(f"[biofem] Executable not found: {executable}", file=sys.stderr)
+        print(f"         Run: biofem build --backend {args.backend}", file=sys.stderr)
+        sys.exit(1)
+
+    if not shutil.which("sbatch"):
+        print("[biofem] sbatch not found. Sweep requires SLURM to submit jobs.", file=sys.stderr)
+        print("         Use --dry-run to preview generated jobfiles.", file=sys.stderr)
+        if not args.dry_run:
+            sys.exit(1)
+
+    cfg          = load_site_config()
+    account      = args.account or cfg.get("slurm", "account", fallback="")
+    mpi_flags    = cfg.get("mpi", "extra_flags", fallback="")
+    module_lines = _module_lines(cfg, cuda=info["gpu"])
+
+    if not account:
+        print("[biofem] Warning: no SLURM account set. Jobs may be rejected.", file=sys.stderr)
+        print("         Pass --account YOUR_ACCOUNT, or set it in config/site.cfg", file=sys.stderr)
+
+    nx_list = [int(x) for x in args.nx.split(",")]
+    ny_list = [int(x) for x in args.ny.split(",")]
+    if len(nx_list) != len(ny_list):
+        print("[biofem] --nx and --ny must have the same number of values.", file=sys.stderr)
+        sys.exit(1)
+
+    ntasks_list = [int(x) for x in args.ntasks.split(",")]
+    lx, ly      = args.lx, args.ly
+    output_dir  = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    template_ctrl = REPO_ROOT / "examples" / "dmplex_test" / "control.dat"
+    if not template_ctrl.exists():
+        print(f"[biofem] Template control.dat not found: {template_ctrl}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[biofem] sweep  backend={args.backend}  cases={len(nx_list)}  ntasks={ntasks_list}")
+    print(f"[biofem] output {output_dir}")
+
+    submitted = skipped = 0
+
+    for nx, ny in zip(nx_list, ny_list):
+        case_dir = output_dir / f"mesh_Lx{lx}_Ly{ly}_nx{nx}_ny{ny}"
+        case_dir.mkdir(exist_ok=True)
+        (case_dir / "input").mkdir(exist_ok=True)
+        (case_dir / "output").mkdir(exist_ok=True)
+
+        pts, tri = _build_mesh(lx, ly, nx, ny)
+        nnodes, nelems = pts.shape[0], tri.shape[0]
+        edges = _boundary_node_lists(pts, lx, ly)
+        _write_nlist(case_dir / "input" / "nlist00", pts)
+        _write_elist(case_dir / "input" / "elist00", tri)
+        _write_blist(case_dir / "input" / "blist00", edges)
+        shutil.copy2(template_ctrl, case_dir / "control.dat")
+
+        time_limit, memory = _sweep_resources(nx, ny)
+
+        for ntasks in ntasks_list:
+            approx_elems = 2 * nx * ny
+            if approx_elems // ntasks < args.min_elems_per_task:
+                print(f"  skip  {case_dir.name}  np={ntasks}  (~{approx_elems // ntasks} elems/task)")
+                skipped += 1
+                continue
+            if args.failed_only and not _out_failed(case_dir, args.backend, nx, ny, ntasks):
+                skipped += 1
+                continue
+            if not args.rerun_completed and _out_done(case_dir, args.backend, nx, ny, ntasks):
+                print(f"  done  {case_dir.name}  np={ntasks}  (skip)")
+                skipped += 1
+                continue
+
+            jf = _sweep_jobfile(
+                backend=args.backend, executable=executable,
+                case_dir=case_dir, nx=nx, ny=ny, ntasks=ntasks,
+                nnodes=nnodes, nelems=nelems,
+                time=time_limit, memory=memory, account=account,
+                mpi_flags=mpi_flags, module_lines=module_lines, gpu=info["gpu"],
+            )
+            jobfile = case_dir / f"jobfile_np{ntasks}.slurm"
+            jobfile.write_text(jf)
+
+            if args.dry_run:
+                print(f"  dry   {case_dir.name}  np={ntasks}  {jobfile}")
+                submitted += 1
+                continue
+
+            result = subprocess.run(
+                ["sbatch", jobfile.name], cwd=case_dir, text=True, capture_output=True,
+            )
+            msg = result.stdout.strip() or result.stderr.strip()
+            if result.returncode != 0:
+                print(f"  ERROR {case_dir.name}  np={ntasks}  {msg}", file=sys.stderr)
+                sys.exit(result.returncode)
+            print(f"  sub   {case_dir.name}  np={ntasks}  {msg}")
+            submitted += 1
+
+    print(f"\n[biofem] {submitted} submitted, {skipped} skipped.")
+
+
+# ---------------------------------------------------------------------------
+# Mesh generation (rectangular Delaunay with boundary-edge fix)
+# ---------------------------------------------------------------------------
+def _build_mesh(lx: float, ly: float, nx: int, ny: int):
+    x = np.linspace(0.0, lx, nx)
+    y = np.linspace(0.0, ly, ny)
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    pts  = np.column_stack([X.ravel(), Y.ravel()])
+    tri  = _Delaunay(pts).simplices.astype(np.int64)
+    return _fix_two_boundary_edge_tris(pts, tri, lx, ly)
+
+
+def _on_boundary_edge(pts, i, j, lx, ly, tol=1e-10) -> bool:
+    pi, pj = pts[i], pts[j]
+    return any([
+        abs(pi[0])      <= tol and abs(pj[0])      <= tol,
+        abs(pi[0] - lx) <= tol and abs(pj[0] - lx) <= tol,
+        abs(pi[1])      <= tol and abs(pj[1])      <= tol,
+        abs(pi[1] - ly) <= tol and abs(pj[1] - ly) <= tol,
+    ])
+
+
+def _orient2(a, b, c) -> float:
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _split_edge(pts, tri, u, v, midmap: dict):
+    key = (min(u, v), max(u, v))
+    if key not in midmap:
+        midmap[key] = pts.shape[0]
+        pts = np.vstack([pts, 0.5 * (pts[u] + pts[v])[None, :]])
+    m = midmap[key]
+
+    new_tris = []
+    for t in tri:
+        if u in t and v in t:
+            r       = next(x for x in t if x != u and x != v)
+            a, b, c = t
+            sgn     = _orient2(pts[a], pts[b], pts[c])
+            t1, t2  = (u, m, r), (m, v, r)
+            if sgn != 0:
+                if _orient2(pts[t1[0]], pts[t1[1]], pts[t1[2]]) * sgn < 0:
+                    t1 = (u, r, m)
+                if _orient2(pts[t2[0]], pts[t2[1]], pts[t2[2]]) * sgn < 0:
+                    t2 = (m, r, v)
+            new_tris += [t1, t2]
+        else:
+            new_tris.append(tuple(t))
+    return pts, np.array(new_tris, dtype=np.int64)
+
+
+def _fix_two_boundary_edge_tris(pts, tri, lx, ly, tol=1e-10, max_passes=1000):
+    midmap: dict = {}
+    for _ in range(max_passes):
+        to_split = None
+        for t in tri:
+            a, b, c = t
+            bedges = [(i, j) for i, j in [(a, b), (b, c), (c, a)]
+                      if _on_boundary_edge(pts, i, j, lx, ly, tol)]
+            if len(bedges) == 2:
+                (u1, v1), (u2, v2) = bedges
+                shared = next((x for x in (u1, v1) if x in (u2, v2)), None)
+                if shared is None:
+                    continue
+                others = [x for x in (a, b, c) if x != shared]
+                if len(others) == 2:
+                    to_split = tuple(others)
+                    break
+        if to_split is None:
+            return pts, tri
+        pts, tri = _split_edge(pts, tri, *to_split, midmap)
+    raise RuntimeError("Could not resolve two-boundary-edge triangles.")
+
+
+def _boundary_node_lists(pts, lx: float, ly: float, tol=1e-10) -> list:
+    ids = np.arange(1, pts.shape[0] + 1, dtype=int)
+
+    def sorted_ids(mask, col, reverse=False):
+        idx = np.where(mask)[0]
+        order = np.argsort(pts[idx, col])
+        if reverse:
+            order = order[::-1]
+        return ids[idx[order]].tolist()
+
+    return [
+        sorted_ids(np.abs(pts[:, 1])        <= tol, 0),          # bottom
+        sorted_ids(np.abs(pts[:, 0] - lx)   <= tol, 1),          # right
+        sorted_ids(np.abs(pts[:, 1] - ly)   <= tol, 0, True),    # top
+        sorted_ids(np.abs(pts[:, 0])         <= tol, 1, True),    # left
+    ]
+
+
+def _write_nlist(path: Path, pts):
+    with open(path, "w") as f:
+        f.write(f"{pts.shape[0]}\n")
+        for i, (x, y) in enumerate(pts, start=1):
+            f.write(f"{i}\t0\t0\t{x:.6f} {y:.6f} {0.0:.6f}\n")
+
+
+def _write_elist(path: Path, tri):
+    with open(path, "w") as f:
+        f.write(f"{tri.shape[0]}\n")
+        for e, (a, b, c) in enumerate(tri, start=1):
+            f.write(f"1\t1\t0\t0\t0\t0\t0\t0\t4\t0\t{e}\t{a+1}\t{b+1}\t{c+1}\t{c+1}\n")
+
+
+def _write_blist(path: Path, edges: list):
+    bset = set()
+    for e in edges:
+        bset.update(e)
+    with open(path, "w") as f:
+        f.write("4\n")
+        f.write(f"{len(bset)}\n")
+        for e in edges:
+            f.write(f"{len(e)}\n")
+        for e in edges:
+            f.write(" ".join(map(str, e)) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser(
+        prog="biofem",
+        description="BioFEM-IA solver CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Build first (from repo root):
+  make build                  # dmplex backend (default)
+  make build ARGS="-DBIOFEM_CUDA=ON"   # cuda backend
+  make install                # symlink biofem into ~/.local/bin
+
+Run:
+  biofem run --backend dmplex --np 8
+  biofem run --backend cuda --dry-run
+  biofem sweep --backend dmplex --nx 64,128,256 --ny 48,96,192 --ntasks 1,4,8,16
+""",
+    )
+    parser.add_argument("--version", action="version", version=f"biofem {__version__}")
+
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    # run
+    p_run = sub.add_parser(
+        "run", help="run solver in current case directory",
+        description=(
+            "Run the solver from the current directory (must contain control.dat).\n"
+            "On a SLURM cluster the job is submitted via sbatch unless you are\n"
+            "already inside an interactive allocation."
+        ),
+    )
+    p_run.add_argument("--backend", default="dmplex", choices=list(BACKENDS),
+                       help="solver backend (default: dmplex)")
+    p_run.add_argument("--np", type=int, default=1,
+                       help="MPI task count (default: 1)")
+    p_run.add_argument("--time", default="01:00:00",
+                       help="SLURM time limit (default: 01:00:00)")
+    p_run.add_argument("--account", default="",
+                       help="SLURM account (overrides site.cfg)")
+    p_run.add_argument("--dry-run", action="store_true",
+                       help="print jobfile or mpirun command without executing")
+
+    # sweep
+    p_sw = sub.add_parser(
+        "sweep", help="generate mesh cases and submit parameter sweep",
+        description=(
+            "Generate rectangular Delaunay meshes for each (nx, ny) pair,\n"
+            "write case directories under --output-dir, and submit one\n"
+            "SLURM job per (mesh, ntasks) combination."
+        ),
+    )
+    p_sw.add_argument("--backend", default="dmplex", choices=list(BACKENDS),
+                      help="solver backend (default: dmplex)")
+    p_sw.add_argument("--nx", default="64",
+                      help="comma-separated nx values, e.g. 64,128,256")
+    p_sw.add_argument("--ny", default="48",
+                      help="comma-separated ny values (must match --nx length)")
+    p_sw.add_argument("--ntasks", default="1",
+                      help="comma-separated MPI task counts, e.g. 1,4,8,16")
+    p_sw.add_argument("--lx", type=float, default=1.2, help="domain length x (default: 1.2)")
+    p_sw.add_argument("--ly", type=float, default=0.9, help="domain length y (default: 0.9)")
+    p_sw.add_argument("--output-dir", default="./sweep",
+                      help="directory for generated case folders (default: ./sweep)")
+    p_sw.add_argument("--account", default="",
+                      help="SLURM account (overrides site.cfg)")
+    p_sw.add_argument("--min-elems-per-task", type=int, default=100,
+                      help="skip (mesh, ntasks) with fewer elements/task (default: 100)")
+    p_sw.add_argument("--failed-only", action="store_true",
+                      help="only submit runs whose existing output shows a failure")
+    p_sw.add_argument("--rerun-completed", action="store_true",
+                      help="re-submit jobs that already completed successfully")
+    p_sw.add_argument("--dry-run", action="store_true",
+                      help="generate jobfiles but do not submit")
+
+    args = parser.parse_args()
+    if args.command is None:
+        parser.print_help()
+        sys.exit(0)
+
+    {"run": cmd_run, "sweep": cmd_sweep}[args.command](args)
+
+
+if __name__ == "__main__":
+    main()

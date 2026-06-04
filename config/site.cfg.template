@@ -1,0 +1,11 @@
+[slurm]
+account =
+partition =
+
+[modules]
+base  = GCC/13.2.0 OpenMPI/4.1.6
+petsc = PETSc/3.22.5
+cuda  = CUDA/13.0.0
+
+[mpi]
+extra_flags = -mca pml ucx -mca btl ^uct,ofi -mca mtl ^ofi

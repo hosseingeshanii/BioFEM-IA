@@ -4,7 +4,7 @@ include ${CONFIG}
 endif
 
 WRAPPER_GOALS = dmplex dmplex-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean
-NO_PETSC_GOALS = cleanobj ${WRAPPER_GOALS}
+NO_PETSC_GOALS = cleanobj clean build build-cuda build-kokkos-cuda build-kokkos-openmp install ${WRAPPER_GOALS}
 SKIP_PETSC_CONF = $(if ${MAKECMDGOALS},$(if $(filter-out ${NO_PETSC_GOALS},${MAKECMDGOALS}),,1))
 
 ifeq (${SKIP_PETSC_CONF},)
@@ -147,7 +147,7 @@ asan: CFLAGS += ${SAN_FLAGS}
 asan: LIBS += -fsanitize=address,undefined
 asan: cleanobj testt
 
-.PHONY: testt asan cleanobj dmplex dmplex-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean
+.PHONY: testt asan cleanobj clean dmplex dmplex-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean build build-cuda build-kokkos-cuda build-kokkos-openmp install
 
 cleanobj:
 	rm -rf ${BUILDDIR} *.o testt testt-*
@@ -179,6 +179,39 @@ kokkos-openmp:
 
 kokkos-openmp-clean:
 	$(MAKE) CONFIG=config/kokkos-openmp.mk cleanobj testt
+
+# ── cmake-based build and install ────────────────────────────────────────
+clean:
+	rm -rf build
+
+build:
+	cmake -B build -DBIOFEM_DMPLEX=ON -DBIOFEM_CUDA=OFF -DBIOFEM_KOKKOS_CUDA=OFF -DBIOFEM_KOKKOS_OPENMP=OFF
+	cmake --build build
+
+build-cuda:
+	cmake -B build -DBIOFEM_DMPLEX=OFF -DBIOFEM_CUDA=ON -DBIOFEM_KOKKOS_CUDA=OFF -DBIOFEM_KOKKOS_OPENMP=OFF
+	cmake --build build
+
+build-kokkos-cuda:
+	cmake -B build -DBIOFEM_DMPLEX=OFF -DBIOFEM_CUDA=OFF -DBIOFEM_KOKKOS_CUDA=ON -DBIOFEM_KOKKOS_OPENMP=OFF
+	cmake --build build
+
+build-kokkos-openmp:
+	cmake -B build -DBIOFEM_DMPLEX=OFF -DBIOFEM_CUDA=OFF -DBIOFEM_KOKKOS_CUDA=OFF -DBIOFEM_KOKKOS_OPENMP=ON
+	cmake --build build
+
+install:
+	cmake --install build
+	@if ! echo "$$PATH" | tr ':' '\n' | grep -qx "$$HOME/.local/bin"; then \
+		echo ""; \
+		echo "  One-time setup: add ~/.local/bin to your PATH."; \
+		echo "  Run this once:"; \
+		echo ""; \
+		echo "    echo 'export PATH=\"\$$HOME/.local/bin:\$$PATH\"' >> ~/.bashrc && source ~/.bashrc"; \
+		echo ""; \
+	else \
+		echo "  biofem is ready. Try: biofem --help"; \
+	fi
 
 ifeq (${SKIP_PETSC_CONF},)
 include ${PETSC_DIR}/lib/petsc/conf/test
