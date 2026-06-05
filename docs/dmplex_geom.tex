@@ -100,26 +100,29 @@ rank share a single flat \emph{chart} $[\texttt{pStart}, \texttt{pEnd})$.
         range of cell point indices.
   \item \texttt{DMPlexGetDepthStratum(dm, 0, \&vStart, \&vEnd)} --- returns the
         range of vertex point indices.
-  \item After \texttt{DMPlexDistribute()}, each rank holds an owned subdomain plus
-        \texttt{overlap} layers of \emph{ghost} cells and vertices needed for stencil
-        evaluation near partition boundaries.
+  \item After \texttt{DMPlexDistribute()}, each rank holds an owned subdomain.
+        The current implementation uses \texttt{overlap=0} (no ghost cell layers);
+        cross-boundary stencil nodes are handled entirely by the PetscSF coordinate
+        exchange rather than ghost topology.
 \end{itemize}
 
-\textbf{Labels.}
-A \texttt{DMLabel} is an integer-valued map from point indices to arbitrary integers.
-Two labels are created before distribution and migrate with the points:
+\textbf{Original-index arrays.}
+After distribution, each rank holds two flat arrays built from the migration Star Forest
+(see \S\ref{sec:createdist}):
 \begin{center}
 \begin{tabular}{lll}
 \toprule
-Label name & Domain & Value \\
+Array & Size & Value \\
 \midrule
-\texttt{"biofem\_orig\_cell"}   & cell point $c$   & original cell index $e = c - c_\text{start}$ \\
-\texttt{"biofem\_orig\_vertex"} & vertex point $v$ & original vertex index $i = v - v_\text{start}$ \\
+\texttt{origCell[lc]} & $N_\text{local cells}$ & original IBMNodes cell index for local cell $lc$; $-1$ if unknown \\
+\texttt{origVert[lv]} & $N_\text{local verts}$ & original IBMNodes vertex index for local vertex $lv$; $-1$ if unknown \\
 \bottomrule
 \end{tabular}
 \end{center}
-These labels are the only thread from distributed-DM point indices back to the
-global \texttt{IBMNodes} arrays, which are indexed by original indices throughout.
+These arrays are the only thread from distributed-DM point indices back to the
+global \texttt{IBMNodes} arrays.  Unlike the previous design, no \texttt{DMLabel}
+is created or queried; the mapping is extracted from the migration SF in a single
+$\mathcal{O}(n_\text{leaves})$ walk immediately after \texttt{DMPlexDistribute}.
 
 \subsection{PetscSF: Star Forest}
 \label{sec:sf}
@@ -261,7 +264,7 @@ consists of four sequential steps, illustrated in Figure~\ref{fig:pipeline}.
 \draw[arr] (s2)--(s3);
 \draw[arr] (s3)--(s4);
 
-\node[note,right=0.8cm of s1] {Build serial DM on R0, label points, distribute with overlap.};
+\node[note,right=0.8cm of s1] {Build serial DM on R0 (no edges), distribute overlap=0; extract origCell[]/origVert[] from migration SF.};
 \node[note,right=0.8cm of s2] {Ghost detection via point SF + \texttt{MPI\_Allreduce(MAX)} $\Rightarrow$ \texttt{ownerRank[0..N\_v)}.};
 \node[note,right=0.8cm of s3] {Copy \texttt{ire/irv/val/patch} from global \texttt{ibm} to local layout.};
 \node[note,right=0.8cm of s4] {Identify cross-rank patch nodes, build PetscSF. $\mathcal{O}(N/P)$ after optimisation.};
@@ -270,23 +273,35 @@ consists of four sequential steps, illustrated in Figure~\ref{fig:pipeline}.
 \label{fig:pipeline}
 \end{figure}
 
-\subsection{\texttt{BuildSerialDMPlex\_} and \texttt{LabelOriginalPoints\_}}
+\subsection{\texttt{BuildSerialDMPlex\_}}
 
 Rank 0 fills the cell connectivity and coordinate arrays from \texttt{ibm} and
-passes them to \texttt{DMPlexCreateFromCellListPetsc}.
-All other ranks pass empty arrays; PETSc collectively constructs the full topology
-(including edge interpolation) and holds the complete mesh on rank 0.
-\texttt{LabelOriginalPoints\_} then stamps every cell and vertex with its
-pre-distribution index, so that after distribution each point on any rank can be
-mapped back to the global \texttt{ibm} arrays.
+passes them to \texttt{DMPlexCreateFromCellListPetsc} with
+\texttt{interpolate=PETSC\_FALSE}.
+All other ranks pass empty arrays; PETSc collectively constructs the cell--vertex
+topology on rank 0 \emph{without} edge interpolation.
+Skipping edge interpolation avoids PETSc's $\mathcal{O}(N^{3+})$ serial edge-building
+path and is safe because \texttt{overlap=0} distribution of an uninterpolated mesh
+is fully supported.
+No \texttt{DMLabel} is created at this stage; original indices are recovered from the
+migration SF after distribution (see \S\ref{sec:createdist}).
 
 \subsection{\texttt{CreateDistributedDMPlex\_}}
+\label{sec:createdist}
 
-Calls \texttt{DMPlexDistribute(dm, overlap, \&migrationSF, \&distributed)}.
-The migration SF is discarded; it was used internally to migrate the labels.
-The resulting distributed DM has \texttt{overlap} ghost cell layers on every rank,
-which ensures that subdivision stencils of boundary cells can be partially satisfied
-by locally available ghost vertex coordinates.
+Calls \texttt{DMPlexDistribute(dm, 0, \&migrationSF, \&distributed)}.
+The migration SF encodes, for each local point on each rank, the serial point on
+rank 0 it originated from.  Both \texttt{origCell[]} and \texttt{origVert[]} are
+extracted from this SF in a single $\mathcal{O}(n_\text{leaves})$ pass:
+\begin{itemize}
+  \item For each leaf $i$: local point \texttt{ilocal[i]}, serial point \texttt{iremote[i].index}.
+  \item If the local point falls in the cell chart $[c_\text{start}, c_\text{end})$:
+        $\texttt{origCell}[p - c_\text{start}] = \texttt{iremote}[i].\texttt{index} - \text{serial}\_c_\text{start}$.
+  \item Likewise for vertex points and \texttt{origVert}.
+\end{itemize}
+The resulting distributed DM has \texttt{overlap=0} (no ghost cell layers).
+For \texttt{np=1} the distributed DM is \texttt{NULL} (no migration); the identity
+mapping is applied directly.
 
 \subsection{\texttt{BuildOriginalVertexOwnerTable\_}}
 \label{sec:owner}
@@ -305,7 +320,8 @@ via \texttt{ilocal} (or the implicit $0,1,2,\ldots$ ordering if \texttt{ilocal =
 
 \textbf{Step 2: Local ownership.}
 Iterate over all local vertices $v \in [v_\text{start}, v_\text{end})$, read
-\texttt{orig = label(v)}, and for non-ghost vertices set \texttt{localOwner[orig] = myRank}.
+\texttt{orig = origVert[v - vStart]} (no label lookup), and for non-ghost vertices
+set \texttt{localOwner[orig] = myRank}.
 
 \textbf{Step 3: Global reduction.}
 \[
@@ -316,11 +332,12 @@ Non-owners contribute $-1$; the owning rank contributes its rank ID $\geq 0$.
 
 \subsection{\texttt{DMPlexPatchLayoutCreate\_}}
 
-Iterates over locally owned cells, reads the \texttt{"biofem\_orig\_cell"} label
-to obtain $e$, and copies \texttt{ibm->ire[e]}, \texttt{ibm->irv[e]}, \texttt{ibm->val[e]},
-and \texttt{ibm->patch[16e+i]} into the layout arrays.
-Ghost cells (label $= -1$) receive \texttt{PATCH\_MISSING} in all patch slots.
-This step involves no communication.
+Iterates over locally owned cells $lc \in [0, N_\text{local})$, reads
+$e = \texttt{origCell}[lc]$ (no label lookup), and copies \texttt{ibm->ire[e]},
+\texttt{ibm->irv[e]}, \texttt{ibm->val[e]}, and \texttt{ibm->patch[16e+i]}
+into the layout arrays.
+Cells with $e < 0$ or $e \geq N_\text{elmt}$ receive \texttt{PATCH\_MISSING}
+in all patch slots.  This step involves no communication.
 
 \subsection{\texttt{BuildPatchCoordinateExchange\_}}
 \label{sec:exchange}
@@ -438,27 +455,29 @@ for the full setup and for $n_\text{repeat}=3$ geometry kernel iterations.
 The first iteration is a cold run (cache effects); subsequent iterations give the
 warm steady-state cost.
 
-Selected results from the mesh sweep (GRACE cluster, \texttt{overlap=2}):
+Selected results from the mesh sweep (GRACE cluster, \texttt{overlap=0},
+no serial interpolation):
 
 \begin{center}
 \begin{tabular}{rrccc}
 \toprule
 $N_x \times N_y$ & $N_\text{elmt}$ & $P$ & Setup (s) & Iter-1 (s) \\
 \midrule
-$16\times12$   &    334   & 1  & 6.54   & 0.00630 \\
-$64\times48$   &  5\,926  & 4  & 275.15 & 0.03583 \\
-$64\times48$   &  5\,926  & 32 & 11.49  & 0.00925 \\
-$128\times96$  & 24\,132  & 8  & 3375.5 & 0.08660 \\
-$128\times96$  & 24\,132  & 32 & 146.6  & 0.02800 \\
-$160\times120$ & 37\,846  & 16 & 1527.0 & 0.06090 \\
-$256\times192$ & 97\,414  & 32 & 3950.6 & 0.07881 \\
+$16\times12$   &    334        & 1  & 0.0043  & 0.00650 \\
+$64\times48$   &  5\,926       & 4  & 0.012   & 0.02808 \\
+$64\times48$   &  5\,926       & 32 & 0.030   & 0.00359 \\
+$128\times96$  & 24\,132       & 8  & 0.029   & 0.06522 \\
+$128\times96$  & 24\,132       & 32 & 0.015   & 0.01513 \\
+$256\times192$ & 97\,414       & 32 & 0.058   & 0.05829 \\
+$512\times384$ & 391\,434      & 32 & 0.24    & 0.25191 \\
+$640\times480$ & 612\,166      & 32 & 0.38    & 0.41079 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The large setup times at low core counts reflect the $\mathcal{O}(N^2/P^2)$
-complexity of the pre-optimisation \texttt{BuildPatchCoordinateExchange\_};
-after the fix these collapse to the DMPlex distribution cost.
+Setup times are now dominated by \texttt{DMPlexDistribute} (O(N/P)) rather than
+\texttt{BuildPatchCoordinateExchange\_}, which was the $\mathcal{O}(N^2/P^2)$
+bottleneck before the optimisation.  Iter-1 scales near-linearly with $N/P$.
 
 %% ============================================================
 \section{Call Graph Summary}
@@ -467,13 +486,12 @@ after the fix these collapse to the DMPlex distribution cost.
 \begin{lstlisting}[language={},numbers=none,frame=none,backgroundcolor=\color{white}]
 RunDMPlexGeomProcesses()
   CreateDistributedDMPlex_()
-    BuildSerialDMPlex_()          // rank 0 only, serial
-    LabelOriginalPoints_()        // rank 0 only, serial
-    DMPlexDistribute()            // collective
-  BuildOriginalVertexOwnerTable_()
+    BuildSerialDMPlex_()          // rank 0 only, no edges (PETSC_FALSE)
+    DMPlexDistribute(overlap=0)   // collective; migration SF -> origCell[], origVert[]
+  BuildOriginalVertexOwnerTable_(origVert)
     DMGetPointSF()
     MPI_Allreduce(MPI_MAX)        // collective, size N_v
-  DMPlexPatchLayoutCreate_()      // local, no comms
+  DMPlexPatchLayoutCreate_(origCell)  // local, no comms
   BuildPatchCoordinateExchange_() // local + PetscSFSetUp()
     [per iteration:]
   RunLocalGeometry_()
@@ -493,13 +511,13 @@ RunDMPlexGeomProcesses()
 \toprule
 Option & Default & Description \\
 \midrule
-\texttt{-dmplex\_geom\_overlap} & 2 & Ghost overlap layers for DMPlex distribution. \\
-\texttt{-nbody}                 & 1 & Number of IBM bodies to process. \\
+\texttt{-nbody} & 1 & Number of IBM bodies to process. \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-A larger overlap increases the fraction of cells whose stencils are fully local
-(reducing SF traffic) at the cost of a larger ghost layer.
+The ghost overlap is hardcoded to \texttt{overlap=0}.  Cross-boundary stencil nodes
+are handled entirely by the PetscSF coordinate exchange, so no ghost topology is
+needed.
 
 \end{document}
