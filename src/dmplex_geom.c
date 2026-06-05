@@ -410,6 +410,7 @@ static PetscErrorCode BuildOriginalVertexOwnerTable_(DM dm, IBMNodes *ibm,
  *
  * @param[in]  layout    Local patch layout (provides dm, nLocalCells, patch array).
  * @param[in]  ibm       IBM mesh (n_v, coordinate arrays used as SF root data).
+ * @param[in]  origVert  origVert[lv]: original IBMNodes vertex index for local vertex lv.
  * @param[in]  ownerRank Global owner table from BuildOriginalVertexOwnerTable_().
  * @param[out] exchange  Initialised exchange struct (caller must call
  *                       DMPlexPatchExchangeDestroy_ when done).
@@ -621,6 +622,7 @@ static PetscErrorCode DMPlexPatchLayoutCreate_(DM dm, IBMNodes *ibm,
  * Counts are summed across all ranks with MPI_Allreduce and printed once.
  *
  * @param[in] layout    Local patch layout.
+ * @param[in] origVert  origVert[lv]: original IBMNodes vertex index for local vertex lv.
  * @param[in] nVertices Total number of original vertices (ibm->n_v).
  */
 static PetscErrorCode ReportPatchHalo_(const DMPlexPatchLayout *layout,
@@ -740,8 +742,8 @@ static PetscErrorCode RunLocalGeometry_(FE *fem, const DMPlexPatchLayout *layout
  * wall-clock times.  Setup and kernel times are reported to stdout.
  *
  * Runtime parameters (via PetscOptions):
- *   - @c -dmplex_geom_overlap <int>  Ghost overlap layers (default 2).
- *   - @c -nbody <int>                Number of IBM bodies (default 1).
+ *   - @c -dmplex_geom_overlap N  Ghost overlap layers (default 2).
+ *   - @c -nbody N                Number of IBM bodies (default 1).
  *
  * @param[in,out] fem  Array of FE structs, one per body.  fem[ibi].ibm must be
  *                     populated before calling this function.

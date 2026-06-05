@@ -43,18 +43,13 @@ PetscInt           num_gaussian_quad_points;
 
 #define LOG(msg) PetscPrintf(PETSC_COMM_WORLD, "[%s] %s\n", __func__, msg)
 
-/**
- * @brief Update activation parameters in the user context.
- *
+/*
+ * update_user_act_params — implementation.
  * Uses PETSc options database to set muscle activation coefficients:
- *  - `-muscle_act_gamma` always,
- *  - `-muscle_act_a_1` if fiber- or curvature-based activation is enabled,
- *  - `-muscle_act_a_2` only if curvature-based activation is enabled.
- *
- * This allows runtime configuration of activation parameters without recompilation.
- *
- * @param[in,out] fem FE structure containing UserCtx.
- * @return PetscErrorCode 0 on success.
+ *  - -muscle_act_gamma always,
+ *  - -muscle_act_a_1 if fiber- or curvature-based activation is enabled,
+ *  - -muscle_act_a_2 only if curvature-based activation is enabled.
+ * See muscle_activation.h for the API contract.
  */
 PetscErrorCode update_user_act_params(FE *fem){
     UserCtx  *userctx = &fem->userctx;    
@@ -80,7 +75,7 @@ PetscErrorCode update_user_act_params(FE *fem){
 
 /**
  * @brief High-Level Procedure for Muscle Activation Update
- * @detailsno
+ * @details
  * 1. Calculate active part of deformation gradient tensor coefficients in undeformed 
  *    curvilinear basis (Fa_ij) for all elements.
  */
@@ -214,14 +209,7 @@ PetscErrorCode compute_act_Fa_element(FE *fem, PetscInt ec)
 }
 
 
-/**
- * @brief Updates all active Fa values for each element in the finite element mesh.
- *
- * Iterates over all elements and calls compute_active_Fa_element for each.
- *
- * @param fem Pointer to the FE structure containing mesh and element data.
- * @return PetscErrorCode Returns 0 on success.
- */
+/* update_act_Fa — implementation. See muscle_activation.h for the API contract. */
 PetscErrorCode update_act_Fa(FE *fem)
 {
     IBMNodes  *ibm=fem->ibm;          
@@ -305,15 +293,7 @@ PetscErrorCode compute_intmd_state_cov_basis_element(FE *fem, PetscInt ec){
     return 0;
 }
 
-/**
- * @brief Update intermediate state for all elements.
- *
- * Loops over all elements and computes their intermediate deformed
- * covariant basis vectors.
- *
- * @param[in,out] fem FE structure.
- * @return PetscErrorCode 0 on success.
- */
+/* update_intmd_state_cov_basis — implementation. See muscle_activation.h for the API contract. */
 PetscErrorCode update_intmd_state_cov_basis(FE *fem){
   IBMNodes  *ibm=fem->ibm;          
   PetscReal *garray;

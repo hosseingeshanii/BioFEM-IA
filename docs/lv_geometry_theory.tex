@@ -1,0 +1,429 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,bm}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+\geometry{margin=2.5cm}
+
+\newcommand{\be}{\hat{\mathbf{e}}}
+\newcommand{\bn}{\hat{\mathbf{n}}}
+\newcommand{\bl}{\hat{\mathbf{l}}}
+\newcommand{\bc}{\hat{\mathbf{c}}}
+\newcommand{\bff}{\mathbf{f}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\R}{\mathbb{R}}
+
+\title{Left Ventricle Surface Geometry and Helical Fiber Architecture\\
+\large Methodology and Formulation}
+\author{BioFEM-IA}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\vspace{1em}
+
+% -----------------------------------------------------------------------
+\section{Overview}
+
+This document describes the analytical geometry and rule-based myofiber
+architecture used to construct a simplified left-ventricle (LV) surface mesh
+in BioFEM-IA (\texttt{src/lv\_geometry.c}).  The model is intended as a
+lightweight starting point: no volumetric or imaging data are required, and
+the mesh is generated entirely from closed-form expressions.
+
+The mesh is a \emph{surface} (shell) representation of the
+\textbf{midmyocardial layer} of the LV free wall, suitable for thin-shell
+finite-element analyses.  Fiber directions are assigned element-by-element via
+a classical rule-based interpolation of Streeter's experimental midwall
+measurements~\cite{Streeter1969}, following the algorithmic framework of Bayer
+et al.~\cite{Bayer2012}.
+
+% -----------------------------------------------------------------------
+\section{Left Ventricle Geometry}
+
+\subsection{Prolate Spheroid Parameterisation}
+
+The left ventricle is approximated as a \emph{truncated prolate spheroid}
+(oblate-spheroid prolate ellipsoid of revolution).  In the reference
+configuration, the long axis coincides with the $z$-axis.  The apex is
+placed at the top of the long axis, $(0,0,a)$, and the open base rim lies in
+a plane of constant $z$ below the equator.
+
+The surface is parameterised by two angles,
+\begin{equation}
+  \bx(\theta,\varphi)
+  =
+  \begin{pmatrix}
+    b\sin\theta\cos\varphi \\
+    b\sin\theta\sin\varphi \\
+    a\cos\theta
+  \end{pmatrix},
+  \qquad
+  \theta\in[0,\theta_{\max}],\quad
+  \varphi\in[0,2\pi),
+  \label{eq:parameterisation}
+\end{equation}
+where
+\begin{itemize}
+  \item $a > 0$ is the \textbf{polar} (long-axis) semi-axis,
+  \item $b > 0$ is the \textbf{equatorial} semi-axis ($b < a$ for a prolate
+        shape),
+  \item $\theta$ is the \textbf{polar angle} measured from the apex
+        ($\theta=0$ at the apex, increasing toward the base), and
+  \item $\varphi$ is the \textbf{azimuthal angle}.
+\end{itemize}
+
+The level-set function of the spheroid is
+\begin{equation}
+  F(\bx) = \frac{x^2}{b^2} + \frac{y^2}{b^2} + \frac{z^2}{a^2} - 1 = 0.
+\end{equation}
+
+\subsection{Truncation Height}
+
+A single dimensionless parameter $h \in (0,1]$, called the \emph{cut
+fraction}, controls how much of the spheroid is retained.  It is defined as
+the fraction of the full axial height $2a$ kept from the apex:
+\begin{equation}
+  h = \frac{a - z_{\text{base}}}{2a}
+  \;\Longrightarrow\;
+  z_{\text{base}} = a(1 - 2h).
+\end{equation}
+The corresponding maximum polar angle is
+\begin{equation}
+  \boxed{\theta_{\max} = \arccos(1 - 2h).}
+  \label{eq:theta_cut}
+\end{equation}
+\begin{itemize}
+  \item $h = 0.5$: hemisphere ($z_{\text{base}} = 0$, equatorial cut).
+  \item $h = 0.65$: typical LV truncation ($z_{\text{base}} < 0$, base extends
+        below the equator).
+  \item $h = 1.0$: full spheroid (no truncation).
+\end{itemize}
+
+\subsection{Discrete Mesh}
+
+The surface is discretised with a structured triangulation.
+
+\subsubsection*{Node layout}
+
+\begin{itemize}
+  \item \textbf{Node 0} (apex): $\bx = (0, 0, a)$.
+  \item \textbf{Ring $k$} ($k = 0, 1, \dots, N_\theta - 1$):
+        $N_\varphi$ nodes uniformly spaced in $\varphi$, at polar angle
+        \[
+          \theta_k = (k+1)\,\frac{\theta_{\max}}{N_\theta}.
+        \]
+        Node index: $1 + k\,N_\varphi + j$ for azimuthal position
+        $j = 0, \dots, N_\varphi - 1$.
+\end{itemize}
+
+Total nodes: $N_v = 1 + N_\theta N_\varphi$.
+
+\subsubsection*{Element connectivity}
+
+\begin{enumerate}
+  \item \textbf{Apex fan} ($N_\varphi$ triangles): connect the apex to
+        consecutive pairs of ring-0 nodes,
+        \[
+          T_j^{\rm apex} = \{0,\;1+j,\;1+(j+1)\bmod N_\varphi\},
+          \quad j = 0,\dots,N_\varphi-1.
+        \]
+  \item \textbf{Latitude bands} ($N_\theta - 1$ bands, each with
+        $2N_\varphi$ triangles): each latitude quad is split along its
+        diagonal into two triangles.  For band $k$ (between ring $k$ and
+        ring $k+1$) and column $j$:
+        \begin{align*}
+          T_1 &= \{n_{bl},\;n_{tl},\;n_{br}\}, \\
+          T_2 &= \{n_{tl},\;n_{tr},\;n_{br}\},
+        \end{align*}
+        where $n_{bl/br/tl/tr}$ are the bottom-left, bottom-right, top-left,
+        and top-right corners of the quad.
+\end{enumerate}
+
+Total elements: $N_e = N_\varphi(2N_\theta - 1)$.
+
+\subsubsection*{Patch nodes ($nv4/nv5/nv6$)}
+
+For subdivision-surface bending (curvature mode~1), each element requires the
+``opposite'' node of each of its three edge-sharing neighbours.  These are
+computed with an $O(N_e^2)$ neighbour search (acceptable for the small meshes
+used in this module) and stored in \texttt{ibm->nv4/nv5/nv6}.  Elements on
+the open base boundary use the sentinel value $10^6$ to indicate no neighbour.
+
+% -----------------------------------------------------------------------
+\section{Helical Myofiber Architecture}
+
+\subsection{Myocardial Wall Layers}
+
+The LV free wall consists of three concentric layers.
+
+\begin{itemize}
+  \item \textbf{Endocardium} — thin inner endothelial lining of the ventricular
+        chamber.  Passively transmits luminal pressure; not contractile.
+  \item \textbf{Myocardium} — the thick muscular middle layer, composed almost
+        entirely of cardiomyocytes whose sarcomeres generate active tension.
+        This is the layer responsible for the pumping function of the heart.
+        Within the myocardium, the \emph{subendocardial} portion (inner third)
+        is activated first via the Purkinje network, but contractile force is
+        generated throughout the full thickness.
+  \item \textbf{Epicardium} — thin outer serous membrane (visceral pericardium).
+        Passively supports the wall; not contractile.
+\end{itemize}
+
+The myocardium is therefore the layer of primary interest for muscle-activation
+models.
+
+\subsection{Transmural Fiber Architecture and the Representative Surface}
+
+Streeter et al.~\cite{Streeter1969} measured the myofiber helix angle
+$\alpha$ across the wall thickness (transmurally) at multiple apex-to-base
+stations.  The angle varies \emph{continuously} from a large positive value at
+the endocardium to a large negative value at the epicardium, passing through
+approximately zero at the midwall:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+Layer & Depth & Typical helix angle $\alpha$ \\
+\midrule
+Endocardium (inner) & 0\%   & $+60^\circ$ to $+90^\circ$ \\
+\textbf{Midmyocardium} & \textbf{50\%} & \boldmath$\pm 60^\circ$ \textbf{(apex $\to$ base)} \\
+Epicardium (outer)  & 100\% & $-60^\circ$ to $-90^\circ$ \\
+\bottomrule
+\end{tabular}
+\caption{Transmural helix-angle distribution in the LV wall
+         (Streeter 1969, Table~1).  Sign convention: positive angles indicate
+         left-handed helices (endocardial sense), negative angles right-handed
+         helices (epicardial sense).}
+\label{tab:transmural}
+\end{table}
+
+Because BioFEM-IA uses a \emph{single-layer} thin-shell formulation, the mesh
+represents \textbf{one} depth through the wall.  The conventional choice in the
+computational cardiac mechanics literature
+(Bayer et al.~\cite{Bayer2012}, Bovendeerd et al.~\cite{Bovendeerd1994})
+is to place that surface at the \textbf{midmyocardium} (mid-wall, 50\% depth).
+This choice is motivated by two reasons:
+\begin{enumerate}
+  \item The midwall is the \emph{neutral surface} for bending of the shell,
+        minimising the error introduced by collapsing finite thickness onto a
+        single surface.
+  \item The midwall helix angles ($+60^\circ$ at the apex, crossing $0^\circ$
+        near the equator, $-60^\circ$ at the base) are well characterised by
+        Streeter's direct measurements and serve as the canonical reference
+        for rule-based fiber assignment.
+\end{enumerate}
+
+\noindent
+\textbf{Summary:} the present model represents the \emph{midmyocardial surface}
+of the LV free wall.  The default angle parameters
+$\alpha_{\rm apex} = +60^\circ$, $\alpha_{\rm base} = -60^\circ$ are taken
+directly from Streeter's midwall data~\cite{Streeter1969}.
+
+\subsection{Motivation}
+
+Myocardial fibers in the LV wall follow a helical path that rotates
+continuously from the endocardial surface (positive helix angle) to the
+epicardial surface (negative helix angle), with a smooth zero crossing at the
+midwall~\cite{Streeter1969,Holzapfel2009}.  For a \emph{surface} mesh
+representing the midmyocardial layer (Section~3.2), the helical rotation
+manifests as a spatial variation of the fiber angle with position along the
+long axis: near the apex the fibers are steeply inclined, while near the base
+they are nearly circumferential.
+
+\subsection{Local Orthonormal Frame}
+
+At the centroid $\bx_c$ of each triangular element, three orthonormal vectors
+are constructed.
+
+\paragraph{Outward surface normal $\bn$.}
+The outward unit normal to the spheroid is proportional to $\nabla F$:
+\begin{equation}
+  \bn = \mathrm{unit}\!\left(\frac{x_c}{b^2},\;\frac{y_c}{b^2},\;
+                               \frac{z_c}{a^2}\right).
+  \label{eq:normal}
+\end{equation}
+
+\paragraph{Meridional (apex-to-base) direction $\bl$.}
+The apex-to-base direction is obtained by projecting the downward unit vector
+$\hat{\mathbf{z}}_{-} = (0,0,-1)$ onto the tangent plane:
+\begin{equation}
+  \bl_{\rm raw} = \hat{\mathbf{z}}_{-}
+                  - \bigl(\hat{\mathbf{z}}_{-}\cdot\bn\bigr)\,\bn,
+  \qquad
+  \bl = \mathrm{unit}(\bl_{\rm raw}).
+  \label{eq:meridional}
+\end{equation}
+At the apex ($\theta\to 0$) the projection degenerates; in that case a
+fallback tangent is derived by projecting $(1,0,0)$ instead.
+
+\paragraph{Circumferential direction $\bc$.}
+The right-hand circumferential direction is
+\begin{equation}
+  \bc = \bn \times \bl.
+  \label{eq:circumferential}
+\end{equation}
+By construction $\{\bn,\bl,\bc\}$ is an orthonormal triad, and $\bl$, $\bc$
+lie in the tangent plane of the spheroid at $\bx_c$.
+
+\subsection{Helix Angle Model}
+
+Following Streeter~\cite{Streeter1969} and the rule-based framework of
+Bayer et al.~\cite{Bayer2012}, the helix angle $\alpha$ (measured from the
+circumferential direction $\bc$ toward the meridional direction $\bl$) is
+interpolated linearly along the long axis:
+\begin{equation}
+  \boxed{
+    \alpha(z^*) = (1 - z^*)\,\alpha_{\rm apex} + z^*\,\alpha_{\rm base},
+  }
+  \label{eq:helix_angle}
+\end{equation}
+where the normalised axial coordinate is
+\begin{equation}
+  z^* = \frac{a - z_c}{a - z_{\rm base}} \;\in\; [0,1],
+  \label{eq:zstar}
+\end{equation}
+with $z^* = 0$ at the apex and $z^* = 1$ at the base.
+
+Default values (following Streeter's midwall measurements~\cite{Streeter1969}):
+\[
+  \alpha_{\rm apex} = +60^\circ, \qquad \alpha_{\rm base} = -60^\circ.
+\]
+
+\subsection{Fiber Unit Vector}
+
+The fiber direction at element $e$ is the unit vector in the tangent plane
+making angle $\alpha$ with $\bc$:
+\begin{equation}
+  \boxed{
+    \bff_e = \cos\alpha\,\bc + \sin\alpha\,\bl,
+  }
+  \label{eq:fiber_vec}
+\end{equation}
+stored as \texttt{ibm->n\_fib[e]}.  Since $\bc$ and $\bl$ are both unit
+vectors and mutually orthogonal, $\bff_e$ is automatically a unit vector.
+
+\paragraph{Interpretation of $\alpha$.}
+\begin{itemize}
+  \item $\alpha = 0^\circ$: fiber is circumferential ($\bff = \bc$).
+  \item $\alpha = 90^\circ$: fiber is meridional/longitudinal ($\bff = \bl$).
+  \item $\alpha = 60^\circ$ (apex): fiber is predominantly meridional with a
+        helical component.
+  \item $\alpha = -60^\circ$ (base): fiber is predominantly circumferential
+        but wound in the opposite helical sense.
+\end{itemize}
+
+\subsection{Variation Along the Wall}
+
+Figure~\ref{fig:fiber_schematic} illustrates the expected fiber rotation.
+The helix angle transitions smoothly from $+\alpha_{\rm apex}$ at the apex to
+$-\alpha_{\rm base}$ at the base, crossing $0^\circ$ at the midpoint
+$z^* = \alpha_{\rm apex}/(\alpha_{\rm apex} - \alpha_{\rm base})$ (at
+$z^* = 0.5$ for the symmetric default values).
+
+\begin{figure}[h]
+\centering
+% Placeholder — replace with actual figure once generated from ParaView.
+\fbox{\parbox{0.7\textwidth}{\centering\vspace{2cm}
+  \textit{ParaView rendering of the LV mesh with fiber vectors coloured by
+  helix angle $\alpha(z^*)$. Generated from \texttt{lv\_fiber\_00.vtk}.}
+  \vspace{2cm}}}
+\caption{Helical fiber architecture on the truncated prolate-spheroid LV
+surface. Colours indicate $\alpha$ from $-60^\circ$ (base, blue) to
+$+60^\circ$ (apex, red).}
+\label{fig:fiber_schematic}
+\end{figure}
+
+% -----------------------------------------------------------------------
+\section{Implementation Parameters}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\toprule
+PETSc option & Variable & Default & Description \\
+\midrule
+\texttt{-lv\_geom\_process} & \texttt{lv\_geom\_process} & 0        & Enable LV mesh (0 = file input) \\
+\texttt{-lv\_a}             & \texttt{lv\_a}             & 4.5 cm   & Polar semi-axis \\
+\texttt{-lv\_b}             & \texttt{lv\_b}             & 2.5 cm   & Equatorial semi-axis \\
+\texttt{-lv\_f\_cut}        & \texttt{lv\_f\_cut}        & 0.55     & Cut fraction $h$ \\
+\texttt{-lv\_N\_theta}      & \texttt{lv\_N\_theta}      & 16       & Number of latitude rings \\
+\texttt{-lv\_N\_phi}        & \texttt{lv\_N\_phi}        & 32       & Nodes per ring \\
+\texttt{-lv\_alpha\_apex}   & \texttt{lv\_alpha\_apex}   & $+60^\circ$ & Apex helix angle \\
+\texttt{-lv\_alpha\_base}   & \texttt{lv\_alpha\_base}   & $-60^\circ$ & Base helix angle \\
+\bottomrule
+\end{tabular}
+\caption{PETSc command-line options for the LV geometry module.}
+\label{tab:options}
+\end{table}
+
+Example invocation (from the case directory, which must contain \texttt{control.dat}):
+\begin{verbatim}
+cd BioFEM-studies/lv_test
+biofem run --backend dmplex --np 1          # local / interactive
+biofem run --backend dmplex --np 8 \        # submit to SLURM
+           --account <account> --time 00:30:00
+\end{verbatim}
+All \texttt{-lv\_*} parameters are read from \texttt{control.dat} via PETSc's options
+database; no flags need to be passed on the command line unless overriding a
+value from the file.
+
+% -----------------------------------------------------------------------
+\section{Output}
+
+When \texttt{-lv\_geom\_process~1} is active, fiber vectors are written in
+two places:
+
+\paragraph{Initialisation VTK (\texttt{lv\_fiber\_00.vtk}).}
+Written once at startup to \texttt{out\_dir}.  Contains the surface mesh as
+\texttt{UNSTRUCTURED\_GRID} (VTK cell type~5) and a \texttt{VECTORS} cell-data
+field \texttt{fiber\_direction} with $\bff_e$ for every element.
+
+\paragraph{Time-step surface files (\texttt{surface\{ibi\}\_\{ti\}.vtk}).}
+The standard \texttt{Output()} routine (controlled by \texttt{-tiout}) writes
+a \texttt{VECTORS nfib float} cell-data block to each surface VTK whenever
+\texttt{lv\_geom\_process}~$> 0$.  This allows the fiber field to be viewed
+alongside the deformed geometry and stress/strain fields at every saved
+time step.
+
+Open either file in ParaView and apply the \emph{Glyph} filter (arrow glyphs
+on \texttt{nfib} or \texttt{fiber\_direction}) to visualise the helical fiber
+architecture over the LV surface.
+
+% -----------------------------------------------------------------------
+\begin{thebibliography}{9}
+
+\bibitem{Streeter1969}
+Streeter~DD~Jr, Spotnitz~HM, Patel~DJ, Ross~J~Jr, Sonnenblick~EH.
+\newblock Fiber orientation in the canine left ventricle during diastole and
+  systole.
+\newblock \textit{Circulation Research}, 24(3):339--347, 1969.
+
+\bibitem{Bayer2012}
+Bayer~JD, Blake~RC, Plank~G, Trayanova~NA.
+\newblock A novel rule-based algorithm for assigning myocardial fiber
+  orientation to computational heart models.
+\newblock \textit{Annals of Biomedical Engineering}, 40(10):2243--2254, 2012.
+
+\bibitem{Holzapfel2009}
+Holzapfel~GA, Ogden~RW.
+\newblock Constitutive modelling of passive myocardium: a structurally based
+  framework for material characterization.
+\newblock \textit{Philosophical Transactions of the Royal Society A},
+  367:3445--3475, 2009.
+
+\bibitem{Bovendeerd1994}
+Bovendeerd~PHM, Arts~T, Huyghe~JM, van Campen~DH, Reneman~RS.
+\newblock Dependence of local left ventricular wall mechanics on myocardial
+  fiber orientation: a model study.
+\newblock \textit{Journal of Biomechanics}, 27(7):941--951, 1994.
+
+\end{thebibliography}
+
+\end{document}

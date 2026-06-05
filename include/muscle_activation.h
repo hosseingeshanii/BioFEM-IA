@@ -30,10 +30,11 @@
 PetscErrorCode update_user_act_params(FE *fem);
 
 /**
- * @brief Step 1: Compute the active part of the deformation gradient tensor (Fa_ij) 
+ * @brief Step 1: Compute the active part of the deformation gradient tensor (Fa_ij)
  *        for a given shell element.
  *
- * @param ec Index of the shell element
+ * @param[in,out] fem  Finite element structure with activation and mesh data.
+ * @param[in]     ec   Index of the shell element.
  * @return PetscErrorCode Standard PETSc error code
  */
 PetscErrorCode compute_active_Fa_element(FE *fem, PetscInt ec);

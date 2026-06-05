@@ -6,7 +6,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-extern PetscInt   dof, outghost, ConstitutiveLawNonLinear, contact, n_Fung_Coeffs, n_lin_model_coeffs;  
+extern PetscInt   dof, outghost, ConstitutiveLawNonLinear, contact, n_Fung_Coeffs, n_lin_model_coeffs;
+extern PetscInt   lv_geom_process;
 
 extern PetscReal  dt, char_length_x, char_length_y, char_length_z;
 
@@ -742,12 +743,12 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   //   PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->nf_x[i], ibm->nf_y[i], ibm->nf_z[i]);
   // }
   
-  // if(ConstitutiveLawNonLinear){
-  //   PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS nfib float\n");
-  //   for (i=0; i<ibm->n_elmt; i++) {
-  //     PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->n_fib[i].x, ibm->n_fib[i].y, ibm->n_fib[i].z);
-  //   }
-  // }
+  if (lv_geom_process) {
+    PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS nfib float\n");
+    for (i=0; i<ibm->n_elmt; i++) {
+      PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",ibm->n_fib[i].x, ibm->n_fib[i].y, ibm->n_fib[i].z);
+    }
+  }
 
   // PetscFPrintf(PETSC_COMM_WORLD, f,  "VECTORS StrainM float\n");
   // for (i=0; i<ibm->n_elmt; i++) {

@@ -49,6 +49,14 @@ else:
 
 SITE_CFG = CONFIG_DIR / "site.cfg"
 
+# load-env.sh lives at the repo root; for installed builds look one level up
+# from the bin/ directory (i.e. <prefix>/load-env.sh).
+if _IN_SOURCE:
+    LOAD_ENV_SH = _REPO_ROOT / "load-env.sh"
+else:
+    _cand = _HERE.parent / "load-env.sh"
+    LOAD_ENV_SH = _cand if _cand.exists() else None
+
 BACKENDS = {
     "dmplex":        {"exe": _exe("biofem-dmplex",        "testt-dmplex"),        "gpu": False},
     "cuda":          {"exe": _exe("biofem-cuda",          "testt-cuda"),          "gpu": True},
@@ -95,6 +103,13 @@ def _module_lines(cfg: configparser.ConfigParser, *, cuda: bool) -> str:
     return "module purge\n" + "\n".join(f"ml {m}" for m in mods)
 
 
+def _load_env_line() -> str:
+    """Return a shell line that sources load-env.sh, or empty string if not found."""
+    if LOAD_ENV_SH and LOAD_ENV_SH.exists():
+        return f"source {LOAD_ENV_SH}"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Cluster detection
 # ---------------------------------------------------------------------------
@@ -114,11 +129,12 @@ def detect_cluster() -> dict:
 # ---------------------------------------------------------------------------
 def _run_jobfile(
     *, backend, executable, run_dir, np, time, account,
-    mpi_flags, module_lines, gpu,
+    mpi_flags, load_env, gpu,
 ) -> str:
-    acct_line = f"#SBATCH --account={account}" if account else ""
-    gpu_line  = "#SBATCH --gpus=1" if gpu else ""
-    ntasks    = 1 if gpu else np
+    acct_line  = f"#SBATCH --account={account}" if account else ""
+    gpu_line   = "#SBATCH --gpus=1" if gpu else ""
+    ntasks     = 1 if gpu else np
+    env_block  = load_env if load_env else "# no load-env.sh found"
     if gpu:
         mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {executable}'
     else:
@@ -138,7 +154,7 @@ def _run_jobfile(
         f"{gpu_line}\n"
         f"{acct_line}\n"
         f"\nset -euo pipefail\n"
-        f"\n{module_lines}\n"
+        f"\n{env_block}\n"
         f'\ncd "{run_dir}" || exit 1\n'
         f"\n{mpi_cmd}\n"
     )
@@ -146,10 +162,11 @@ def _run_jobfile(
 
 def _sweep_jobfile(
     *, backend, executable, case_dir, nx, ny, ntasks, nnodes, nelems,
-    time, memory, account, mpi_flags, module_lines, gpu,
+    time, memory, account, mpi_flags, load_env, gpu,
 ) -> str:
     acct_line = f"#SBATCH --account={account}" if account else ""
     gpu_line  = "#SBATCH --gpus=1" if gpu else ""
+    env_block = load_env if load_env else "# no load-env.sh found"
     if gpu:
         mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {executable}'
     else:
@@ -169,7 +186,7 @@ def _sweep_jobfile(
         f"{gpu_line}\n"
         f"{acct_line}\n"
         f"\nset -euo pipefail\n"
-        f"\n{module_lines}\n"
+        f"\n{env_block}\n"
         f'\ncd "{case_dir}" || exit 1\n'
         f'\necho "BENCH_BACKEND={backend}"\n'
         f'echo "BENCH_MESH_NX={nx}"\n'
@@ -199,25 +216,28 @@ def cmd_run(args):
         print("         cd into a case directory before running.", file=sys.stderr)
         sys.exit(1)
 
-    cfg          = load_site_config()
-    cluster      = detect_cluster()
-    account      = args.account or cfg.get("slurm", "account", fallback="")
-    mpi_flags    = cfg.get("mpi", "extra_flags", fallback="")
-    module_lines = _module_lines(cfg, cuda=info["gpu"])
+    cfg       = load_site_config()
+    cluster   = detect_cluster()
+    account   = args.account or cfg.get("slurm", "account", fallback="")
+    mpi_flags = cfg.get("mpi", "extra_flags", fallback="")
+    load_env  = _load_env_line()
 
-    if cluster["has_slurm"] and not account:
-        print("[biofem] Warning: no SLURM account set. Job may be rejected.", file=sys.stderr)
-        print("         Pass --account YOUR_ACCOUNT, or set it in config/site.cfg", file=sys.stderr)
-
-    # On a cluster: submit via sbatch when not already in an allocation,
-    # or when the backend needs a GPU (must be a dedicated node).
-    use_sbatch = cluster["has_slurm"] and (info["gpu"] or not cluster["in_allocation"])
+    # --local forces a direct terminal run regardless of SLURM availability.
+    # Otherwise submit via sbatch when on a cluster and not in an allocation
+    # (or when a GPU backend is requested, which always needs a dedicated node).
+    if args.local:
+        use_sbatch = False
+    else:
+        use_sbatch = cluster["has_slurm"] and (info["gpu"] or not cluster["in_allocation"])
 
     if use_sbatch:
+        if not account:
+            print("[biofem] Warning: no SLURM account set. Job may be rejected.", file=sys.stderr)
+            print("         Pass --account YOUR_ACCOUNT, or set it in config/site.cfg", file=sys.stderr)
         jf = _run_jobfile(
             backend=args.backend, executable=executable, run_dir=run_dir,
             np=args.np, time=args.time, account=account,
-            mpi_flags=mpi_flags, module_lines=module_lines, gpu=info["gpu"],
+            mpi_flags=mpi_flags, load_env=load_env, gpu=info["gpu"],
         )
         if args.dry_run:
             print(jf)
@@ -230,11 +250,26 @@ def cmd_run(args):
         finally:
             tmp.unlink(missing_ok=True)
     else:
-        cmd = ["mpirun", "-np", str(args.np)] + mpi_flags.split() + [str(executable)]
+        # Build the mpi command parts
+        mpi_extra = mpi_flags.split() if mpi_flags.strip() else []
+        cmd_parts = ["mpirun", "-np", str(args.np)] + mpi_extra + [str(executable)]
+        cmd_str   = " ".join(cmd_parts)
+
+        # Prepend environment setup so the solver sees the right modules
+        if load_env:
+            shell_cmd = f"{load_env} && {cmd_str}"
+        else:
+            shell_cmd = cmd_str
+
         if args.dry_run:
-            print(" ".join(str(c) for c in cmd))
+            print(shell_cmd)
             return
-        subprocess.run(cmd, cwd=run_dir, check=True)
+
+        print(f"[biofem] running locally: {cmd_str}")
+        subprocess.run(
+            ["bash", "--login", "-c", shell_cmd],
+            cwd=run_dir, check=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -283,10 +318,10 @@ def cmd_sweep(args):
         if not args.dry_run:
             sys.exit(1)
 
-    cfg          = load_site_config()
-    account      = args.account or cfg.get("slurm", "account", fallback="")
-    mpi_flags    = cfg.get("mpi", "extra_flags", fallback="")
-    module_lines = _module_lines(cfg, cuda=info["gpu"])
+    cfg       = load_site_config()
+    account   = args.account or cfg.get("slurm", "account", fallback="")
+    mpi_flags = cfg.get("mpi", "extra_flags", fallback="")
+    load_env  = _load_env_line()
 
     if not account:
         print("[biofem] Warning: no SLURM account set. Jobs may be rejected.", file=sys.stderr)
@@ -348,7 +383,7 @@ def cmd_sweep(args):
                 case_dir=case_dir, nx=nx, ny=ny, ntasks=ntasks,
                 nnodes=nnodes, nelems=nelems,
                 time=time_limit, memory=memory, account=account,
-                mpi_flags=mpi_flags, module_lines=module_lines, gpu=info["gpu"],
+                mpi_flags=mpi_flags, load_env=load_env, gpu=info["gpu"],
             )
             jobfile = case_dir / f"jobfile_np{ntasks}.slurm"
             jobfile.write_text(jf)
@@ -505,8 +540,10 @@ Build first (from repo root):
   make install                # symlink biofem into ~/.local/bin
 
 Run:
-  biofem run --backend dmplex --np 8
-  biofem run --backend cuda --dry-run
+  biofem run                                  # submit to SLURM (default)
+  biofem run --local                          # run in this terminal now
+  biofem run --np 8 --account myaccount       # SLURM, 8 tasks
+  biofem run --backend cuda --dry-run         # preview jobfile
   biofem sweep --backend dmplex --nx 64,128,256 --ny 48,96,192 --ntasks 1,4,8,16
 """,
     )
@@ -531,8 +568,10 @@ Run:
                        help="SLURM time limit (default: 01:00:00)")
     p_run.add_argument("--account", default="",
                        help="SLURM account (overrides site.cfg)")
+    p_run.add_argument("--local", action="store_true",
+                       help="run directly in this terminal instead of submitting to SLURM")
     p_run.add_argument("--dry-run", action="store_true",
-                       help="print jobfile or mpirun command without executing")
+                       help="print jobfile or shell command without executing")
 
     # sweep
     p_sw = sub.add_parser(

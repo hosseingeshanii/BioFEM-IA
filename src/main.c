@@ -16,6 +16,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include "kokkos_processes.h"
 #include "manufactured_active_strain.h"
 #include "dmplex_geom.h"
+#include "lv_geometry.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
@@ -33,6 +34,7 @@ PetscInt   prescribed_force_field = 0;
 PetscInt   cuda_process = 0;
 PetscInt   kokkos_process = 0;
 PetscInt   dmplex_geom_process = 0;
+PetscInt   lv_geom_process  = 0;     /* use analytic LV mesh instead of file input */
 
 
 
@@ -174,6 +176,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cuda_process", &cuda_process, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-kokkos_process", &kokkos_process, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-dmplex_geom_process", &dmplex_geom_process, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_geom_process", &lv_geom_process, PETSC_NULL);
 
   PetscCheck(!(cuda_process && kokkos_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
              "-cuda_process and -kokkos_process are mutually exclusive; choose one preprocessing backend");
@@ -209,19 +212,39 @@ int main(int argc, char **argv)
   PetscMalloc(nbody*sizeof(FE), &fem);
   PetscMalloc(nbody*sizeof(IBMNodes), &ibm);
     
-  for (ibi=0; ibi<nbody; ibi++) { 
+  for (ibi=0; ibi<nbody; ibi++) {
   PetscPrintf(PETSC_COMM_WORLD, "Initializing body %d \n", ibi);
-  Dimension(&ibm[ibi], ibi);
-  Create(&ibm[ibi], &fem[ibi], ibi);
+
+  if (lv_geom_process) {
+    PetscPrintf(PETSC_COMM_WORLD, "[lv] reading options\n");
+    LVParams lv_p;
+    ierr = LVParamsCreate(&lv_p); CHKERRQ(ierr);
+    PetscPrintf(PETSC_COMM_WORLD, "[lv] a=%.2f b=%.2f f_cut=%.2f N_theta=%d N_phi=%d alpha_apex=%.1f alpha_base=%.1f\n",
+                lv_p.a, lv_p.b, lv_p.f_cut, (int)lv_p.N_theta, (int)lv_p.N_phi,
+                lv_p.alpha_apex, lv_p.alpha_base);
+    PetscPrintf(PETSC_COMM_WORLD, "[lv] calling CreateLVMesh\n");
+    ierr = CreateLVMesh(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);
+    PetscPrintf(PETSC_COMM_WORLD, "[lv] CreateLVMesh done, n_v=%d n_elmt=%d\n",
+                (int)ibm[ibi].n_v, (int)ibm[ibi].n_elmt);
+    char lv_vtk_path[512];
+    snprintf(lv_vtk_path, sizeof(lv_vtk_path), "%s/lv_fiber_%02d.vtk", out_dir, (int)ibi);
+    PetscPrintf(PETSC_COMM_WORLD, "[lv] writing VTK to %s\n", lv_vtk_path);
+    ierr = WriteLVFiberVTK(&ibm[ibi], lv_vtk_path); CHKERRQ(ierr);
+    PetscPrintf(PETSC_COMM_WORLD, "[lv] VTK written\n");
+  } else {
+    Dimension(&ibm[ibi], ibi);
+    Create(&ibm[ibi], &fem[ibi], ibi);
+    Input(&ibm[ibi], ibi);
+  }
+
   PetscPrintf(PETSC_COMM_WORLD, "Dimension of body %d is %d \n", ibi, ibm[ibi].n_v);
-  Input(&ibm[ibi], ibi);
   Init(&fem[ibi], ibi);
   PetscPrintf(PETSC_COMM_WORLD, "Init finished \n");
   // ContactZ(&fem[ibi]);
 
   if (explicit)  {VecSet(fem[ibi].Mass, 0.0);  VecSet(fem[ibi].Dissip, 0.0);  MassDamp(&fem[ibi]);}
   if (tistart)  {
-    
+
     LocationIn(&fem[ibi], tistart, ibi, out_dir);
 
     }

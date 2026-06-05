@@ -2054,9 +2054,8 @@ PetscErrorCode FInternalAct(FE *fem){
 /**
  * @brief Apply a given element-level routine to all elements.
  *
- * @param fem      Pointer to finite element structure.
- * @param n_elems  Number of elements.
- * @param func     Element routine to apply.
+ * @param fem   Pointer to finite element structure.
+ * @param func  Element routine to apply.
  */
 PetscErrorCode UpdateElements(FE *fem, ElemFunc func)
 {
