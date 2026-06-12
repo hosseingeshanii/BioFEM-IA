@@ -92,6 +92,7 @@ PetscErrorCode GetUserActParams(FE *fem){
 
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
+    PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cart_fib_act", &cart_fib_act, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);    
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_gamma0", &manufactured_gamma0, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_T", &manufactured_T, PETSC_NULL);
@@ -434,11 +435,41 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
 
 //   SubdivGeomQP *G = &ead->geom[0];  /* midsurface cache */
 
+  /* Cap elements (ec >= n_elmt_base) close the apex topologically but their
+     12-node subdivision stencils include topologically inconsistent neighbors
+     (ring-1 nodes mixed with inner-cap nodes), producing garbage gm0.  Skip
+     subdivision entirely and use the CST triangle geometry instead. */
+  if (ibm->n_elmt_base > 0 && ec >= ibm->n_elmt_base) {
+    const PetscInt n1 = ibm->nv1[ec], n2 = ibm->nv2[ec], n3 = ibm->nv3[ec];
+    G->ndx21.x = xb[n2]-xb[n1];  G->ndx21.y = yb[n2]-yb[n1];  G->ndx21.z = zb[n2]-zb[n1];
+    G->ndx31.x = xb[n3]-xb[n1];  G->ndx31.y = yb[n3]-yb[n1];  G->ndx31.z = zb[n3]-zb[n1];
+    G->nn  = UNIT(CROSS(G->ndx21, G->ndx31));
+    G->gc1 = CROSS(G->ndx31, G->nn);
+    G->gc1 = AMULT(1.0 / DOT(G->ndx21, G->gc1), G->gc1);
+    G->gc2 = CROSS(G->nn, G->ndx21);
+    G->gc2 = AMULT(1.0 / DOT(G->ndx31, G->gc2), G->gc2);
+    G->Aaa.x = G->Aaa.y = G->Aaa.z = 0.0;
+    G->Abb.x = G->Abb.y = G->Abb.z = 0.0;
+    G->Aab.x = G->Aab.y = G->Aab.z = 0.0;
+    G->is_irregular = 0;
+    G->v   = 0;
+    G->nen = 12;
+    if (G->INa0) {
+      ierr = PetscFree(G->INa0);  CHKERRQ(ierr);
+      ierr = PetscFree(G->INa1);  CHKERRQ(ierr);
+      ierr = PetscFree(G->INab0); CHKERRQ(ierr);
+      ierr = PetscFree(G->INab1); CHKERRQ(ierr);
+      ierr = PetscFree(G->INab2); CHKERRQ(ierr);
+      G->INa0 = G->INa1 = G->INab0 = G->INab1 = G->INab2 = NULL;
+    }
+    PetscFunctionReturn(0);
+  }
+
   /* ============================================================
      REGULAR PATCH
      ============================================================ */
   if (ibm->ire[ec] == 0) {
-    PetscReal x[12], y[12], z[12];
+    PetscReal x[12] = {0}, y[12] = {0}, z[12] = {0};
     PetscInt node;
     PetscInt nob = 1;
 
@@ -452,8 +483,37 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
         nob = 0;
       }
     }
-    PetscCheck(nob, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
-               "Regular patch missing control point ec=%" PetscInt_FMT, ec);
+
+    /* Boundary element: incomplete stencil (missing ghost-side nodes).  The
+       centroid-fill approximation produces wrong curvature (Aaa) when the apex
+       ring is REGULAR, which pushes C33 to ~2.  Fall back to CST geometry
+       (flat triangle from nv1/nv2/nv3, zero curvature) — the same approach
+       used for cap elements above. */
+    if (!nob) {
+      const PetscInt n1 = ibm->nv1[ec], n2 = ibm->nv2[ec], n3 = ibm->nv3[ec];
+      G->ndx21.x = xb[n2]-xb[n1];  G->ndx21.y = yb[n2]-yb[n1];  G->ndx21.z = zb[n2]-zb[n1];
+      G->ndx31.x = xb[n3]-xb[n1];  G->ndx31.y = yb[n3]-yb[n1];  G->ndx31.z = zb[n3]-zb[n1];
+      G->nn  = UNIT(CROSS(G->ndx21, G->ndx31));
+      G->gc1 = CROSS(G->ndx31, G->nn);
+      G->gc1 = AMULT(1.0 / DOT(G->ndx21, G->gc1), G->gc1);
+      G->gc2 = CROSS(G->nn, G->ndx21);
+      G->gc2 = AMULT(1.0 / DOT(G->ndx31, G->gc2), G->gc2);
+      G->Aaa.x = G->Aaa.y = G->Aaa.z = 0.0;
+      G->Abb.x = G->Abb.y = G->Abb.z = 0.0;
+      G->Aab.x = G->Aab.y = G->Aab.z = 0.0;
+      G->is_irregular = 0;
+      G->v   = 0;
+      G->nen = 12;
+      if (G->INa0) {
+        ierr = PetscFree(G->INa0);  CHKERRQ(ierr);
+        ierr = PetscFree(G->INa1);  CHKERRQ(ierr);
+        ierr = PetscFree(G->INab0); CHKERRQ(ierr);
+        ierr = PetscFree(G->INab1); CHKERRQ(ierr);
+        ierr = PetscFree(G->INab2); CHKERRQ(ierr);
+        G->INa0 = G->INa1 = G->INab0 = G->INab1 = G->INab2 = NULL;
+      }
+      PetscFunctionReturn(0);
+    }
 
     /* Aaa, Abb, Aab from Nab_center */
     G->Aaa.x = G->Aaa.y = G->Aaa.z = 0.0;
@@ -525,8 +585,31 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
     for (PetscInt i = 0; i < nen; i++) {
       if (ibm->patch[16*ec + i] == 1000000) nob = 0;
     }
-    PetscCheck(nob, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
-               "Irregular patch missing control point ec=%" PetscInt_FMT, ec);
+
+    if (!nob) {
+      /* Incomplete subdivision stencil (cap boundary element).
+         Zero all IN arrays so ElemUpdFint contributes no force —
+         consistent with Fbending's nob=0 skip for these elements. */
+      ierr = SubdivGeomEnsureIrregularArrays_(G, nen); CHKERRQ(ierr);
+      for (PetscInt i = 0; i < nen; i++) {
+        G->INa0[i] = G->INa1[i] = G->INab0[i] = G->INab1[i] = G->INab2[i] = 0.0;
+      }
+      const PetscInt n1 = ibm->nv1[ec], n2 = ibm->nv2[ec], n3 = ibm->nv3[ec];
+      G->ndx21.x = xb[n2]-xb[n1]; G->ndx21.y = yb[n2]-yb[n1]; G->ndx21.z = zb[n2]-zb[n1];
+      G->ndx31.x = xb[n3]-xb[n1]; G->ndx31.y = yb[n3]-yb[n1]; G->ndx31.z = zb[n3]-zb[n1];
+      G->nn  = UNIT(CROSS(G->ndx21, G->ndx31));
+      G->gc1 = CROSS(G->ndx31, G->nn);
+      G->gc1 = AMULT(1.0 / DOT(G->ndx21, G->gc1), G->gc1);
+      G->gc2 = CROSS(G->nn, G->ndx21);
+      G->gc2 = AMULT(1.0 / DOT(G->ndx31, G->gc2), G->gc2);
+      G->Aaa.x = G->Aaa.y = G->Aaa.z = 0.0;
+      G->Abb.x = G->Abb.y = G->Abb.z = 0.0;
+      G->Aab.x = G->Aab.y = G->Aab.z = 0.0;
+      G->is_irregular = 1;
+      G->v = v;
+      G->nen = nen;
+      PetscFunctionReturn(0);
+    }
 
     /* X0 */
     PetscReal **X0 = NULL;
@@ -1088,11 +1171,23 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
             ibm->n_fib[ec].z};
 
         for (PetscInt i = 0; i < 3; i++)
-        {
             for (PetscInt j = 0; j < 3; j++)
-            {
-                Fa_cart[i][j] =
-                    (i == j) ? (1.0 - gamma * nfiber[i] * nfiber[j]) : 0.0;
+                Fa_cart[i][j] = (i == j ? 1.0 : 0.0) - gamma * nfiber[i] * nfiber[j];
+
+        /* Diagnostic: print nfiber and Fa_cart once per run for ec=0 and ec=100 */
+        {
+            static PetscInt printed[2];
+            PetscInt slot = (ec == 0) ? 0 : (ec == 100) ? 1 : -1;
+            if (slot >= 0 && !printed[slot]) {
+                printed[slot] = 1;
+                PetscReal f0 = nfiber[0], f1 = nfiber[1], f2 = nfiber[2];
+                PetscPrintf(PETSC_COMM_SELF,
+                    "\n[ElemActDefGrad] ec=%d  gamma=%.4f\n"
+                    "  nfiber = (%.6f, %.6f, %.6f)  |f|=%.6f\n",
+                    (int)ec, (double)gamma,
+                    (double)f0, (double)f1, (double)f2,
+                    (double)PetscSqrtReal(f0*f0 + f1*f1 + f2*f2));
+                PrintMat3x3("  Fa_cart (I - gamma*f.f)", Fa_cart);
             }
         }
     }
@@ -1407,8 +1502,8 @@ PetscErrorCode ElemElsTangMatTens(FE *fem, PetscInt ec)
         * Compute elastic Jacobian Je = sqrt(det(Ce)/det(g0))
         *-----------------------------------------------------------------*/
         PetscReal detCe, detG0;
-        detCe = DET3x3(ead->Ce[qp].Cov);  // determinant of elastic CG (covariant)
-        detG0 = DET3x3(ead->gm0[qp].Cov); // determinant of reference metric
+        detCe = DET3x3(ead->Ce[qp].Cov);
+        detG0 = DET3x3(ead->gm0[qp].Cov);
         PetscReal Je = sqrt(detCe / detG0);
         const PetscReal Je2 = Je * Je;
 
@@ -1531,7 +1626,12 @@ PetscErrorCode ModElemC33(FE *fem, PetscInt ec, PetscReal *delta)
         PetscReal CC3333 = ead->CC[qp].Cont[2][2][2][2];
 
         /* Guard: avoid division by zero / tiny tangent */
-        PetscReal denom_tol = 1e-14; /* tune as needed for your scaling */
+        PetscReal denom_tol = 1e-14;
+        if (PetscAbsReal(CC3333) <= denom_tol || CC3333 != CC3333) {
+            PetscPrintf(PETSC_COMM_SELF,
+                "[ModElemC33] ec=%d qp=%d: CC3333=%.6e S33=%.6e\n",
+                (int)ec, (int)qp, (double)CC3333, (double)S33);
+        }
         PetscCheck(PetscAbsReal(CC3333) > denom_tol,
                    PETSC_COMM_SELF, PETSC_ERR_FP,
                    "CC3333 too small (%.6e) at qp=%" PetscInt_FMT, (double)CC3333, qp);
@@ -1541,10 +1641,28 @@ PetscErrorCode ModElemC33(FE *fem, PetscInt ec, PetscReal *delta)
         /* One Newton update step */
 
         PetscReal DeltaC33 = -1.0 * S33 / CC3333;
+
+        /* Guard: clamp step so det(C) stays positive.
+         * With thick shells or boundary elements, gm0 can have large off-diagonal
+         * [0][2] terms that make det(C) sensitive to C33.  If the full Newton step
+         * would drive det(C) <= 0, scale it back to half the zero-crossing. */
+        {
+            PetscReal C33_old = ead->C[qp].Cov[2][2];
+            ead->C[qp].Cov[2][2] = C33_old + DeltaC33;  /* trial */
+            if (DET3x3(ead->C[qp].Cov) <= 0.0) {
+                /* binary search: find max |alpha| in [0,1] keeping det > 0 */
+                PetscReal lo = 0.0, hi = 1.0;
+                for (int bk = 0; bk < 16; bk++) {
+                    PetscReal mid = 0.5 * (lo + hi);
+                    ead->C[qp].Cov[2][2] = C33_old + mid * DeltaC33;
+                    if (DET3x3(ead->C[qp].Cov) > 0.0) lo = mid; else hi = mid;
+                }
+                DeltaC33 *= lo;
+                ead->C[qp].Cov[2][2] = C33_old + DeltaC33;
+            }
+        }
+
         *delta  = DeltaC33;
-        /* Update C33 (covariant) */
-        // PetscPrintf(PETSC_COMM_SELF, "before updating C33 = %f\n", (double)ead->C[qp].Cov[2][2]);
-        ead->C[qp].Cov[2][2] += DeltaC33;
         // PetscPrintf(PETSC_COMM_SELF, "after updating C33 = %f\n", (double)ead->C[qp].Cov[2][2]);
         // PetscPrintf(PETSC_COMM_SELF, "after updating C33 = %f\n", (double)ead->C[qp].Cov[2][2]);
 
@@ -1637,6 +1755,59 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
   PetscReal A0 = ibm->dA0[ec];
   const PetscReal half_h0 = 0.5 * h0;
   const PetscReal pref0   = 0.5 * h0 * A0; 
+
+  /* LV apex cap elements are topologically irregular, but their subdivision
+     geometry is intentionally replaced with a flat triangle in
+     ElemUpdateGeomSubdivFromCoords_().  Assemble a matching CST membrane
+     contribution into the patch slots that hold nv1/nv2/nv3. */
+  if (ibm->n_elmt_base > 0 && ec >= ibm->n_elmt_base) {
+    const PetscInt tri_nodes[3] = {ibm->nv1[ec], ibm->nv2[ec], ibm->nv3[ec]};
+    const PetscReal dN[3][2] = {{-1.0, -1.0}, {1.0, 0.0}, {0.0, 1.0}};
+    PetscInt tri_slot[3] = {-1, -1, -1};
+    const PetscInt nslot = ibm->val[ec] + 6;
+
+    for (PetscInt a = 0; a < 3; a++) {
+      for (PetscInt i = 0; i < nslot; i++) {
+        if (ibm->patch[16*ec + i] == tri_nodes[a]) {
+          tri_slot[a] = i;
+          break;
+        }
+      }
+      PetscCheck(tri_slot[a] >= 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+                 "LV cap element %" PetscInt_FMT " vertex %" PetscInt_FMT
+                 " is missing from patch[]", ec, tri_nodes[a]);
+    }
+
+    for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++) {
+      const PetscReal w_qp = PetscRealPart(fem->act_data.w[qp]);
+      PetscReal Sv[3];
+      Sv[0] = ead->S[qp].Cont[0][0];
+      Sv[1] = ead->S[qp].Cont[1][1];
+      Sv[2] = ead->S[qp].Cont[0][1];
+
+      for (PetscInt a = 0; a < 3; a++) {
+        const PetscInt base = 3 * tri_slot[a];
+        const PetscReal Na0 = dN[a][0];
+        const PetscReal Na1 = dN[a][1];
+
+        const PetscReal Bm0x = Na0 * ndx21.x;
+        const PetscReal Bm0y = Na0 * ndx21.y;
+        const PetscReal Bm0z = Na0 * ndx21.z;
+        const PetscReal Bm1x = Na1 * ndx31.x;
+        const PetscReal Bm1y = Na1 * ndx31.y;
+        const PetscReal Bm1z = Na1 * ndx31.z;
+        const PetscReal Bm2x = Na0 * ndx31.x + Na1 * ndx21.x;
+        const PetscReal Bm2y = Na0 * ndx31.y + Na1 * ndx21.y;
+        const PetscReal Bm2z = Na0 * ndx31.z + Na1 * ndx21.z;
+
+        Fb_out[base+0] += pref0 * w_qp * (Bm0x*Sv[0] + Bm1x*Sv[1] + Bm2x*Sv[2]);
+        Fb_out[base+1] += pref0 * w_qp * (Bm0y*Sv[0] + Bm1y*Sv[1] + Bm2y*Sv[2]);
+        Fb_out[base+2] += pref0 * w_qp * (Bm0z*Sv[0] + Bm1z*Sv[1] + Bm2z*Sv[2]);
+      }
+    }
+
+    PetscFunctionReturn(0);
+  }
 
   /* -------------------------------------------------------------------
      Loop through thickness quadrature points qp
@@ -1848,9 +2019,9 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     ElemElasStress(fem, ec);  
     // PrintElemSe(fem, ec);
     
-    ElemTotStress(fem, ec);  
+    ElemTotStress(fem, ec);
     // PrintElemS(fem, ec);
-    
+
     ElemElsTangMatTens(fem, ec);  
     // PrintElemCCe(fem, ec);
     
@@ -1983,6 +2154,42 @@ PetscErrorCode FInternalPreCalc(FE *fem) {
 
     PetscReal avg_C33 = (total_qp > 0) ? sum_C33 / total_qp : 0.0;
     PetscPrintf(PETSC_COMM_SELF, "Average C33: %e (over %d QPs in %d elements)\n", (double)avg_C33, total_qp, n_elmt);
+    /* DEBUG: print gm0 and C33 for ec=0 */
+    {
+      ElemActData *ead0 = &fem->act_data.elem_act_data[0];
+      PetscPrintf(PETSC_COMM_SELF, "ec=0: gm0.Cov = [[%e,%e,%e],[%e,%e,%e],[%e,%e,%e]]\n",
+        (double)ead0->gm0[0].Cov[0][0], (double)ead0->gm0[0].Cov[0][1], (double)ead0->gm0[0].Cov[0][2],
+        (double)ead0->gm0[0].Cov[1][0], (double)ead0->gm0[0].Cov[1][1], (double)ead0->gm0[0].Cov[1][2],
+        (double)ead0->gm0[0].Cov[2][0], (double)ead0->gm0[0].Cov[2][1], (double)ead0->gm0[0].Cov[2][2]);
+      PetscPrintf(PETSC_COMM_SELF, "ec=0: C.Cov = [[%e,%e,%e],[%e,%e,%e],[%e,%e,%e]]  C33=%e  n_fib=(%e,%e,%e)\n",
+        (double)ead0->C[0].Cov[0][0], (double)ead0->C[0].Cov[0][1], (double)ead0->C[0].Cov[0][2],
+        (double)ead0->C[0].Cov[1][0], (double)ead0->C[0].Cov[1][1], (double)ead0->C[0].Cov[1][2],
+        (double)ead0->C[0].Cov[2][0], (double)ead0->C[0].Cov[2][1], (double)ead0->C[0].Cov[2][2],
+        (double)ead0->C[0].Cov[2][2],
+        (double)ibm->n_fib[0].x, (double)ibm->n_fib[0].y, (double)ibm->n_fib[0].z);
+      PetscPrintf(PETSC_COMM_SELF, "ec=0: nv1=%d nv2=%d nv3=%d  ire=%d  val=%d\n",
+        (int)ibm->nv1[0], (int)ibm->nv2[0], (int)ibm->nv3[0], (int)ibm->ire[0], (int)ibm->val[0]);
+      PetscPrintf(PETSC_COMM_SELF, "ec=0: ref n1=(%e,%e,%e) n2=(%e,%e,%e) n3=(%e,%e,%e)\n",
+        (double)ibm->x_bp0[ibm->nv1[0]], (double)ibm->y_bp0[ibm->nv1[0]], (double)ibm->z_bp0[ibm->nv1[0]],
+        (double)ibm->x_bp0[ibm->nv2[0]], (double)ibm->y_bp0[ibm->nv2[0]], (double)ibm->z_bp0[ibm->nv2[0]],
+        (double)ibm->x_bp0[ibm->nv3[0]], (double)ibm->y_bp0[ibm->nv3[0]], (double)ibm->z_bp0[ibm->nv3[0]]);
+      PetscPrintf(PETSC_COMM_SELF, "ec=0: cur n1=(%e,%e,%e) n2=(%e,%e,%e) n3=(%e,%e,%e)\n",
+        (double)ibm->x_bp[ibm->nv1[0]], (double)ibm->y_bp[ibm->nv1[0]], (double)ibm->z_bp[ibm->nv1[0]],
+        (double)ibm->x_bp[ibm->nv2[0]], (double)ibm->y_bp[ibm->nv2[0]], (double)ibm->z_bp[ibm->nv2[0]],
+        (double)ibm->x_bp[ibm->nv3[0]], (double)ibm->y_bp[ibm->nv3[0]], (double)ibm->z_bp[ibm->nv3[0]]);
+    }
+    /* DEBUG: print elements with extreme C33 */
+    for (PetscInt ec2 = 0; ec2 < n_elmt && ec2 < 70; ec2++) {
+      ElemActData *ead2 = &fem->act_data.elem_act_data[ec2];
+      PetscReal c33 = ead2->C[0].Cov[2][2];
+      if (c33 > 1.5 || c33 < 0.3) {
+        PetscInt nob2 = 1;
+        PetscInt nen2 = (ibm->ire[ec2]==0) ? 12 : ibm->val[ec2]+6;
+        for (PetscInt ii = 0; ii < nen2 && ii < 16; ii++) if (ibm->patch[16*ec2+ii] == 1000000) { nob2 = 0; break; }
+        PetscPrintf(PETSC_COMM_SELF, "  ec=%4d ire=%d nob=%d val=%d C33=%e\n",
+                    (int)ec2, (int)ibm->ire[ec2], nob2, (int)ibm->val[ec2], (double)c33);
+      }
+    }
   }
   PetscFunctionReturn(0);
 }
@@ -2013,14 +2220,6 @@ PetscErrorCode FInternalAct(FE *fem){
     ElemUpdFint(fem, ec, Fb);
 
 
-    /* Debug: print Fb for element 100 */
-    // if (ec == 100) {
-    //   PetscPrintf(PETSC_COMM_SELF, "Fb for ec=100 (dof=%" PetscInt_FMT ", v=%" PetscInt_FMT "):\n", dof, v);
-    //   PetscInt nFb = dof * (v + 6);
-    //   for (PetscInt idx = 0; idx < nFb && idx < (PetscInt)(sizeof(Fb)/sizeof(Fb[0])); idx++) {
-    //     PetscPrintf(PETSC_COMM_SELF, " Fb[%3" PetscInt_FMT "] = % .12e\n", idx, (double)Fb[idx]);
-    //   }
-    // }
 
     for (i=0; i<(v+6); i++) {
       if (ibm->patch[16*ec+i]!=1000000) {

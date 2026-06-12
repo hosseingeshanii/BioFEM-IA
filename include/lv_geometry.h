@@ -15,8 +15,8 @@ typedef struct {
   PetscReal  f_cut;      /* axial fraction of spheroid retained (0,1]     */
   PetscInt   N_theta;    /* number of latitude rings (excl. apex point)   */
   PetscInt   N_phi;      /* number of nodes per ring                      */
-  PetscReal  alpha_apex; /* fiber helix angle at apex [degrees]           */
-  PetscReal  alpha_base; /* fiber helix angle at base [degrees]           */
+  PetscReal  alpha_endo; /* Streeter helix angle at endocardium [degrees] */
+  PetscReal  alpha_epi;  /* Streeter helix angle at epicardium [degrees]  */
 } LVParams;
 
 /*
@@ -27,8 +27,11 @@ typedef struct {
  *   -lv_f_cut      [0.55]   height fraction  (0.5 = hemisphere)
  *   -lv_N_theta    [16]     latitude rings
  *   -lv_N_phi      [32]     nodes per ring
- *   -lv_alpha_apex [60.0]   apex helix angle [deg]
- *   -lv_alpha_base [-60.0]  base helix angle [deg]
+ *   -lv_alpha_endo [60.0]   endocardial helix angle [deg]  (Bayer: 40°)
+ *   -lv_alpha_epi  [-60.0]  epicardial helix angle  [deg]  (Bayer: -50°)
+ *
+ * The mid-wall fiber angle is α_mid = (α_endo + α_epi)/2, constant over the
+ * surface, consistent with Bayer et al. 2012 Eq.(2) evaluated at d=0.5.
  */
 PetscErrorCode LVParamsCreate(LVParams *p);
 

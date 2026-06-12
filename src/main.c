@@ -219,9 +219,9 @@ int main(int argc, char **argv)
     PetscPrintf(PETSC_COMM_WORLD, "[lv] reading options\n");
     LVParams lv_p;
     ierr = LVParamsCreate(&lv_p); CHKERRQ(ierr);
-    PetscPrintf(PETSC_COMM_WORLD, "[lv] a=%.2f b=%.2f f_cut=%.2f N_theta=%d N_phi=%d alpha_apex=%.1f alpha_base=%.1f\n",
+    PetscPrintf(PETSC_COMM_WORLD, "[lv] a=%.2f b=%.2f f_cut=%.2f N_theta=%d N_phi=%d alpha_endo=%.1f alpha_epi=%.1f\n",
                 lv_p.a, lv_p.b, lv_p.f_cut, (int)lv_p.N_theta, (int)lv_p.N_phi,
-                lv_p.alpha_apex, lv_p.alpha_base);
+                lv_p.alpha_endo, lv_p.alpha_epi);
     PetscPrintf(PETSC_COMM_WORLD, "[lv] calling CreateLVMesh\n");
     ierr = CreateLVMesh(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);
     PetscPrintf(PETSC_COMM_WORLD, "[lv] CreateLVMesh done, n_v=%d n_elmt=%d\n",
@@ -668,9 +668,14 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   //   VecRestoreArray(fem->x, &xx);
   // }
 
-  ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
-  ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
-  ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);
+  /* Fix the LV basal ring (edge_n=1, 32 nodes) in all 3 directions.
+   * edge_n=0 = near-apex ring; edge_n=1 = base ring (annular attachment).
+   * Fixing the base removes the 6 rigid-body null modes so the linear
+   * solve is well-conditioned. The apex is free to move (LV shortening). */
+  ierr = EdgeDirectionalFix(1, 0, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(1, 1, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(1, 2, fem, R); CHKERRQ(ierr);
+  ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
   // GlobalGhost(ibm);
 
@@ -988,8 +993,11 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   PetscInt   nv, ec, n1e, n2e, n3e;
 
   if (curvature==6) {GlobalGhostInit(ibm);}
+  fprintf(stderr, "[DBG] after GlobalGhostInit: x_bp0[0]=%.6g  x_bp[0]=%.6g\n",
+          (double)ibm->x_bp0[0], (double)ibm->x_bp[0]);
 
   AreaNormal(ibm);
+  fprintf(stderr, "[DBG] after AreaNormal: x_bp0[0]=%.6g\n", (double)ibm->x_bp0[0]);
   for (ec=0; ec<ibm->n_elmt + 2*ibm->n_ghosts; ec++) {
     ibm->dA0[ec] = ibm->dA[ec]; 
     ibm->Nf_x[ec] = ibm->nf_x[ec];  ibm->Nf_y[ec] = ibm->nf_y[ec];  ibm->Nf_z[ec] = ibm->nf_z[ec]; 
@@ -1014,7 +1022,17 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
     ibm->m[n1e] += mass;  ibm->m[n2e] += mass;  ibm->m[n3e] += mass;
   }
 
+  /* PatchLoc inside InitGhost reads ibm->x_bp to set p4x/p4x0 etc.
+   * Seed x_bp from x_bp0 (reference) so the reference curvature kve0
+   * is computed from the correct geometry, not from uninitialized memory. */
+  for (nv = 0; nv < ibm->n_v + ibm->n_ghosts; nv++) {
+    ibm->x_bp[nv] = ibm->x_bp0[nv];
+    ibm->y_bp[nv] = ibm->y_bp0[nv];
+    ibm->z_bp[nv] = ibm->z_bp0[nv];
+  }
+  fprintf(stderr, "[DBG] before InitGhost: x_bp0[0]=%.6g\n", (double)ibm->x_bp0[0]);
   if (bending){InitGhost(fem);}
+  fprintf(stderr, "[DBG] after InitGhost: x_bp0[0]=%.6g\n", (double)ibm->x_bp0[0]);
 
   VecGetArray(fem->x, &xx);
   for (nv=0; nv<ibm->n_v+ibm->n_ghosts; nv++) {

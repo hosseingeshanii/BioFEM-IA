@@ -756,7 +756,10 @@ PetscErrorCode InitGhost(FE *fem) {
   PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->p4y0));  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->p5y0));  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->p6y0));
   PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->p4z0));  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->p5z0));  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->p6z0));
 
-  if (ibm->n_edge){Ghost(ibm);}
+  /* Ghost() populates belmts/edgefrontnodes for GhostFix/GhostFree BCs.
+   * For curvature==1 (subdivision with PatchLoc), GhostLoc is a no-op so
+   * belmts is never accessed — skip Ghost() to avoid 0-size write crash. */
+  if (ibm->n_edge && curvature != 1){Ghost(ibm);}
 
   if (curvature==1) {
     PatchLoc(ibm);
@@ -774,28 +777,36 @@ PetscErrorCode InitGhost(FE *fem) {
   }
 
   Kve0(fem);
-  
+
   return(0);
 }
 
-//------------------------------------------------------------------------------------------------------------ 
+//------------------------------------------------------------------------------------------------------------
 PetscErrorCode PatchLoc(IBMNodes *ibm) {
 
   PetscInt  n4e, n5e, n6e, ec;
 
   for (ec=0; ec<ibm->n_elmt; ec++) {
+    PetscInt  n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
+    PetscReal cx  = (ibm->x_bp[n1e] + ibm->x_bp[n2e] + ibm->x_bp[n3e]) / 3.0;
+    PetscReal cy  = (ibm->y_bp[n1e] + ibm->y_bp[n2e] + ibm->y_bp[n3e]) / 3.0;
+    PetscReal cz  = (ibm->z_bp[n1e] + ibm->z_bp[n2e] + ibm->z_bp[n3e]) / 3.0;
+
     n4e = ibm->nv4[ec];  n5e = ibm->nv5[ec];  n6e = ibm->nv6[ec];
-    
-    if(n4e!=1000000){ //So its patch is availabel (not ghost node)
-      ibm->p4x[ec] = ibm->x_bp[n4e];  ibm->p4y[ec] = ibm->y_bp[n4e];  ibm->p4z[ec] = ibm->z_bp[n4e];
-    }
-    if(n5e!=1000000){ //So its patch is availabel (not ghost node)
-      ibm->p5x[ec] = ibm->x_bp[n5e];  ibm->p5y[ec] = ibm->y_bp[n5e];  ibm->p5z[ec] = ibm->z_bp[n5e];
-    }
-    if(n6e!=1000000){  //So its patch is availabel (not ghost node)
-      ibm->p6x[ec] = ibm->x_bp[n6e];  ibm->p6y[ec] = ibm->y_bp[n6e];  ibm->p6z[ec] = ibm->z_bp[n6e];
-    }
-    
+
+    /* Use adjacent node position when available; fall back to element
+     * centroid at open boundaries to avoid uninitialized memory in Kve0. */
+    ibm->p4x[ec] = (n4e!=1000000) ? ibm->x_bp[n4e] : cx;
+    ibm->p4y[ec] = (n4e!=1000000) ? ibm->y_bp[n4e] : cy;
+    ibm->p4z[ec] = (n4e!=1000000) ? ibm->z_bp[n4e] : cz;
+
+    ibm->p5x[ec] = (n5e!=1000000) ? ibm->x_bp[n5e] : cx;
+    ibm->p5y[ec] = (n5e!=1000000) ? ibm->y_bp[n5e] : cy;
+    ibm->p5z[ec] = (n5e!=1000000) ? ibm->z_bp[n5e] : cz;
+
+    ibm->p6x[ec] = (n6e!=1000000) ? ibm->x_bp[n6e] : cx;
+    ibm->p6y[ec] = (n6e!=1000000) ? ibm->y_bp[n6e] : cy;
+    ibm->p6z[ec] = (n6e!=1000000) ? ibm->z_bp[n6e] : cz;
   }
 
   return(0);
@@ -862,7 +873,6 @@ PetscErrorCode Ghost(IBMNodes *ibm) {
 
 //---------------------------------------------------------------------------------------   
 PetscErrorCode Kve0(FE *fem) {
-  
   IBMNodes       *ibm=fem->ibm;
   PetscReal      sum;
   PetscInt       i, j, m, p, q, ec, n1e, n2e, n3e;
@@ -881,32 +891,33 @@ PetscErrorCode Kve0(FE *fem) {
     X1.x = ibm->x_bp0[n1e];  X1.y = ibm->y_bp0[n1e];  X1.z = ibm->z_bp0[n1e];
     X2.x = ibm->x_bp0[n2e];  X2.y = ibm->y_bp0[n2e];  X2.z = ibm->z_bp0[n2e];
     X3.x = ibm->x_bp0[n3e];  X3.y = ibm->y_bp0[n3e];  X3.z = ibm->z_bp0[n3e];
-    X4.x = ibm->p4x0[ec];  X4.y = ibm->p4y0[ec];  X4.z = ibm->p4z0[ec];
-    X5.x = ibm->p5x0[ec];  X5.y = ibm->p5y0[ec];  X5.z = ibm->p5z0[ec];
-    X6.x = ibm->p6x0[ec];  X6.y = ibm->p6y0[ec];  X6.z = ibm->p6z0[ec];
-    
     dX21 = MINUS(X2, X1);  dX31 = MINUS(X3, X1); //dX21:G1 , dX31:G2
-    A4 = MINUS(X4, X2);   A5 = MINUS(X5, X3);  A6 = MINUS(X6, X1);
-    
+
     N.x = ibm->Nf_x[ec];  N.y = ibm->Nf_y[ec];  N.z = ibm->Nf_z[ec];
-    
-    Gc1 = CROSS(dX31, N);
-    Gc1 = AMULT(1./DOT(dX21, Gc1), Gc1);
-    
-    Gc2 = CROSS(N, dX21);
-    Gc2 = AMULT(1./DOT(dX31, Gc2), Gc2);
-              
-    Csi4 = 1.+DOT(A4, Gc1);  Eta4 = DOT(A4, Gc2);    Z4 = DOT(A4, N);
-    Csi5 = DOT(A5, Gc1);     Eta5 = 1.+DOT(A5, Gc2); Z5 = DOT(A5, N);
-    Csi6 = DOT(A6, Gc1);     Eta6 = DOT(A6, Gc2);    Z6 = DOT(A6, N);
-    
-    T[0][0] = pow(Csi4, 2.)-Csi4;   T[0][1] = pow(Eta4, 2.)-Eta4;  T[0][2] = Csi4*Eta4;
-    T[1][0] = pow(Csi5, 2.)-Csi5;   T[1][1] = pow(Eta5, 2.)-Eta5;  T[1][2] = Csi5*Eta5;
-    T[2][0] = pow(Csi6, 2.)-Csi6;   T[2][1] = pow(Eta6, 2.)-Eta6;  T[2][2] = Csi6*Eta6;
-    
-    INV(T, Tinv);
-    
+
     if(curvature == 1) {
+      X4.x = ibm->p4x0[ec];  X4.y = ibm->p4y0[ec];  X4.z = ibm->p4z0[ec];
+      X5.x = ibm->p5x0[ec];  X5.y = ibm->p5y0[ec];  X5.z = ibm->p5z0[ec];
+      X6.x = ibm->p6x0[ec];  X6.y = ibm->p6y0[ec];  X6.z = ibm->p6z0[ec];
+
+      A4 = MINUS(X4, X2);   A5 = MINUS(X5, X3);  A6 = MINUS(X6, X1);
+
+      Gc1 = CROSS(dX31, N);
+      Gc1 = AMULT(1./DOT(dX21, Gc1), Gc1);
+
+      Gc2 = CROSS(N, dX21);
+      Gc2 = AMULT(1./DOT(dX31, Gc2), Gc2);
+
+      Csi4 = 1.+DOT(A4, Gc1);  Eta4 = DOT(A4, Gc2);    Z4 = DOT(A4, N);
+      Csi5 = DOT(A5, Gc1);     Eta5 = 1.+DOT(A5, Gc2); Z5 = DOT(A5, N);
+      Csi6 = DOT(A6, Gc1);     Eta6 = DOT(A6, Gc2);    Z6 = DOT(A6, N);
+
+      T[0][0] = pow(Csi4, 2.)-Csi4;   T[0][1] = pow(Eta4, 2.)-Eta4;  T[0][2] = Csi4*Eta4;
+      T[1][0] = pow(Csi5, 2.)-Csi5;   T[1][1] = pow(Eta5, 2.)-Eta5;  T[1][2] = Csi5*Eta5;
+      T[2][0] = pow(Csi6, 2.)-Csi6;   T[2][1] = pow(Eta6, 2.)-Eta6;  T[2][2] = Csi6*Eta6;
+
+      INV(T, Tinv);
+
       Ze[0] = Z4;  Ze[1] = Z5;  Ze[2] = Z6;
       
       for (i=0; i<3; i++){
@@ -959,13 +970,6 @@ PetscErrorCode Kve0(FE *fem) {
 	}
 		
 		
-	for (i=0; i<12; i++) {
-	  if (ibm->patch[16*ec+i]==1000000) {
-		PetscPrintf(PETSC_COMM_SELF, "Ghost node missing!\n");
-		PetscPrintf(PETSC_COMM_SELF, "Element index is%d \n", ec);
-		PetscPrintf(PETSC_COMM_SELF, "\n");
-	}
-	}
 	
 	Aaa.x = 0.;  Aaa.y = 0.;  Aaa.z = 0.;
 	Abb.x = 0.;  Abb.y = 0.;  Abb.z = 0.;
@@ -1019,13 +1023,6 @@ PetscErrorCode Kve0(FE *fem) {
 	
       }else if (ibm->ire[ec]==1) {
 	
-	for (i=0; i<(v+6); i++) {
-	  if (ibm->patch[16*ec+i]==1000000) {
-		PetscPrintf(PETSC_COMM_SELF, "Ghost node missing!\n");
-		PetscPrintf(PETSC_COMM_SELF, "Element index is%d \n", ec);
-                PetscPrintf(PETSC_COMM_SELF, "\n");	
-	}
-	}
 
 	PetscReal w;
 	PetscReal **X0 = (PetscReal **)malloc((v+6) * sizeof(PetscReal *));
@@ -1190,9 +1187,13 @@ PetscErrorCode Kve0(FE *fem) {
 //---------------------------------------------------------------------------
 PetscErrorCode IrrVer(IBMNodes *ibm) {
   
-  PetscInt  nc, ec, count, elmt[10], i, bcount, *irr;
+  PetscInt  nc, ec, count, i, bcount, *irr, *elmt;
   
+  PetscPrintf(PETSC_COMM_WORLD, "[IrrVer] enter n_elmt=%d n_v=%d sum_n_bnodes=%d\n",
+              (int)ibm->n_elmt, (int)ibm->n_v, (int)ibm->sum_n_bnodes);
+
   PetscMalloc(ibm->n_v*sizeof(PetscInt), &irr); //saves irregular node
+  PetscMalloc1(ibm->n_elmt, &elmt);
   
   for (ec=0; ec<ibm->n_elmt; ec++) {
     ibm->ire[ec] = 0;
@@ -1200,25 +1201,35 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
     ibm->val[ec] = 6; 
   }
   
+  /* Count only base elements (ec < n_elmt_base) when classifying vertices.
+     Cap fan elements (ec >= n_elmt_base) use a CST fallback in active_strain.c
+     and must not be counted here:
+       - The apex node appears in all N_phi fan elements; counting them gives
+         val = N_phi >> 16, which overflows ibm->patch[] in Patch().
+       - Ring-0 boundary nodes appear in 3 base elements → bcount = 6 → REGULAR. */
+  PetscInt ec_limit = (ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
   for (nc=0; nc<ibm->n_v; nc++) {
     irr[nc] = 0;
     count = 0;
     bcount = 0;
-    
-    for (ec=0; ec<ibm->n_elmt; ec++) {
+
+    /* Determine whether this node is a boundary node */
+    PetscInt is_bnode = 0;
+    for (i=0; i<ibm->sum_n_bnodes; i++) {
+      if (nc==ibm->bnodes[i]) { is_bnode = 1; break; }
+    }
+
+    for (ec=0; ec<ec_limit; ec++) {
       if (nc==ibm->nv1[ec] || nc==ibm->nv2[ec] || nc==ibm->nv3[ec]) {
 	elmt[count] = ec;
 	count++;
       }
     }
-    
-    for (i=0; i<ibm->sum_n_bnodes; i++) {
-      if (nc==ibm->bnodes[i]) {
-      	bcount = count + 3;
-	break; // for corners
-      }
+
+    if (is_bnode) {
+      bcount = count + 3;
     }
-    
+
     if (bcount==0) {
       if (count!=6) {
 	irr[nc] = 1;
@@ -1235,7 +1246,7 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
     	  ibm->val[elmt[i]] = bcount;
 	}
       }
-    }  
+    }
   }
   
   for (ec=0; ec<ibm->n_elmt; ec++) { //detects which element vertex is irregular
@@ -1249,6 +1260,8 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
   }
   
   PetscFree(irr);
+  PetscFree(elmt);
+  PetscPrintf(PETSC_COMM_WORLD, "[IrrVer] done\n");
   
   return(0);
 }
@@ -1257,10 +1270,22 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
 PetscErrorCode Patch(IBMNodes *ibm) {
 
   PetscInt  ec, *p, i, m, n1p, n2p, n3p, k;
+  const PetscInt maxPatchWidth = 16;
+
+  PetscPrintf(PETSC_COMM_WORLD, "[Patch] enter n_elmt=%d n_ghosts=%d n_elmt_base=%d\n",
+              (int)ibm->n_elmt, (int)ibm->n_ghosts, (int)ibm->n_elmt_base);
   
   for (ec=0; ec<ibm->n_elmt; ec++) {
 
-    PetscInt  v=ibm->val[ec];
+    PetscInt  v = ibm->val[ec];
+
+    if (ibm->n_elmt_base > 0 && ec >= ibm->n_elmt_base) {
+      for (i = 0; i < maxPatchWidth; i++) {
+        ibm->patch[16*ec + i] = 1000000;
+      }
+      continue;
+    }
+
     PetscMalloc((v+6)*sizeof(PetscInt), &p);
 
     for (i=0; i<(v+6); i++) {p[i] = 1000000;} //to form BC later
@@ -1589,18 +1614,28 @@ PetscErrorCode Patch(IBMNodes *ibm) {
 
     }
     
-    for (i=0; i<(v+6); i++) {ibm->patch[16*ec+i] = p[i];}
+    for (i = 0; i < maxPatchWidth; i++) {
+      ibm->patch[16*ec + i] = 1000000;
+    }
+    for (i = 0; i < (v + 6) && i < maxPatchWidth; i++) {
+      ibm->patch[16*ec + i] = p[i];
+    }
+    if (v + 6 > maxPatchWidth) {
+      PetscPrintf(PETSC_COMM_WORLD, "[Patch] ec=%d v=%d v+6=%d truncated to %d\n",
+                  (int)ec, (int)v, (int)(v+6), maxPatchWidth);
+    }
     PetscFree(p);
   } //elements
+  PetscPrintf(PETSC_COMM_WORLD, "[Patch] done\n");
   
   return(0);
 }
 
 //------------------------------------------------------------------------------------------------------------ 
 PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
-  
+
   PetscInt  i, ec, nv1, nv2, nv3, catch, edge_n, edge, start, end, count=0;
-  
+
   for (edge_n=0; edge_n<ibm->n_edge; edge_n++){
     //compute start&end
     start = 0;  end = 0;
@@ -1609,12 +1644,18 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
     }
     start = end - ibm->n_bnodes[edge_n];
 
+    /* For the apex ring (edge_n==0), cap strips share outer-outer edges with K=0 base
+       strips.  Searching all elements would find the cap strip (higher index) and
+       reflect through the wrong interior node.  Limit to base elements so we always
+       reflect through the correct ring-1 node. */
+    PetscInt ec_limit = (edge_n == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
+
     for (i=start; i<end-1; i++) {
-      
+
       nv1 = ibm->bnodes[i+1];
       nv2 = ibm->bnodes[i];
-      
-      for (ec=0; ec<ibm->n_elmt; ec++) {
+
+      for (ec=0; ec<ec_limit; ec++) {
       	catch = 0;
       	if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) {catch++;}
       	if (nv2==ibm->nv1[ec] || nv2==ibm->nv2[ec] || nv2==ibm->nv3[ec]) {catch++;}
@@ -1676,12 +1717,15 @@ PetscErrorCode GlobalGhost(IBMNodes *ibm) {
     }
     start = end - ibm->n_bnodes[edge_n];
 
+    /* Same base-element limit as GlobalGhostInit — see comment there. */
+    PetscInt ec_limit = (edge_n == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
+
     for (i=start; i<end-1; i++) {
-      
+
       nv1 = ibm->bnodes[i+1];
       nv2 = ibm->bnodes[i];
-      
-      for (ec=0; ec<ibm->n_elmt; ec++) {
+
+      for (ec=0; ec<ec_limit; ec++) {
       	catch = 0;
       	if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) {catch++;}
       	if (nv2==ibm->nv1[ec] || nv2==ibm->nv2[ec] || nv2==ibm->nv3[ec]) {catch++;}

@@ -27,9 +27,11 @@ extern PetscInt   ressmooth, inverse, Adam, par_jac;
 extern PetscReal  char_length_x, char_length_y, char_length_z;
 
 /* ------------------------------------------------------------------ */
-/* io.c entry points we depend on                                      */
+/* io.c / bending.c entry points we depend on                         */
 /* ------------------------------------------------------------------ */
 extern PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi);
+extern PetscErrorCode IrrVer(IBMNodes *ibm);   /* classify irregular vertices   */
+extern PetscErrorCode Patch (IBMNodes *ibm);   /* build subdivision patch table */
 
 /* Material parameters needed to initialize El/E_epsilon (set via PetscOptions) */
 extern PetscReal E, mu;
@@ -49,11 +51,11 @@ extern struct Cmpnts AMULT(PetscReal alpha, struct Cmpnts v1);
 /* Local helpers                                                        */
 /* ------------------------------------------------------------------ */
 
-/* 0-based index of node (k, j) in the ring layout:
- *   node 0          : apex
- *   nodes 1..N_phi  : ring k=0 (first ring below apex)
- *   nodes 1+k*Np .. : ring k                                          */
-#define RING_NODE(k, j, Np)  (1 + (k)*(Np) + (j))
+/* 0-based flat index of ring node (k, j):
+ *   ring k=0 is the top (near-apex) open boundary ring.
+ *   No apex node — both top and base are open boundaries so every
+ *   interior vertex has valence 6 (regular subdivision surface).      */
+#define RING_NODE(k, j, Np)  ((k)*(Np) + (j))
 
 /* ------------------------------------------------------------------ */
 
@@ -64,16 +66,16 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   p->f_cut      = 0.55;
   p->N_theta    = 16;
   p->N_phi      = 32;
-  p->alpha_apex = 60.0;
-  p->alpha_base = -60.0;
+  p->alpha_endo = 60.0;
+  p->alpha_epi  = -60.0;
 
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_a",          &p->a,          PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_b",          &p->b,          PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_f_cut",      &p->f_cut,      PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_theta",    &p->N_theta,    PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_phi",      &p->N_phi,      PETSC_NULL);
-  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_apex", &p->alpha_apex, PETSC_NULL);
-  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_base", &p->alpha_base, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_endo", &p->alpha_endo, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_epi",  &p->alpha_epi,  PETSC_NULL);
 
   return 0;
 }
@@ -87,31 +89,38 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   PetscReal f_cut         = p->f_cut;
   PetscInt  N_theta       = p->N_theta;
   PetscInt  N_phi         = p->N_phi;
-  PetscReal alpha_apex_deg = p->alpha_apex;
-  PetscReal alpha_base_deg = p->alpha_base;
+  PetscReal alpha_endo_deg = p->alpha_endo;
+  PetscReal alpha_epi_deg  = p->alpha_epi;
 
   PetscErrorCode ierr;
 
   /* ----------------------------------------------------------------
    * 1.  Mesh dimensions
    * ---------------------------------------------------------------- */
-  /* θ_cut: polar angle from apex at which the base plane cuts the spheroid.
-   * Derived from f_cut (fraction of total axial height 2a kept):
-   *   z_base = a - 2a·f_cut = a(1-2f_cut)
-   *   θ_cut  = arccos(1 - 2·f_cut)                                   */
+  /* theta_cut: polar angle where the base plane cuts the spheroid.
+   *   z_base = a*cos(theta_cut),  theta_cut = acos(1 - 2*f_cut)
+   * Ring k sits at theta = (k+1)*theta_step so ring 0 is one step below
+   * the true apex.  Both top and base are open boundaries so every
+   * interior vertex has valence 6 (all regular for Loop subdivision). */
   PetscReal theta_cut  = acos(1.0 - 2.0 * f_cut);
   PetscReal theta_step = theta_cut / (PetscReal)N_theta;
-  PetscReal z_apex     = a;
+  /* PetscReal z_apex     = a; */   /* unused: apex cap removed */
   PetscReal z_base     = a * cos(theta_cut);
 
-  PetscInt n_v          = 1 + N_theta * N_phi;
-  PetscInt n_elmt       = N_phi * (2 * N_theta - 1);  /* apex fan + quad strips */
-  PetscInt n_edge       = 1;                           /* one open boundary loop */
+  PetscInt n_elmt_base  = (N_theta - 1) * 2 * N_phi;   /* quad strips only         */
+  PetscInt n_v          = N_theta * N_phi;              /* rings only, no apex node */
+  PetscInt n_elmt       = n_elmt_base;                  /* quad strips only         */
+  /* NOTE: apex fan commented out — top boundary is open like the base.
+   *   + N_phi;  simple apex fan */
+  PetscInt n_edge       = 0;  /* base BC via EdgeDirectionalFix, no ghosts */
   PetscInt n_ghosts     = 0;
-  PetscInt sum_n_bnodes = N_phi;                       /* base ring */
+  /* Both apex ring AND base ring are boundary for IrrVer's ghost trick.
+     Apex ring BCs are NOT imposed (EdgeDirectionalFix only uses edge_n=1 below). */
+  PetscInt sum_n_bnodes = 2 * N_phi;
 
   ibm->n_v          = n_v;
   ibm->n_elmt       = n_elmt;
+  ibm->n_elmt_base  = n_elmt_base;
   ibm->n_edge       = n_edge;
   ibm->n_ghosts     = n_ghosts;
   ibm->sum_n_bnodes = sum_n_bnodes;
@@ -130,13 +139,8 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   ierr = Create(ibm, fem, 0); CHKERRQ(ierr);
   PetscPrintf(PETSC_COMM_WORLD, "[lv] Create() done\n");
 
-  /* Create() allocates ibm->n_bnodes[n_edge] but NOT ibm->bnodes.
-   * That allocation lives in Input() — do it here instead.            */
   ierr = PetscMalloc(sum_n_bnodes * sizeof(PetscInt), &(ibm->bnodes)); CHKERRQ(ierr);
 
-  /* Create() uses PetscMalloc for El/E_epsilon, leaving them uninitialised.
-   * InitMaterial() is only called when ConstitutiveLawNonLinear=1.  For the
-   * linear case StressLinear reads ibm->El[], so we must seed them here.  */
   for (PetscInt i = 0; i < n_elmt; i++) {
     ibm->El[0][i]         = E;
     ibm->El[1][i]         = mu;
@@ -144,21 +148,19 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     ibm->E_epsilon[1][i]  = 0.0;
   }
 
-  /* EdgeDirectionalFix(3, ...) in FormFunctionFEM unconditionally walks edges
-   * 0-3 of ibm->n_bnodes[].  Create() only PetscMalloc's n_edge=1 entries,
-   * leaving indices 1-3 as uninitialised garbage.  Re-allocate with enough
-   * zero-initialised slots so the out-of-range reads are safe no-ops.      */
+  /* EdgeDirectionalFix unconditionally reads n_bnodes[0..3]; zero-init 8 slots */
   PetscFree(ibm->n_bnodes);
-  ierr = PetscCalloc1(8, &ibm->n_bnodes); CHKERRQ(ierr); /* zero-init */
-  ibm->n_bnodes[0] = N_phi;                               /* base ring */
+  ierr = PetscCalloc1(8, &ibm->n_bnodes); CHKERRQ(ierr);
+  /* n_bnodes[0]=N_phi tells IrrVer the apex ring is a boundary (bcount=3+3=6 → regular).
+     No actual force BCs are applied to it — EdgeDirectionalFix only targets edge_n=1. */
+  ibm->n_bnodes[0] = N_phi;
+  ibm->n_bnodes[1] = N_phi;   /* base ring — fixed via EdgeDirectionalFix */
 
   /* ----------------------------------------------------------------
-   * 3.  Node coordinates
-   *     Node 0 : apex (0, 0, a);  RING_NODE(k,j,N_phi) : ring k, col j
+   * 3.  Node coordinates  —  RING_NODE(k,j,N_phi) = k*N_phi + j
+   *     Ring k=0 is the first ring below the apex (θ = theta_step).
    * ---------------------------------------------------------------- */
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 3: filling node coordinates\n");
-  ibm->x_bp[0] = 0.0;  ibm->y_bp[0] = 0.0;  ibm->z_bp[0] = a;
-  ibm->x_bp0[0] = 0.0; ibm->y_bp0[0] = 0.0; ibm->z_bp0[0] = a;
 
   for (PetscInt k = 0; k < N_theta; k++) {
     PetscReal theta = (k + 1) * theta_step;
@@ -176,49 +178,47 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     }
   }
 
+  /* Apex node removed: top boundary is open. */
+  /* PetscInt n_apex_node = N_theta * N_phi;
+  ibm->x_bp[n_apex_node]  = 0.0;  ibm->x_bp0[n_apex_node] = 0.0;
+  ibm->y_bp[n_apex_node]  = 0.0;  ibm->y_bp0[n_apex_node] = 0.0;
+  ibm->z_bp[n_apex_node]  = z_apex; ibm->z_bp0[n_apex_node] = z_apex; */
+
   /* ----------------------------------------------------------------
    * 4.  Element connectivity  (0-based node indices)
    *
-   *   Apex fan  (N_phi triangles):
-   *     apex -- ring0[j] -- ring0[j+1]
-   *
-   *   Quad strip between ring k and ring k+1 (2·N_phi triangles):
-   *     split each latitude quad into two triangles with a shared
-   *     diagonal from the lower-left to upper-right corner.
+   *   Quad strips only — apex fan commented out.  Top boundary is open
+   *   like the base so every interior vertex has valence 6 (regular).
    * ---------------------------------------------------------------- */
   PetscInt ec = 0;
 
-  /* Apex fan */
-  for (PetscInt j = 0; j < N_phi; j++, ec++) {
-    ibm->nv1[ec] = 0;
-    ibm->nv2[ec] = RING_NODE(0,  j,            N_phi);
-    ibm->nv3[ec] = RING_NODE(0, (j + 1) % N_phi, N_phi);
-  }
-
-  /* Quad strips: band between ring k (closer to apex) and ring k+1 */
   for (PetscInt k = 0; k < N_theta - 1; k++) {
     for (PetscInt j = 0; j < N_phi; j++) {
       PetscInt jn   = (j + 1) % N_phi;
-      PetscInt n_bl = RING_NODE(k,     j,  N_phi);  /* bottom-left  */
-      PetscInt n_br = RING_NODE(k,     jn, N_phi);  /* bottom-right */
-      PetscInt n_tl = RING_NODE(k + 1, j,  N_phi);  /* top-left     */
-      PetscInt n_tr = RING_NODE(k + 1, jn, N_phi);  /* top-right    */
+      PetscInt n_bl = RING_NODE(k,     j,  N_phi);
+      PetscInt n_br = RING_NODE(k,     jn, N_phi);
+      PetscInt n_tl = RING_NODE(k + 1, j,  N_phi);
+      PetscInt n_tr = RING_NODE(k + 1, jn, N_phi);
 
-      /* Triangle 1: bl – tl – br */
       ibm->nv1[ec] = n_bl;  ibm->nv2[ec] = n_tl;  ibm->nv3[ec] = n_br;  ec++;
-      /* Triangle 2: tl – tr – br */
       ibm->nv1[ec] = n_tl;  ibm->nv2[ec] = n_tr;  ibm->nv3[ec] = n_br;  ec++;
     }
   }
+
+  /* Apex fan removed: top ring is open boundary.
+  for (PetscInt j = 0; j < N_phi; j++) {
+    PetscInt jn = (j + 1) % N_phi;
+    ibm->nv1[ec] = RING_NODE(0, j,  N_phi);
+    ibm->nv2[ec] = RING_NODE(0, jn, N_phi);
+    ibm->nv3[ec] = n_apex_node;
+    ec++;
+  } */
 
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 4: connectivity done (%d elements)\n", (int)ec);
 
   /* ----------------------------------------------------------------
    * 5.  Patch nodes  nv4/nv5/nv6
-   *     Each element stores the "opposite" node of each of its three
-   *     neighbours — used by the subdivision-surface bending stencil.
-   *     Algorithm reproduced from io.c: Input().
-   *     "1000000" flags a boundary element with no neighbour on that edge.
+   *     Opposite node of each neighbouring triangle — 1000000 = none.
    * ---------------------------------------------------------------- */
   for (PetscInt i = 0; i < n_elmt; i++) {
     ibm->nv4[i] = 1000000;
@@ -251,12 +251,17 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 5: patch nodes done\n");
 
   /* ----------------------------------------------------------------
-   * 6.  Boundary edge info  (the open base ring)
+   * 6.  Boundary rings  —  top (ring 0) and base (ring N_theta-1)
    * ---------------------------------------------------------------- */
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 6: boundary edge info\n");
-  for (PetscInt j = 0; j < N_phi; j++) {
-    ibm->bnodes[j] = RING_NODE(N_theta - 1, j, N_phi);
-  }
+  /* Both apex ring (edge_n=0) and base ring (edge_n=1) in bnodes[].
+     IrrVer uses this to apply the ghost trick (bcount=count+3) for boundary nodes,
+     keeping the apex ring classified as REGULAR despite the cap additions.
+     No displacement BCs are applied to the apex ring — EdgeDirectionalFix targets edge_n=1 only. */
+  for (PetscInt j = 0; j < N_phi; j++)
+    ibm->bnodes[j] = RING_NODE(0, j, N_phi);              /* apex ring  (edge_n=0) */
+  for (PetscInt j = 0; j < N_phi; j++)
+    ibm->bnodes[N_phi + j] = RING_NODE(N_theta - 1, j, N_phi); /* base ring (edge_n=1) */
 
   /* ----------------------------------------------------------------
    * 7.  Fiber directions  —  Streeter helical rule
@@ -268,20 +273,17 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
    *           where ẑ₋ = (0,0,-1)
    *   e_c = e_n × e_l                              circumferential
    *
-   *   z* = (a - cz)/(a - z_base)  ∈ [0,1]
-   *   α  = α_apex(1-z*) + α_base·z*               linear Streeter rule
+   *   α  = (α_endo + α_epi)/2   mid-wall value, constant (Bayer Eq.2, d=0.5)
    *
    *   f  = cos(α)·e_c + sin(α)·e_l                → ibm->n_fib[ec]
    * ---------------------------------------------------------------- */
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 7: assigning fiber directions\n");
 
-  PetscReal alpha_apex = alpha_apex_deg * PETSC_PI / 180.0;
-  PetscReal alpha_base = alpha_base_deg * PETSC_PI / 180.0;
+  /* Mid-wall helix angle: Bayer 2012 Eq.(2) evaluated at d=0.5 */
+  PetscReal alpha = 0.5 * (alpha_endo_deg + alpha_epi_deg) * PETSC_PI / 180.0;
 
   /* Direction vector pointing from apex toward base along the z axis */
   struct Cmpnts e_down = {0.0, 0.0, -1.0};
-
-  PetscReal dz = z_apex - z_base;  /* always > 0 */
 
   for (ec = 0; ec < n_elmt; ec++) {
     PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
@@ -323,23 +325,29 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     /* Circumferential direction (right-hand: outward-normal × meridional) */
     struct Cmpnts e_c = CROSS(e_n, e_l);
 
-    /* Normalised longitudinal coordinate z* ∈ [0,1] */
-    PetscReal zstar = (z_apex - c.z) / dz;
-    if (zstar < 0.0) zstar = 0.0;
-    if (zstar > 1.0) zstar = 1.0;
-
-    /* Helix angle: linear interpolation from apex to base */
-    PetscReal alpha = (1.0 - zstar) * alpha_apex + zstar * alpha_base;
-
-    /* Fiber unit vector in the tangent plane */
+    /* Fiber unit vector in the tangent plane — Bayer 2012 Eq.(7) */
     ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
     ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
     ibm->n_fib[ec].z = cos(alpha) * e_c.z + sin(alpha) * e_l.z;
   }
 
   PetscPrintf(PETSC_COMM_WORLD,
-    "LV fibers assigned: α_apex=%.1f°  α_base=%.1f°  (Streeter 1969 / Bayer 2012)\n",
-    alpha_apex_deg, alpha_base_deg);
+    "LV fibers assigned: α_endo=%.1f°  α_epi=%.1f°  α_mid=%.1f°  (Bayer 2012 Eq.2, d=0.5)\n",
+    alpha_endo_deg, alpha_epi_deg, (alpha_endo_deg + alpha_epi_deg) * 0.5);
+
+  /* ----------------------------------------------------------------
+   * 8.  Subdivision surface topology
+   *     IrrVer classifies each element as regular (ire=0) or irregular
+   *     (ire=1) based on vertex valence, and fills irv/val.
+   *     Patch builds the 16-slot Loop stencil table (ibm->patch[]).
+   *     Both are needed by ElemUpdateGeomSubdivFromCoords_ in
+   *     active_strain.c; Create() allocates the arrays but leaves
+   *     them uninitialised.
+   * ---------------------------------------------------------------- */
+  PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 8: subdivision surface topology (IrrVer + Patch)\n");
+  ierr = IrrVer(ibm); CHKERRQ(ierr);
+  ierr = Patch(ibm);  CHKERRQ(ierr);
+  PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 8: done\n");
 
   return 0;
 }

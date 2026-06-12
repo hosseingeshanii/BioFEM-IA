@@ -181,7 +181,7 @@ kokkos-openmp-clean:
 	$(MAKE) CONFIG=config/kokkos-openmp.mk cleanobj testt
 
 # ── cmake-based build and install ────────────────────────────────────────
-clean:
+clean::
 	rm -rf build
 
 build:

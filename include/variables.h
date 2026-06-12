@@ -42,6 +42,7 @@ typedef struct {
 
 typedef struct {
   PetscInt       n_v, n_elmt, n_edge, sum_n_bnodes, n_ghosts, ibi;
+  PetscInt       n_elmt_base;  /* elements before any cap/cap-fan additions (0 = use all) */
   PetscReal      *x_bp, *y_bp, *z_bp, *x_bp0, *y_bp0, *z_bp0;
 
   PetscReal      *x_bpi, *y_bpi, *z_bpi;    // intermediate coords when muscle activation is on.
