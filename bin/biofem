@@ -129,19 +129,21 @@ def detect_cluster() -> dict:
 # ---------------------------------------------------------------------------
 def _run_jobfile(
     *, backend, executable, run_dir, np, time, account,
-    mpi_flags, load_env, gpu,
+    mpi_flags, load_env, gpu, petsc_opts="", slurm_output="",
 ) -> str:
-    acct_line  = f"#SBATCH --account={account}" if account else ""
-    gpu_line   = "#SBATCH --gpus=1" if gpu else ""
-    ntasks     = 1 if gpu else np
-    env_block  = load_env if load_env else "# no load-env.sh found"
+    acct_line   = f"#SBATCH --account={account}" if account else ""
+    gpu_line    = "#SBATCH --gpus=1" if gpu else ""
+    output_line = f"#SBATCH --output={slurm_output}" if slurm_output else f"#SBATCH --output=biofem_{backend}_%j.out"
+    ntasks      = 1 if gpu else np
+    env_block   = load_env if load_env else "# no load-env.sh found"
+    exe_str     = f"{executable}{(' ' + petsc_opts) if petsc_opts else ''}"
     if gpu:
-        mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {executable}'
+        mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {exe_str}'
     else:
         mpi_extra = f" {mpi_flags}" if mpi_flags.strip() else ""
         mpi_cmd = (
             f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n'
-            f'  mpirun -np "${{SLURM_NTASKS:-{np}}}"{mpi_extra} {executable}'
+            f'  mpirun -np "${{SLURM_NTASKS:-{np}}}"{mpi_extra} {exe_str}'
         )
     return (
         f"#!/bin/bash\n"
@@ -150,12 +152,13 @@ def _run_jobfile(
         f"#SBATCH --ntasks={ntasks}\n"
         f"#SBATCH --cpus-per-task=1\n"
         f"#SBATCH --mem=8G\n"
-        f"#SBATCH --output=biofem_{backend}_%j.out\n"
+        f"{output_line}\n"
         f"{gpu_line}\n"
         f"{acct_line}\n"
         f"\nset -euo pipefail\n"
         f"\n{env_block}\n"
         f'\ncd "{run_dir}" || exit 1\n'
+        f'\necho "BENCH_TIME_LIMIT={time}"\n'
         f"\n{mpi_cmd}\n"
     )
 
@@ -195,6 +198,7 @@ def _sweep_jobfile(
         f'echo "BENCH_ELEMENTS={nelems}"\n'
         f'echo "BENCH_NTASKS=${{SLURM_NTASKS:-{ntasks}}}"\n'
         f'echo "BENCH_JOB_ID=${{SLURM_JOB_ID:-local}}"\n'
+        f'echo "BENCH_TIME_LIMIT={time}"\n'
         f"\n{mpi_cmd}\n"
     )
 
@@ -222,6 +226,33 @@ def cmd_run(args):
     mpi_flags = cfg.get("mpi", "extra_flags", fallback="")
     load_env  = _load_env_line()
 
+    # Build extra PETSc options from --monitor and --petsc-opts
+    monitors = [m.strip() for m in args.monitor.split(",") if m.strip()]
+    petsc_opts_parts = []
+    if "residual" in monitors:
+        petsc_opts_parts.append("-monitor_residual 1")
+    if args.petsc_opts.strip():
+        petsc_opts_parts.append(args.petsc_opts.strip())
+    petsc_opts = " ".join(petsc_opts_parts)
+
+    # Resolve the output directory, matching PETSc option precedence:
+    # command-line (--petsc-opts) > control.dat > hardcoded default "output".
+    def _parse_out_dir(tokens):
+        for i, t in enumerate(tokens):
+            if t == "-out_dir" and i + 1 < len(tokens):
+                return tokens[i + 1]
+        return None
+
+    out_dir = (
+        _parse_out_dir(petsc_opts.split())           # 1. command-line wins
+        or _parse_out_dir(                            # 2. control.dat
+            [tok for line in (run_dir / "control.dat").read_text(errors="replace").splitlines()
+             for tok in line.split()
+             if not line.lstrip().startswith("#")]
+        )
+        or "output"                                   # 3. default
+    )
+
     # --local forces a direct terminal run regardless of SLURM availability.
     # Otherwise submit via sbatch when on a cluster and not in an allocation
     # (or when a GPU backend is requested, which always needs a dedicated node).
@@ -238,6 +269,7 @@ def cmd_run(args):
             backend=args.backend, executable=executable, run_dir=run_dir,
             np=args.np, time=args.time, account=account,
             mpi_flags=mpi_flags, load_env=load_env, gpu=info["gpu"],
+            petsc_opts=petsc_opts, slurm_output=args.slurm_output,
         )
         if args.dry_run:
             print(jf)
@@ -245,14 +277,32 @@ def cmd_run(args):
         with tempfile.NamedTemporaryFile("w", suffix=".slurm", delete=False, dir=run_dir) as f:
             f.write(jf)
             tmp = Path(f.name)
+        want_monitor = "residual" in monitors
+        sbatch_cmd = ["sbatch"]
+        if args.wait or want_monitor:
+            # --wait is required for live monitoring (we need sbatch to block
+            # so we can poll residual.log while the job runs on the compute node)
+            sbatch_cmd.append("--wait")
+        sbatch_cmd.append(str(tmp))
         try:
-            subprocess.run(["sbatch", str(tmp)], cwd=run_dir, check=True)
+            if want_monitor:
+                # Pass the sbatch command into _run_with_monitor so it polls
+                # output/residual.log (on the shared filesystem) while the job
+                # runs — same live plot + final PNG save as for local runs.
+                sbatch_shell = " ".join(str(s) for s in sbatch_cmd)
+                _run_with_monitor(sbatch_shell, run_dir, args.port, out_dir)
+            else:
+                subprocess.run(sbatch_cmd, cwd=run_dir, check=True)
         finally:
             tmp.unlink(missing_ok=True)
+        if want_monitor and not args.wait:
+            # job already finished (--wait was added implicitly above), nothing extra to do
+            pass
     else:
         # Build the mpi command parts
-        mpi_extra = mpi_flags.split() if mpi_flags.strip() else []
-        cmd_parts = ["mpirun", "-np", str(args.np)] + mpi_extra + [str(executable)]
+        mpi_extra     = mpi_flags.split() if mpi_flags.strip() else []
+        petsc_opts_list = petsc_opts.split() if petsc_opts else []
+        cmd_parts = ["mpirun", "-np", str(args.np)] + mpi_extra + [str(executable)] + petsc_opts_list
         cmd_str   = " ".join(cmd_parts)
 
         # Prepend environment setup so the solver sees the right modules
@@ -266,10 +316,10 @@ def cmd_run(args):
             return
 
         print(f"[biofem] running locally: {cmd_str}")
-        subprocess.run(
-            ["bash", "--login", "-c", shell_cmd],
-            cwd=run_dir, check=True,
-        )
+        if "residual" in monitors:
+            _run_with_monitor(shell_cmd, run_dir, args.port, out_dir)
+        else:
+            subprocess.run(["bash", "--login", "-c", shell_cmd], cwd=run_dir, check=True)
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +576,214 @@ def _write_blist(path: Path, edges: list):
 
 
 # ---------------------------------------------------------------------------
+# residual monitor helpers  (used by cmd_run when --monitor residual is set)
+# ---------------------------------------------------------------------------
+
+# Embedded script run as a subprocess to own the tornado/WebAgg event loop.
+# Main biofem process writes plot data to a JSON file; this script reads it.
+_WEBAGG_DISPLAY_SCRIPT = r"""
+import sys, json, time, threading
+port      = int(sys.argv[1])
+data_file = sys.argv[2]
+import matplotlib as mpl
+mpl.use("WebAgg")
+mpl.rcParams["webagg.port"] = port
+mpl.rcParams["webagg.open_in_browser"] = False
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(10, 5))
+
+def _update():
+    # Wait for tornado to start before first draw attempt.
+    time.sleep(3)
+    while True:
+        try:
+            with open(data_file) as f:
+                d = json.load(f)
+            ts0 = d.get("ts0", [])
+            rn0 = d.get("rn0", [])
+            ax.cla()
+            if ts0 and rn0:
+                ax.semilogy(ts0, rn0, "b.-", linewidth=1.2, markersize=6)
+            ax.set_xlabel("Time step")
+            ax.set_ylabel("Initial ||R||")
+            ax.set_title("SNES convergence — initial ||R|| per time step")
+            ax.grid(True, which="both", alpha=0.3)
+            fig.tight_layout()
+            # Schedule the canvas flush in tornado's own thread (thread-safe).
+            try:
+                from matplotlib.backends.backend_webagg import WebAggApplication
+                iol = getattr(WebAggApplication, "ioloop", None)
+                if iol is not None:
+                    iol.add_callback(fig.canvas.draw)
+                else:
+                    fig.canvas.draw()
+            except Exception:
+                fig.canvas.draw()
+        except Exception:
+            pass
+        time.sleep(2)
+
+threading.Thread(target=_update, daemon=True).start()
+plt.show()   # blocking — tornado owns this thread; subprocess is killed by parent on exit
+"""
+
+def _parse_residual_log(log_file):
+    timesteps, snes_iters, rnorms = [], [], []
+    try:
+        with open(log_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) == 3:
+                    try:
+                        timesteps.append(int(parts[0]))
+                        snes_iters.append(int(parts[1]))
+                        rnorms.append(float(parts[2]))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return timesteps, snes_iters, rnorms
+
+
+def _draw_snes_plot(ax, timesteps, snes_iters, rnorms):
+    """Single-panel: initial SNES ||R|| (Newton iter 0) per completed time step."""
+    ts0_steps, ts0_norms = [], []
+    seen = set()
+    for ts, si, rn in zip(timesteps, snes_iters, rnorms):
+        if si == 0 and ts not in seen:
+            ts0_steps.append(ts)
+            ts0_norms.append(rn)
+            seen.add(ts)
+    ax.cla()
+    if ts0_norms:
+        ax.semilogy(ts0_steps, ts0_norms, "b.-", linewidth=1.2, markersize=6)
+    ax.set_xlabel("Time step")
+    ax.set_ylabel("Initial ||R||")
+    ax.set_title("SNES convergence — initial residual per time step")
+    ax.grid(True, which="both", alpha=0.3)
+
+
+def _run_with_monitor(shell_cmd, run_dir, port, out_dir="output"):
+    """Run solver as Popen and live-plot SNES residuals.
+
+    WebAgg runs in a completely separate subprocess so its blocking tornado
+    event loop never touches the main process.  Main process: submits job,
+    polls log, prints status, handles Ctrl+C — no matplotlib involved at all.
+    Final PNG saved via standalone Agg figure.
+    """
+    import sys as _sys
+    import json as _json
+    import tempfile as _tmp
+    import time as _time
+    run_dir  = Path(run_dir)
+    log_file = run_dir / out_dir / "residual.log"
+    png_file = run_dir / out_dir / "residual_monitor.png"
+
+    # ── launch WebAgg display subprocess ─────────────────────────────────────
+    data_file    = Path(_tmp.mktemp(suffix="_biofem_webagg.json"))
+    display_proc = None
+    use_webagg   = False
+    try:
+        import matplotlib  # check availability only; do NOT import pyplot here
+        data_file.write_text("{}")
+        display_proc = subprocess.Popen(
+            [_sys.executable, "-c", _WEBAGG_DISPLAY_SCRIPT, str(port), str(data_file)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            start_new_session=True,   # isolate from terminal Ctrl+C signal
+        )
+        _time.sleep(2.5)              # give tornado time to bind the port
+        if display_proc.poll() is not None:
+            err = display_proc.stderr.read().decode(errors="replace").strip()
+            raise RuntimeError(err or "display process exited immediately")
+        use_webagg = True
+        print(f"[biofem] live plot → http://localhost:{port}")
+        print(f"[biofem] (VSCode: Ports tab → forward {port}, then open in browser)")
+    except Exception as e:
+        if display_proc is not None:
+            display_proc.terminate()
+            display_proc = None
+        print(f"[biofem] WebAgg unavailable ({e})")
+        print(f"[biofem] running without live plot — PNG saved to {png_file}")
+
+    # ── start solver / sbatch ─────────────────────────────────────────────────
+    if shell_cmd.startswith("sbatch "):
+        proc = subprocess.Popen(shell_cmd.split(), cwd=run_dir)
+        print(f"[biofem] job submitted, monitoring {log_file} ...")
+    else:
+        proc = subprocess.Popen(["bash", "--login", "-c", shell_cmd], cwd=run_dir)
+        print(f"[biofem] solver started (PID {proc.pid})")
+
+    # ── monitor loop ──────────────────────────────────────────────────────────
+    last_size = -1
+    try:
+        while True:
+            done = proc.poll() is not None
+
+            if log_file.exists():
+                sz = log_file.stat().st_size
+                if sz != last_size:
+                    last_size = sz
+                    ts, si, rn = _parse_residual_log(log_file)
+                    if rn:
+                        print(f"\r[biofem] step={ts[-1]}  newton={si[-1]}  rnorm={rn[-1]:.3e}",
+                              end="", flush=True)
+                        if use_webagg:
+                            ts0, rn0 = [], []
+                            seen: set = set()
+                            for t, s, r in zip(ts, si, rn):
+                                if s == 0 and t not in seen:
+                                    ts0.append(t); rn0.append(r); seen.add(t)
+                            try:
+                                data_file.write_text(_json.dumps({"ts0": ts0, "rn0": rn0}))
+                            except Exception:
+                                pass
+
+            _time.sleep(2.0)   # Ctrl+C interrupts cleanly here
+
+            if done:
+                break
+    except KeyboardInterrupt:
+        print("\n[biofem] interrupted — terminating solver ...")
+        proc.terminate()
+        proc.wait()
+
+    # ── shut down display subprocess ──────────────────────────────────────────
+    if display_proc is not None:
+        try:
+            display_proc.terminate()
+            display_proc.wait(timeout=3)
+        except Exception:
+            pass
+    try:
+        data_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    # ── final PNG via standalone Agg figure ───────────────────────────────────
+    ts, si, rn = _parse_residual_log(log_file)
+    if rn:
+        try:
+            from matplotlib.backends.backend_agg import FigureCanvasAgg as _FCA
+            from matplotlib.figure import Figure as _Fig
+            fig2 = _Fig(figsize=(10, 5))
+            _FCA(fig2)
+            ax2 = fig2.add_subplot(1, 1, 1)
+            _draw_snes_plot(ax2, ts, si, rn)
+            fig2.tight_layout()
+            fig2.savefig(png_file, dpi=100)
+            print(f"\n[biofem] plot saved → {png_file}")
+        except Exception as e:
+            print(f"\n[biofem] PNG save failed: {e}")
+
+    if proc.returncode not in (0, -15):  # -15 = SIGTERM (our own interrupt)
+        raise subprocess.CalledProcessError(proc.returncode, shell_cmd)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
@@ -570,6 +828,16 @@ Run:
                        help="SLURM account (overrides site.cfg)")
     p_run.add_argument("--local", action="store_true",
                        help="run directly in this terminal instead of submitting to SLURM")
+    p_run.add_argument("--monitor", default="",
+                       help="comma-separated monitors to enable, e.g. residual")
+    p_run.add_argument("--petsc-opts", default="",
+                       help="extra PETSc flags appended after the executable, e.g. \"-out_dir out_n2\"")
+    p_run.add_argument("--slurm-output", default="",
+                       help="SLURM output file path (overrides default biofem_<backend>_%%j.out)")
+    p_run.add_argument("--wait", action="store_true",
+                       help="block until the submitted SLURM job completes (passes --wait to sbatch)")
+    p_run.add_argument("--port", type=int, default=8988,
+                       help="WebAgg port for live residual plot (--monitor residual, default: 8988)")
     p_run.add_argument("--dry-run", action="store_true",
                        help="print jobfile or shell command without executing")
 
