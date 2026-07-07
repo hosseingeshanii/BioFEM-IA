@@ -61,21 +61,23 @@ extern struct Cmpnts AMULT(PetscReal alpha, struct Cmpnts v1);
 
 PetscErrorCode LVParamsCreate(LVParams *p)
 {
-  p->a          = 4.5;
-  p->b          = 2.5;
-  p->f_cut      = 0.55;
-  p->N_theta    = 16;
-  p->N_phi      = 32;
-  p->alpha_endo = 60.0;
-  p->alpha_epi  = -60.0;
+  p->a            = 4.5;
+  p->b            = 2.5;
+  p->f_cut        = 0.55;
+  p->N_theta      = 16;
+  p->N_phi        = 32;
+  p->N_apex_extra = 0;
+  p->alpha_endo   = 60.0;
+  p->alpha_epi    = -60.0;
 
-  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_a",          &p->a,          PETSC_NULL);
-  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_b",          &p->b,          PETSC_NULL);
-  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_f_cut",      &p->f_cut,      PETSC_NULL);
-  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_theta",    &p->N_theta,    PETSC_NULL);
-  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_phi",      &p->N_phi,      PETSC_NULL);
-  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_endo", &p->alpha_endo, PETSC_NULL);
-  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_epi",  &p->alpha_epi,  PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_a",             &p->a,            PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_b",             &p->b,            PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_f_cut",         &p->f_cut,        PETSC_NULL);
+  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_theta",       &p->N_theta,      PETSC_NULL);
+  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_phi",         &p->N_phi,        PETSC_NULL);
+  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_apex_extra",  &p->N_apex_extra, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_endo",    &p->alpha_endo,   PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_epi",     &p->alpha_epi,    PETSC_NULL);
 
   return 0;
 }
@@ -84,13 +86,17 @@ PetscErrorCode LVParamsCreate(LVParams *p)
 
 PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
 {
-  PetscReal a             = p->a;
-  PetscReal b             = p->b;
-  PetscReal f_cut         = p->f_cut;
-  PetscInt  N_theta       = p->N_theta;
-  PetscInt  N_phi         = p->N_phi;
+  PetscReal a              = p->a;
+  PetscReal b              = p->b;
+  PetscReal f_cut          = p->f_cut;
+  PetscInt  N_theta        = p->N_theta;
+  PetscInt  N_phi          = p->N_phi;
+  PetscInt  N_apex_extra   = p->N_apex_extra;
   PetscReal alpha_endo_deg = p->alpha_endo;
   PetscReal alpha_epi_deg  = p->alpha_epi;
+
+  /* Total rings = base mesh rings + extra apex rings */
+  PetscInt  N_total        = N_theta + N_apex_extra;
 
   PetscErrorCode ierr;
 
@@ -107,8 +113,8 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* PetscReal z_apex     = a; */   /* unused: apex cap removed */
   PetscReal z_base     = a * cos(theta_cut);
 
-  PetscInt n_elmt_base  = (N_theta - 1) * 2 * N_phi;   /* quad strips only         */
-  PetscInt n_v          = N_theta * N_phi;              /* rings only, no apex node */
+  PetscInt n_elmt_base  = (N_total - 1) * 2 * N_phi;   /* quad strips only         */
+  PetscInt n_v          = N_total * N_phi;              /* rings only, no apex node */
   PetscInt n_elmt       = n_elmt_base;                  /* quad strips only         */
   /* NOTE: apex fan commented out — top boundary is open like the base.
    *   + N_phi;  simple apex fan */
@@ -128,9 +134,9 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
 
   PetscPrintf(PETSC_COMM_WORLD,
     "LV mesh: a=%.4f  b=%.4f  f_cut=%.2f  theta_cut=%.2f deg  "
-    "N_theta=%d  N_phi=%d  n_v=%d  n_elmt=%d\n",
+    "N_theta=%d  N_apex_extra=%d  N_phi=%d  n_v=%d  n_elmt=%d\n",
     a, b, f_cut, theta_cut * 180.0 / PETSC_PI,
-    (int)N_theta, (int)N_phi, (int)n_v, (int)n_elmt);
+    (int)N_theta, (int)N_apex_extra, (int)N_phi, (int)n_v, (int)n_elmt);
 
   /* ----------------------------------------------------------------
    * 2.  Allocate all standard IBMNodes / FE arrays
@@ -162,10 +168,17 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
    * ---------------------------------------------------------------- */
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 3: filling node coordinates\n");
 
-  for (PetscInt k = 0; k < N_theta; k++) {
-    PetscReal theta = (k + 1) * theta_step;
-    PetscReal sth   = sin(theta);
-    PetscReal cth   = cos(theta);
+  /* Two-segment theta spacing:
+   *   rings 0..N_apex_extra-1  : squeezed into [0, theta_step] to shrink the apex hole
+   *   rings N_apex_extra..N_total-1 : regular spacing theta_step..theta_cut */
+  for (PetscInt k = 0; k < N_total; k++) {
+    PetscReal theta;
+    if (k < N_apex_extra)
+      theta = (PetscReal)(k + 1) / (PetscReal)(N_apex_extra + 1) * theta_step;
+    else
+      theta = (PetscReal)(k - N_apex_extra + 1) * theta_step;
+    PetscReal sth = sin(theta);
+    PetscReal cth = cos(theta);
     for (PetscInt j = 0; j < N_phi; j++) {
       PetscReal phi = 2.0 * PETSC_PI * (PetscReal)j / (PetscReal)N_phi;
       PetscInt  nc  = RING_NODE(k, j, N_phi);
@@ -192,7 +205,7 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
    * ---------------------------------------------------------------- */
   PetscInt ec = 0;
 
-  for (PetscInt k = 0; k < N_theta - 1; k++) {
+  for (PetscInt k = 0; k < N_total - 1; k++) {
     for (PetscInt j = 0; j < N_phi; j++) {
       PetscInt jn   = (j + 1) % N_phi;
       PetscInt n_bl = RING_NODE(k,     j,  N_phi);
@@ -259,9 +272,9 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
      keeping the apex ring classified as REGULAR despite the cap additions.
      No displacement BCs are applied to the apex ring — EdgeDirectionalFix targets edge_n=1 only. */
   for (PetscInt j = 0; j < N_phi; j++)
-    ibm->bnodes[j] = RING_NODE(0, j, N_phi);              /* apex ring  (edge_n=0) */
+    ibm->bnodes[j] = RING_NODE(0, j, N_phi);               /* apex ring  (edge_n=0) */
   for (PetscInt j = 0; j < N_phi; j++)
-    ibm->bnodes[N_phi + j] = RING_NODE(N_theta - 1, j, N_phi); /* base ring (edge_n=1) */
+    ibm->bnodes[N_phi + j] = RING_NODE(N_total - 1, j, N_phi); /* base ring (edge_n=1) */
 
   /* ----------------------------------------------------------------
    * 7.  Fiber directions  —  Streeter helical rule

@@ -244,32 +244,29 @@ PetscErrorCode EdgeFree(PetscInt edge_n, FE *fem) {
 
 //------------------------------------------------------------------------------------------------------------ 
 PetscErrorCode InitVel(PetscInt edge_n, PetscReal w, FE *fem) {
-  
-  IBMNodes *ibm=fem->ibm;
-  PetscReal *xdd;
-  PetscInt  nb;
-  PetscInt start=0, end=0, edge, nbc;
+
+  IBMNodes      *ibm = fem->ibm;
+  DMPlexGeomCtx *gctx = &fem->geom_ctx;
+  PetscReal     *xdd;
+  PetscInt       nb;
+  PetscInt       start=0, end=0, edge, nbc;
 
   VecGetArray(fem->xd, &xdd);
 
   for (edge=0; edge<edge_n+1; edge++) {
     end += ibm->n_bnodes[edge];
-    } 
+  }
   start = end - ibm->n_bnodes[edge_n];
 
-  //for (nb=0; nb<ibm->n_v; nb++) { 
-   // if (ibm->x_bp0[nb]>0.0017) {//for canti
-     // xdd[nb*dof+2] = 0.5*pow(ibm->x_bp[nb*dof],2)/0.04*w;
-    //}
-  //}
-  
-  for (nbc=start; nbc<end; nbc++) { //fix boundary nodes 
-    nb=ibm->bnodes[nbc]; 
-  	xdd[nb*dof] =0.0; 
-  	} 
+  for (nbc=start; nbc<end; nbc++) { //fix boundary nodes
+    nb = ibm->bnodes[nbc];
+    PetscInt local_idx = gctx->initialized ? gctx->ibm_to_local_idx[nb] : nb;
+    if (local_idx < 0) continue;
+    xdd[local_idx*dof] = 0.0;
+  }
 
   VecRestoreArray(fem->xd, &xdd);
- 
+
   return(0);
 }
 
@@ -1671,57 +1668,40 @@ PetscErrorCode NodeFix(PetscInt nb, FE *fem) {
 PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem, Vec R) {
   PetscFunctionBeginUser;
 
-  IBMNodes   *ibm=fem->ibm;
+  IBMNodes      *ibm  = fem->ibm;
+  DMPlexGeomCtx *gctx = &fem->geom_ctx;
   PetscErrorCode ierr;
-  PetscReal  *RRes;
-  PetscInt   start=0, end=0, edge, nbc, nb;
+  PetscReal     *RRes;
+  PetscInt       start=0, end=0, edge, nbc, nb;
 
   for (edge=0; edge<edge_n+1; edge++) {
     end += ibm->n_bnodes[edge];
   }
   start = end - ibm->n_bnodes[edge_n];
-  
 
   ierr = VecGetArray(R, &RRes); CHKERRQ(ierr);
 
   for (nbc=start; nbc<end; nbc++) { //fix boundary nodes
-    nb=ibm->bnodes[nbc];
-    // PetscPrintf(PETSC_COMM_SELF, "EdgeDirectionalFix: nbc=%d nb=%d dir=%d start=%d end=%d\n", nbc, nb, dir, start, end);
-    
+    nb = ibm->bnodes[nbc];
+    /* In parallel, only the rank that owns nb writes to R; others skip. */
+    PetscInt li = gctx->initialized ? gctx->ibm_to_local_idx[nb] : nb;
+    if (li < 0) continue;
+
     switch (dir) {
-
     case 0:
-    // ibm->x_bp[nb] = ibm->x_bp0[nb]; //for kinematic contact
-    // xx[nb*dof] = ibm->x_bp0[nb];
-    // xdd[nb*dof] = 0.;
-    // RRes[nb*dof] = 0.0; 
-    RRes[nb*dof] = ibm->x_bp[nb] - ibm->x_bp0[nb];
-
-    break;
-
+      RRes[li*dof  ] = ibm->x_bp[nb] - ibm->x_bp0[nb];
+      break;
     case 1:
-    // ibm->y_bp[nb] = ibm->y_bp0[nb];
-    // xx[nb*dof+1] = ibm->y_bp0[nb];
-    // xdd[nb*dof+1] = 0.;
-    // RRes[nb*dof+1] = 0.0;
-    RRes[nb*dof+1] = ibm->y_bp[nb] - ibm->y_bp0[nb];
-    break;
-
+      RRes[li*dof+1] = ibm->y_bp[nb] - ibm->y_bp0[nb];
+      break;
     case 2:
-    // ibm->z_bp[nb] = ibm->z_bp0[nb];
-    // xx[nb*dof+2] = ibm->z_bp0[nb];
-    // xdd[nb*dof+2] = 0.;    
-    // RRes[nb*dof+2] = 0.0;
-    RRes[nb*dof+2] = ibm->z_bp[nb] - ibm->z_bp0[nb];
-    break;
-
+      RRes[li*dof+2] = ibm->z_bp[nb] - ibm->z_bp0[nb];
+      break;
     default:
-        SETERRQ(PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
-                "Direction must be between 0 and 2");
+      SETERRQ(PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
+              "Direction must be between 0 and 2");
     }
-
   }
-
 
   ierr = VecRestoreArray(R, &RRes); CHKERRQ(ierr);
   PetscFunctionReturn(0);
