@@ -304,43 +304,55 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   PetscMalloc(ibm->n_elmt*sizeof(struct Cmpnts), &(ibm->qvec));
   PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->radvec));
 
-  VecCreateSeq(PETSC_COMM_SELF,dof*(ibm->n_v + ibm->n_ghosts), &(fem->Res));  
-  VecDuplicate(fem->Res, &(fem->x));
-  VecDuplicate(fem->Res, &(fem->xn));
-  VecDuplicate(fem->Res, &(fem->xnm1));
-  VecDuplicate(fem->Res, &(fem->xd));
-  VecDuplicate(fem->Res, &(fem->dx));
-  VecDuplicate(fem->Res, &(fem->xdd));
-  VecDuplicate(fem->Res, &(fem->y));
-  VecDuplicate(fem->Res, &(fem->yn));
-  VecDuplicate(fem->Res, &(fem->Fint));
-  VecDuplicate(fem->Res, &(fem->Fext));
-  VecDuplicate(fem->Res, &(fem->Fdyn));
-  VecDuplicate(fem->Res, &(fem->disp));
-  VecDuplicate(fem->Res, &(fem->FJ));
-  VecDuplicate(fem->Res, &(fem->Mass));  
-  VecDuplicate(fem->Res, &(fem->Dissip));
-  VecDuplicate(fem->Res, &(fem->Fcnt));
-  
+  return (0);
+}
 
-  //Initialize
-  VecSet(fem->Res, 0.0);  VecSet(fem->x, 0.0);  VecSet(fem->xn, 0.0);  VecSet(fem->xnm1, 0.0);
-  VecSet(fem->xd, 0.0);  VecSet(fem->xdd, 0.0);  VecSet(fem->y, 0.0);  VecSet(fem->yn, 0.0);
-  VecSet(fem->Fint, 0.0);  VecSet(fem->Fext, 0.0);  VecSet(fem->Fdyn, 0.0);  VecSet(fem->FJ, 0.0); 
+//-----------------------------------------------------------------------------------------------------------------------------------
+/* Create all PETSc Vecs for body fem.
+ * Must be called after FEM_DMPlexGeomSetup() (when used) so that
+ * geom_ctx.nOwnedVerts is available.
+ *   - Parallel muscle-activation path: VecCreateMPI with per-rank owned local size.
+ *   - Serial / non-DMPlex path: VecCreateSeq covering all nodes incl. ghost stencil. */
+PetscErrorCode InitVecs(FE *fem)
+{
+  IBMNodes      *ibm = fem->ibm;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+
+  if (ctx->initialized) {
+    VecCreateMPI(PETSC_COMM_WORLD, dof * ctx->nOwnedVerts, dof * ibm->n_v, &fem->Res);
+  } else {
+    VecCreateSeq(PETSC_COMM_SELF, dof * (ibm->n_v + ibm->n_ghosts), &fem->Res);
+  }
+
+  VecDuplicate(fem->Res, &fem->x);
+  VecDuplicate(fem->Res, &fem->xn);
+  VecDuplicate(fem->Res, &fem->xnm1);
+  VecDuplicate(fem->Res, &fem->xd);
+  VecDuplicate(fem->Res, &fem->dx);
+  VecDuplicate(fem->Res, &fem->xdd);
+  VecDuplicate(fem->Res, &fem->y);
+  VecDuplicate(fem->Res, &fem->yn);
+  VecDuplicate(fem->Res, &fem->Fint);
+  VecDuplicate(fem->Res, &fem->Fext);
+  VecDuplicate(fem->Res, &fem->Fdyn);
+  VecDuplicate(fem->Res, &fem->disp);
+  VecDuplicate(fem->Res, &fem->FJ);
+  VecDuplicate(fem->Res, &fem->Mass);
+  VecDuplicate(fem->Res, &fem->Dissip);
+  VecDuplicate(fem->Res, &fem->Fcnt);
+
+  VecSet(fem->Res, 0.0);   VecSet(fem->x, 0.0);    VecSet(fem->xn, 0.0);   VecSet(fem->xnm1, 0.0);
+  VecSet(fem->xd, 0.0);    VecSet(fem->xdd, 0.0);  VecSet(fem->y, 0.0);    VecSet(fem->yn, 0.0);
+  VecSet(fem->Fint, 0.0);  VecSet(fem->Fext, 0.0); VecSet(fem->Fdyn, 0.0); VecSet(fem->FJ, 0.0);
   VecSet(fem->disp, 0.0);  VecSet(fem->Fcnt, 0.0);
   VecSet(fem->Mass, 0.0);  VecSet(fem->Dissip, 0.0);
 
-  if (ressmooth){
-    VecDuplicate(fem->Res, &(fem->Res_smth));  
+  if (ressmooth) {
+    VecDuplicate(fem->Res, &fem->Res_smth);
     VecSet(fem->Res_smth, 0.0);
   }
-  
-  
-  // if (muscle_activation){
-  //   VecDuplicate(fem->Res, &(fem->x_intmd));
-  //   VecSet(fem->x_intmd, 0.0);
-  // }
-  return (0);
+
+  return 0;
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
@@ -514,10 +526,57 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
 //-----------------------------------------------------------------------------------------------------------------------------------
 PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 
-  PetscInt  n_cells=3, i;
-  IBMNodes  *ibm=fem->ibm;  
+  PetscMPIInt rank;
+  MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
+
+  PetscInt  n_cells=3, i, nv;
+  IBMNodes          *ibm  = fem->ibm;
+  DMPlexGeomCtx     *gctx = &fem->geom_ctx;
   FILE      *f;
   char      filepath[80];
+
+  /* --- Parallel Vec gather: all ranks must participate before rank-0 early return. ---
+   * For each Vec, scatter locally-owned entries into an ibm-node-ordered buffer,
+   * then MPI_Allreduce (SUM) so rank 0 has the full array for VTK output.        */
+  PetscReal *g_Fint = NULL, *g_Fdyn = NULL, *g_xd = NULL, *g_Fcnt = NULL;
+
+  if (gctx->initialized) {
+    PetscInt nbuf = ibm->n_v * dof;
+    PetscMalloc1(nbuf, &g_Fint);
+    PetscMalloc1(nbuf, &g_Fdyn);
+    PetscMalloc1(nbuf, &g_xd);
+    PetscMalloc1(nbuf, &g_Fcnt);
+    PetscMemzero(g_Fint,  nbuf * sizeof(PetscReal));
+    PetscMemzero(g_Fdyn,  nbuf * sizeof(PetscReal));
+    PetscMemzero(g_xd,    nbuf * sizeof(PetscReal));
+    PetscMemzero(g_Fcnt,  nbuf * sizeof(PetscReal));
+
+#define GATHER_NODE_VEC(vec, buf) do { \
+      const PetscReal *_a; \
+      VecGetArrayRead((vec), &_a); \
+      for (nv = 0; nv < ibm->n_v; nv++) { \
+        PetscInt li = gctx->ibm_to_local_idx[nv]; \
+        if (li < 0) continue; \
+        (buf)[nv*dof  ] = _a[li*dof  ]; \
+        (buf)[nv*dof+1] = _a[li*dof+1]; \
+        (buf)[nv*dof+2] = _a[li*dof+2]; \
+      } \
+      VecRestoreArrayRead((vec), &_a); \
+      MPI_Allreduce(MPI_IN_PLACE, (buf), nbuf, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD); \
+    } while (0)
+
+    GATHER_NODE_VEC(fem->Fint, g_Fint);
+    GATHER_NODE_VEC(fem->Fdyn, g_Fdyn);
+    GATHER_NODE_VEC(fem->xd,   g_xd);
+    GATHER_NODE_VEC(fem->Fcnt, g_Fcnt);
+#undef GATHER_NODE_VEC
+  }
+
+  if (rank != 0) {
+    PetscFree(g_Fint); PetscFree(g_Fdyn);
+    PetscFree(g_xd);   PetscFree(g_Fcnt);
+    return 0;
+  }
 
 
   // Use current directory if out_dir is NULL or empty
@@ -602,74 +661,52 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   */
   
   
-  //compute displacement
-  PetscReal  *dd,*FF; 
-  PetscInt   nv;
-  VecGetArray(fem->disp, &dd);
-  for (nv=0; nv<ibm->n_v; nv++) {
-    dd[nv*dof] = ibm->x_bp[nv]-ibm->x_bp0[nv];
-    dd[nv*dof+1] = ibm->y_bp[nv]-ibm->y_bp0[nv];
-    dd[nv*dof+2] = ibm->z_bp[nv]-ibm->z_bp0[nv];
-  }
+  /* displacement: compute directly from ibm arrays (Allreduced on all ranks). */
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS disp float\n");
-  for (i=0; i<ibm->n_v; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", dd[i*dof], dd[i*dof+1], dd[i*dof+2]);
+  for (i=0; i<ibm->n_v; i++) {
+    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+                 ibm->x_bp[i]-ibm->x_bp0[i],
+                 ibm->y_bp[i]-ibm->y_bp0[i],
+                 ibm->z_bp[i]-ibm->z_bp0[i]);
   }
-  VecRestoreArray(fem->disp, &dd);
-  
-  VecGetArray(fem->Fint, &FF);
-  PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fint float\n");
-  for (i=0; i<ibm->n_v; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-    // if (i == 100){
-    //   PetscPrintf(PETSC_COMM_WORLD, "Fint at node 100 what: %f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-    // }
-  }
-  VecRestoreArray(fem->Fint, &FF);
-  
-  VecGetArray(fem->Fext, &FF);
-  PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fext float\n");
-  for (i=0; i<ibm->n_v; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-  }
-  VecRestoreArray(fem->Fext, &FF);
 
-  VecGetArray(fem->Fdyn, &FF);
-  PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fdyn float\n");
-  for (i=0; i<ibm->n_v; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-  }
-  VecRestoreArray(fem->Fdyn, &FF);
+  /* Force/velocity Vecs: serial path uses direct array; parallel path uses
+   * pre-gathered ibm-node-ordered arrays from the Allreduce above.          */
+  PetscReal *FF;
+  PetscBool is_parallel = gctx->initialized;
 
-  // VecGetArray(fem->Res, &FF);
-  // PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Res float\n");
-  // for (i=0; i<ibm->n_v; i++){
-  //   PetscFPrintf(PETSC_COMM_WORLD, f, "%.10f %.10f %.10f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-  // }
-  // VecRestoreArray(fem->Res, &FF);
+  /* Write one VECTORS block.  buf != NULL → use gathered array (parallel);
+   * buf == NULL → fall back to direct serial array read from vec.           */
+#define OUTPUT_VEC(label, vec, buf) do { \
+    PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS " label " float\n"); \
+    PetscReal *_obuf = (PetscReal *)(buf); \
+    if (is_parallel && _obuf != NULL) { \
+      for (i = 0; i < ibm->n_v; i++) \
+        PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", \
+                     _obuf[i*dof], _obuf[i*dof+1], _obuf[i*dof+2]); \
+    } else { \
+      VecGetArray((vec), &FF); \
+      for (i = 0; i < ibm->n_v; i++) \
+        PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", \
+                     FF[i*dof], FF[i*dof+1], FF[i*dof+2]); \
+      VecRestoreArray((vec), &FF); \
+    } \
+  } while (0)
 
-  VecGetArray(fem->Fcnt, &FF);
-  PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fcnt float\n");
-  for (i=0; i<ibm->n_v; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-  }
-  VecRestoreArray(fem->Fcnt, &FF);
+  OUTPUT_VEC("Fint", fem->Fint, g_Fint);
+  OUTPUT_VEC("Fext", fem->Fext, NULL);   /* Fext is set once on all ranks; no gather needed */
+  OUTPUT_VEC("Fdyn", fem->Fdyn, g_Fdyn);
+  OUTPUT_VEC("Fcnt", fem->Fcnt, g_Fcnt);
+  OUTPUT_VEC("u",    fem->xd,   g_xd);
 
-  VecGetArray(fem->xd, &FF);
-  PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS u float\n");
-  for (i=0; i<ibm->n_v; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+  if (manufactured && muscle_activation) {
+    OUTPUT_VEC("xdd", fem->xdd, NULL);
   }
-  VecRestoreArray(fem->xd, &FF);
 
-  if (manufactured && muscle_activation){
-    VecGetArray(fem->xdd, &FF);
-    PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS xdd float\n");
-    for (i=0; i<ibm->n_v; i++){
-      PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
-    }
-    VecRestoreArray(fem->xdd, &FF);
-  }
+#undef OUTPUT_VEC
+
+  PetscFree(g_Fint); PetscFree(g_Fdyn);
+  PetscFree(g_xd);   PetscFree(g_Fcnt);
 
   PetscFPrintf(PETSC_COMM_WORLD, f, "CELL_DATA %d\n",ibm->n_elmt);
   
@@ -870,7 +907,11 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
-PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {     
+PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
+
+  PetscMPIInt rank;
+  MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
+  if (rank != 0) return 0;
 
   PetscInt   n_cells=3, i;
   IBMNodes   *ibm=fem->ibm;

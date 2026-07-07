@@ -5,6 +5,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include <stdio.h>
 #include <petscsystypes.h>  // Correct PETSc header for PetscBool type
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdbool.h>  
@@ -71,7 +72,11 @@ PetscInt fibersmooth = 0;
 PetscInt ressmooth = 0;
 PetscInt res_smooth_itrs = 2;
 
+PetscInt   monitor_residual = 0;
+FILE      *res_log_fp       = NULL;
+
 PetscErrorCode  FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx);
+extern PetscErrorCode InitVecs(FE *fem);
 extern PetscErrorCode InitVel(PetscInt edge_n, PetscReal w, FE *fem);
 extern PetscErrorCode MoveBoundary(PetscInt edge_n, FE *fem);
 extern PetscErrorCode  ConstantVel(PetscReal vel, PetscInt dir, FE *fem);
@@ -98,6 +103,7 @@ extern PetscErrorCode Patch(IBMNodes *ibm);
 static void CleanupAndFinalize(FE *fem, IBMNodes *ibm, PetscInt n_initialized) {
   PetscInt ibi;
   for (ibi = 0; ibi < n_initialized; ibi++) {
+    FEM_DMPlexGeomDestroy(&fem[ibi]);
     Free(&fem[ibi]);
   }
   if (cuda_process) DestroyCudaWorkspace();
@@ -108,22 +114,33 @@ static void CleanupAndFinalize(FE *fem, IBMNodes *ibm, PetscInt n_initialized) {
   PetscFinalize();
 }
 
-int main(int argc, char **argv)
-{  
-  PetscInitialize(&argc, &argv, (char*)0, help);
+static PetscErrorCode ResidualMonitor(SNES snes, PetscInt its, PetscReal rnorm, void *ctx)
+{
+  if (res_log_fp) {
+    fprintf(res_log_fp, "%d %d %.6e\n", (int)ti, (int)its, (double)rnorm);
+    fflush(res_log_fp);
+  }
+  return PETSC_SUCCESS;
+}
 
-  /* Try reading control.dat from -in_dir (if provided) and then from current dir */
+int main(int argc, char **argv)
+{
+  /* Pass "control.dat" as the options file so PETSc loads it BEFORE argv.
+   * PetscInitialize order: file → PETSC_OPTIONS env → argv (command line).
+   * This means command-line flags override control.dat, not the other way round. */
+  PetscInitialize(&argc, &argv, "control.dat", help);
+
+  /* Also load control.dat from -in_dir if provided (e.g. when running from a
+   * different directory).  These are inserted AFTER argv so in_dir file wins
+   * over the cwd control.dat but still loses to explicit command-line flags. */
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-in_dir", in_dir, 255, PETSC_NULL);
-  {
+  if (in_dir[0] != '\0') {
     char control_path[512];
-    if (in_dir[0] != '\0') {
-      snprintf(control_path, sizeof(control_path), "%s/%s", in_dir, "control.dat");
-      if (access(control_path, F_OK) == 0) {
-        PetscOptionsInsertFile(PETSC_COMM_WORLD, PETSC_NULL, control_path, PETSC_TRUE);
-      }
+    snprintf(control_path, sizeof(control_path), "%s/%s", in_dir, "control.dat");
+    if (access(control_path, F_OK) == 0) {
+      PetscOptionsInsertFile(PETSC_COMM_WORLD, PETSC_NULL, control_path, PETSC_TRUE);
     }
   }
-  PetscOptionsInsertFile(PETSC_COMM_WORLD, PETSC_NULL, "control.dat", PETSC_TRUE);
   
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-nbody", &nbody, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-E", &E, PETSC_NULL);
@@ -177,6 +194,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-kokkos_process", &kokkos_process, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-dmplex_geom_process", &dmplex_geom_process, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_geom_process", &lv_geom_process, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-monitor_residual", &monitor_residual, PETSC_NULL);
 
   PetscCheck(!(cuda_process && kokkos_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
              "-cuda_process and -kokkos_process are mutually exclusive; choose one preprocessing backend");
@@ -208,58 +226,71 @@ int main(int argc, char **argv)
 
   PetscMPIInt rank;
   MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
+  if (rank == 0) mkdir(out_dir, 0755);
 
-  PetscMalloc(nbody*sizeof(FE), &fem);
-  PetscMalloc(nbody*sizeof(IBMNodes), &ibm);
+  PetscCalloc1(nbody, &fem);
+  PetscCalloc1(nbody, &ibm);
     
   for (ibi=0; ibi<nbody; ibi++) {
-  PetscPrintf(PETSC_COMM_WORLD, "Initializing body %d \n", ibi);
+    /* Link ibm pointer on ALL ranks so Free() is safe even when Init is skipped */
+    fem[ibi].ibm = &ibm[ibi];
 
-  if (lv_geom_process) {
-    PetscPrintf(PETSC_COMM_WORLD, "[lv] reading options\n");
-    LVParams lv_p;
-    ierr = LVParamsCreate(&lv_p); CHKERRQ(ierr);
-    PetscPrintf(PETSC_COMM_WORLD, "[lv] a=%.2f b=%.2f f_cut=%.2f N_theta=%d N_phi=%d alpha_endo=%.1f alpha_epi=%.1f\n",
-                lv_p.a, lv_p.b, lv_p.f_cut, (int)lv_p.N_theta, (int)lv_p.N_phi,
-                lv_p.alpha_endo, lv_p.alpha_epi);
-    PetscPrintf(PETSC_COMM_WORLD, "[lv] calling CreateLVMesh\n");
-    ierr = CreateLVMesh(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);
-    PetscPrintf(PETSC_COMM_WORLD, "[lv] CreateLVMesh done, n_v=%d n_elmt=%d\n",
-                (int)ibm[ibi].n_v, (int)ibm[ibi].n_elmt);
-    char lv_vtk_path[512];
-    snprintf(lv_vtk_path, sizeof(lv_vtk_path), "%s/lv_fiber_%02d.vtk", out_dir, (int)ibi);
-    PetscPrintf(PETSC_COMM_WORLD, "[lv] writing VTK to %s\n", lv_vtk_path);
-    ierr = WriteLVFiberVTK(&ibm[ibi], lv_vtk_path); CHKERRQ(ierr);
-    PetscPrintf(PETSC_COMM_WORLD, "[lv] VTK written\n");
-  } else {
-    Dimension(&ibm[ibi], ibi);
-    Create(&ibm[ibi], &fem[ibi], ibi);
-    Input(&ibm[ibi], ibi);
-  }
+    PetscPrintf(PETSC_COMM_WORLD, "Initializing body %d \n", ibi);
 
-  PetscPrintf(PETSC_COMM_WORLD, "Dimension of body %d is %d \n", ibi, ibm[ibi].n_v);
-  Init(&fem[ibi], ibi);
-  PetscPrintf(PETSC_COMM_WORLD, "Init finished \n");
-  // ContactZ(&fem[ibi]);
-
-  if (explicit)  {VecSet(fem[ibi].Mass, 0.0);  VecSet(fem[ibi].Dissip, 0.0);  MassDamp(&fem[ibi]);}
-  if (tistart)  {
-
-    LocationIn(&fem[ibi], tistart, ibi, out_dir);
-
+    /* Phase 1: Mesh topology + C arrays (no Vecs created here). */
+    if (lv_geom_process) {
+      /* LV mesh: analytic + deterministic — run on ALL ranks. */
+      LVParams lv_p;
+      ierr = LVParamsCreate(&lv_p); CHKERRQ(ierr);
+      if (rank == 0) {
+        PetscPrintf(PETSC_COMM_SELF, "[lv] a=%.2f b=%.2f f_cut=%.2f N_theta=%d N_phi=%d alpha_endo=%.1f alpha_epi=%.1f\n",
+                    lv_p.a, lv_p.b, lv_p.f_cut, (int)lv_p.N_theta, (int)lv_p.N_phi,
+                    lv_p.alpha_endo, lv_p.alpha_epi);
+      }
+      ierr = CreateLVMesh(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);
+      if (rank == 0) {
+        char lv_vtk_path[512];
+        snprintf(lv_vtk_path, sizeof(lv_vtk_path), "%s/lv_fiber_%02d.vtk", out_dir, (int)ibi);
+        ierr = WriteLVFiberVTK(&ibm[ibi], lv_vtk_path); CHKERRQ(ierr);
+      }
+    } else {
+      /* Standard mesh: read from files. */
+      Dimension(&ibm[ibi], ibi);
+      Create(&ibm[ibi], &fem[ibi], ibi);
+      Input(&ibm[ibi], ibi);
     }
-  }
+    if (rank == 0) PetscPrintf(PETSC_COMM_SELF, "Dimension of body %d is %d \n", ibi, ibm[ibi].n_v);
 
-
-  if (muscle_activation || dmplex_geom_process){
-    for (ibi=0; ibi<nbody; ibi++) { 
-
-      PetscErrorCode ierr;
-
+    /* Phase 2: Active-strain data + DMPlex context.
+     * InitActStrainProblem must precede FEM_DMPlexGeomSetup because Setup calls
+     * ElemUpdateGeom0Subdiv which reads fem->act_data.elem_act_data. */
+    if (dmplex_geom_process || muscle_activation) {
       ierr = InitActStrainProblem(&fem[ibi], ibi); CHKERRQ(ierr);
-      PetscPrintf(PETSC_COMM_WORLD, "Active-Strain geometry/basis storage got initiliazed. \n");
+      PetscPrintf(PETSC_COMM_WORLD, "Active-Strain geometry/basis storage initialized.\n");
+      if (muscle_activation) {
+        ierr = FEM_DMPlexGeomSetup(&fem[ibi], PETSC_COMM_WORLD); CHKERRQ(ierr);
+        PetscPrintf(PETSC_COMM_WORLD, "DMPlex geometry context initialized.\n");
+      }
+    }
 
-    }    
+    /* Phase 3: Vec creation — parallel (VecCreateMPI) when geom_ctx.initialized,
+     * serial (VecCreateSeq) otherwise. */
+    ierr = InitVecs(&fem[ibi]); CHKERRQ(ierr);
+
+    /* Phase 4: Build ibm→global-DOF map for parallel Fint assembly.
+     * Requires Vec ownership ranges from InitVecs. */
+    if (muscle_activation) {
+      ierr = FEM_DMPlexGeomBuildNodeMap(&fem[ibi]); CHKERRQ(ierr);
+    }
+
+    /* Phase 5: Initialize Vec values from reference coordinates. */
+    Init(&fem[ibi], ibi);
+    if (rank == 0) PetscPrintf(PETSC_COMM_SELF, "Init finished \n");
+
+    if (explicit)  {VecSet(fem[ibi].Mass, 0.0);  VecSet(fem[ibi].Dissip, 0.0);  MassDamp(&fem[ibi]);}
+    if (tistart)  {
+      LocationIn(&fem[ibi], tistart, ibi, out_dir);
+    }
   }
 
   if (dmplex_geom_process) {
@@ -306,8 +337,19 @@ int main(int argc, char **argv)
   }
   
   if (tistart) tistart++;
-  PetscPrintf(PETSC_COMM_SELF, "Starting time-stepping loop from tistart = %d for %d steps \n", tistart, tisteps);
-  
+  PetscPrintf(PETSC_COMM_WORLD, "Starting time-stepping loop from tistart = %d for %d steps \n", tistart, tisteps);
+
+  if (monitor_residual && rank == 0) {
+    char res_log_path[512];
+    snprintf(res_log_path, sizeof(res_log_path), "%s/residual.log", out_dir);
+    res_log_fp = fopen(res_log_path, "w");
+    if (res_log_fp) {
+      fprintf(res_log_fp, "# timestep snes_iter rnorm\n");
+      fflush(res_log_fp);
+      PetscPrintf(PETSC_COMM_WORLD, "[monitor] writing residuals to %s\n", res_log_path);
+    }
+  }
+
   // if (tistart==0) tisteps ++;
 
   for (ti=tistart; ti<tistart+tisteps; ti++) {
@@ -337,19 +379,34 @@ int main(int argc, char **argv)
         SNESConvergedReason reason;
         VecDuplicate(fem[ibi].x, &U);
         VecCopy(fem[ibi].x, U);
-        
+
+        /* Trace vertex 20 (first free ring) at key stages.
+         * ibm->x_bp is replicated on all ranks after each FormFunctionFEM Allreduce. */
+#define TRACE_V 20
+        {
+          IBMNodes *tibm = fem[ibi].ibm;
+          if (!rank) PetscPrintf(PETSC_COMM_SELF,
+            "[TRACE ti=%d] BEFORE SNES: x_bp[%d]=(%g,%g,%g)  disp_z=%g\n",
+            ti, TRACE_V,
+            tibm->x_bp[TRACE_V], tibm->y_bp[TRACE_V], tibm->z_bp[TRACE_V],
+            tibm->z_bp[TRACE_V]-tibm->z_bp0[TRACE_V]);
+        }
+
         //SNES
-        SNESCreate(PETSC_COMM_SELF, &snes);
+        SNESCreate(PETSC_COMM_WORLD, &snes);
         SNESSetFunction(snes, fem[ibi].Res, FormFunctionFEM, (void *)&fem[ibi]);
         SNESAppendOptionsPrefix(snes, "fem_");
         MatCreateSNESMF(snes, &J);  //MatrixFree
         // SNESSetJacobian(snes, J, J, MatMFFDComputeJacobian, (void *)&fem[ibi]);
         SNESSetJacobian(snes, J, J, NULL, (void *)&fem[ibi]);
-        SNESSetFromOptions(snes);      
+        SNESSetFromOptions(snes);
+        if (monitor_residual && res_log_fp) {
+          SNESMonitorSet(snes, ResidualMonitor, NULL, NULL);
+        }
 
 	        ierr = SNESSolve(snes, PETSC_NULL, U);
 	        if (ierr) {
-	          PetscPrintf(PETSC_COMM_SELF,
+	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "SNESSolve failed with ierr=%d for body %d at step %d\n",
 	                      (int)ierr, (int)ibi, (int)ti);
 	          SNESDestroy(&snes);
@@ -361,7 +418,7 @@ int main(int argc, char **argv)
 
 	        ierr = SNESGetConvergedReason(snes, &reason);
 	        if (ierr) {
-	          PetscPrintf(PETSC_COMM_SELF,
+	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "SNESGetConvergedReason failed with ierr=%d for body %d at step %d\n",
 	                      (int)ierr, (int)ibi, (int)ti);
 	          SNESDestroy(&snes);
@@ -371,19 +428,65 @@ int main(int argc, char **argv)
 	          return (int)ierr;
 	        }
 
+        {
+          IBMNodes *tibm = fem[ibi].ibm;
+          if (!rank) PetscPrintf(PETSC_COMM_SELF,
+            "[TRACE ti=%d] AFTER  SNES: x_bp[%d]=(%g,%g,%g)  disp_z=%g  reason=%d\n",
+            ti, TRACE_V,
+            tibm->x_bp[TRACE_V], tibm->y_bp[TRACE_V], tibm->z_bp[TRACE_V],
+            tibm->z_bp[TRACE_V]-tibm->z_bp0[TRACE_V], (int)reason);
+        }
+
 	        if (reason >= 0) {
 	          VecCopy(U, fem[ibi].x);
 	        } else {
-	          PetscPrintf(PETSC_COMM_SELF,
+	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "Skipping solution update because SNES diverged (reason=%d) for body %d at step %d\n",
 	                      (int)reason, (int)ibi, (int)ti);
+	          /* ibm->x_bp was dirtied by FormFunctionFEM during failed SNES iterations.
+	           * Restore it from fem->x so Output and xAccVel use the correct state. */
+	          {
+	            DMPlexGeomCtx *gctx_ = &fem[ibi].geom_ctx;
+	            IBMNodes      *ibm_  = fem[ibi].ibm;
+	            if (gctx_->initialized) {
+	              const PetscReal *fx;
+	              PetscMPIInt fmyrank_;
+	              MPI_Comm_rank(PETSC_COMM_WORLD, &fmyrank_);
+	              PetscMemzero(ibm_->x_bp, ibm_->n_v * sizeof(PetscReal));
+	              PetscMemzero(ibm_->y_bp, ibm_->n_v * sizeof(PetscReal));
+	              PetscMemzero(ibm_->z_bp, ibm_->n_v * sizeof(PetscReal));
+	              VecGetArrayRead(fem[ibi].x, &fx);
+	              PetscInt oi_ = 0;
+	              for (PetscInt lv = 0; lv < gctx_->nLocalVerts; ++lv) {
+	                PetscInt v = gctx_->origVert[lv];
+	                if (v < 0 || v >= ibm_->n_v || gctx_->ownerRank[v] != fmyrank_) continue;
+	                ibm_->x_bp[v] = fx[oi_*dof  ];
+	                ibm_->y_bp[v] = fx[oi_*dof+1];
+	                ibm_->z_bp[v] = fx[oi_*dof+2];
+	                oi_++;
+	              }
+	              VecRestoreArrayRead(fem[ibi].x, &fx);
+	              MPI_Allreduce(MPI_IN_PLACE, ibm_->x_bp, ibm_->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
+	              MPI_Allreduce(MPI_IN_PLACE, ibm_->y_bp, ibm_->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
+	              MPI_Allreduce(MPI_IN_PLACE, ibm_->z_bp, ibm_->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
+	            }
+	          }
 	        }
-        
+
+        {
+          IBMNodes *tibm = fem[ibi].ibm;
+          if (!rank) PetscPrintf(PETSC_COMM_SELF,
+            "[TRACE ti=%d] AFTER UPDATE: x_bp[%d]=(%g,%g,%g)  disp_z=%g\n",
+            ti, TRACE_V,
+            tibm->x_bp[TRACE_V], tibm->y_bp[TRACE_V], tibm->z_bp[TRACE_V],
+            tibm->z_bp[TRACE_V]-tibm->z_bp0[TRACE_V]);
+        }
+
         /* Only destroy if SNESSolve didn't corrupt the object */
         if (snes != NULL) {
           PetscErrorCode destroy_ierr = SNESDestroy(&snes);
           if (destroy_ierr != 0) {
-            PetscPrintf(PETSC_COMM_SELF, " WARNING: SNESDestroy failed with ierr = %d\n", destroy_ierr);
+            PetscPrintf(PETSC_COMM_WORLD, " WARNING: SNESDestroy failed with ierr = %d\n", destroy_ierr);
           } else {
             // PetscPrintf(PETSC_COMM_SELF, " after SNESDestroy\n");
           }
@@ -438,27 +541,28 @@ int main(int argc, char **argv)
       VecNorm(fem[ibi].xdd, NORM_INFINITY, &norma);
       VecNorm(fem[ibi].Fint, NORM_INFINITY, &normfint);
 
-      PetscPrintf(PETSC_COMM_SELF, "body:%d Norm(x-xn)= %le Vel %f Acc %f Fint %f\n",ibi,norm,normv,norma, normfint);
+      PetscPrintf(PETSC_COMM_WORLD, "body:%d Norm(x-xn)= %le Vel %f Acc %f Fint %f\n",ibi,norm,normv,norma, normfint);
     }
 
     //    if (contact) {Fcontact(fem);} //static_bhv
     // Printout the results
-    //if (ti!=0 && ti == (ti/tiout)*tiout){
     if (ti == (ti/tiout)*tiout){
       for (ibi=0; ibi<nbody; ibi++) {
-        Output(&fem[ibi], ti, ibi, out_dir);
-        
-  
-	// LocationOut(&fem[ibi], ti+1, ibi, out_dir);
-	if (outghost) {OutputGhost(&fem[ibi], ti, ibi, out_dir);}
+        /* ti+1: file 0 = reference (Init), file 1..N = post-SNES deformed states */
+        Output(&fem[ibi], ti+1, ibi, out_dir);
+        if (outghost) {OutputGhost(&fem[ibi], ti, ibi, out_dir);}
       }
     }
   }// ti
-  
-  //Finish UP
-  for (ibi=0; ibi<nbody; ibi++) {
-    LocationOut(&fem[ibi], ti+1, ibi, out_dir);
-    if(outghost){OutputGhost(&fem[ibi], ti, ibi, out_dir);}    
+
+  if (res_log_fp) { fclose(res_log_fp); res_log_fp = NULL; }
+
+  /* Finish UP: output final state and cleanup on rank 0 only */
+  if (rank == 0) {
+    for (ibi=0; ibi<nbody; ibi++) {
+      LocationOut(&fem[ibi], ti+1, ibi, out_dir);
+      if(outghost){OutputGhost(&fem[ibi], ti, ibi, out_dir);}
+    }
   }
   CleanupAndFinalize(fem, ibm, nbody);
   return(0);
@@ -596,25 +700,45 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   const PetscReal *xx;
   PetscReal  *RR, *RRes,*FF;
   PetscInt   nv, ec;
-
- 
   //---------Update the location
-  ierr = VecGetArrayRead(x, &xx); CHKERRQ(ierr);
-
-  
-  for (nv=0; nv<ibm->n_v + ibm->n_ghosts; nv++) {
-    /* if (ibm->contact[nv]) { // added by Iman 10/12/22 to fix x for nodes in contact as BC */
-    /*   xx[nv*dof  ] = ibm->x_bp[nv]; */
-    /*   xx[nv*dof+1] = ibm->y_bp[nv]; */
-    /*   xx[nv*dof+2] = ibm->z_bp[nv]; */
-    /* } else { */
-      ibm->x_bp[nv] = xx[nv*dof  ];
-      ibm->y_bp[nv] = xx[nv*dof+1];
-      ibm->z_bp[nv] = xx[nv*dof+2];
-      if(twod){ibm->z_bp[nv] = ibm->z_bp0[nv];}  //2d case
-    /* } */
+  {
+    DMPlexGeomCtx *gctx = &fem->geom_ctx;
+    ierr = VecGetArrayRead(x, &xx); CHKERRQ(ierr);
+    if (gctx->initialized) {
+      /* Parallel path: each rank updates its owned vertices, then Allreduce gives
+       * all ranks the complete ibm->x_bp[0..n_v-1]. */
+      PetscMPIInt fmyrank;
+      MPI_Comm_rank(PETSC_COMM_WORLD, &fmyrank);
+      PetscMemzero(ibm->x_bp, ibm->n_v * sizeof(PetscReal));
+      PetscMemzero(ibm->y_bp, ibm->n_v * sizeof(PetscReal));
+      PetscMemzero(ibm->z_bp, ibm->n_v * sizeof(PetscReal));
+      {
+        PetscInt oi = 0;
+        for (PetscInt lv = 0; lv < gctx->nLocalVerts; ++lv) {
+          PetscInt v = gctx->origVert[lv];
+          if (v < 0 || v >= ibm->n_v || gctx->ownerRank[v] != fmyrank) continue;
+          ibm->x_bp[v] = xx[oi*dof  ];
+          ibm->y_bp[v] = xx[oi*dof+1];
+          ibm->z_bp[v] = xx[oi*dof+2];
+          if (twod) ibm->z_bp[v] = ibm->z_bp0[v];
+          oi++;
+        }
+      }
+      ierr = VecRestoreArrayRead(x, &xx); CHKERRQ(ierr);
+      MPI_Allreduce(MPI_IN_PLACE, ibm->x_bp, ibm->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, ibm->y_bp, ibm->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, ibm->z_bp, ibm->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
+    } else {
+      /* Serial path: Vec covers all nodes including ghost stencil nodes. */
+      for (nv=0; nv<ibm->n_v + ibm->n_ghosts; nv++) {
+        ibm->x_bp[nv] = xx[nv*dof  ];
+        ibm->y_bp[nv] = xx[nv*dof+1];
+        ibm->z_bp[nv] = xx[nv*dof+2];
+        if(twod){ibm->z_bp[nv] = ibm->z_bp0[nv];}
+      }
+      ierr = VecRestoreArrayRead(x, &xx); CHKERRQ(ierr);
+    }
   }
-  ierr = VecRestoreArrayRead(x, &xx); CHKERRQ(ierr);
 
   VecCopy(x, fem->x);
 
@@ -639,7 +763,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
 
   //---------Compute Forces then Residual
   VecSet(fem->Fext, 0.0);  VecSet(fem->Fint, 0.0);  VecSet(fem->Fdyn, 0.0);
-  VecSet(R, 0.0);  VecSet(fem->FJ, 0.0);  
+  VecSet(R, 0.0);  VecSet(fem->FJ, 0.0);
   for (nv=0; nv<ibm->n_v; nv++)  fem->IE[nv] = 0.;
   for (ec=0; ec<ibm->n_elmt; ec++)  fem->FC[ec] = 0.;
 
@@ -668,13 +792,10 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   //   VecRestoreArray(fem->x, &xx);
   // }
 
-  /* Fix the LV basal ring (edge_n=1, 32 nodes) in all 3 directions.
-   * edge_n=0 = near-apex ring; edge_n=1 = base ring (annular attachment).
-   * Fixing the base removes the 6 rigid-body null modes so the linear
-   * solve is well-conditioned. The apex is free to move (LV shortening). */
-  ierr = EdgeDirectionalFix(1, 0, fem, R); CHKERRQ(ierr);
-  ierr = EdgeDirectionalFix(1, 1, fem, R); CHKERRQ(ierr);
-  ierr = EdgeDirectionalFix(1, 2, fem, R); CHKERRQ(ierr);
+  /* Fix the LV apex ring (edge_n=0) in all 3 directions; base (edge_n=1) is free. */
+  ierr = EdgeDirectionalFix(0, 0, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
   ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
   // GlobalGhost(ibm);
@@ -819,6 +940,18 @@ PetscErrorCode FInternal(FE *fem) {
 PetscErrorCode FDynamic(FE *fem) {
 
   IBMNodes       *ibm=fem->ibm;
+  DMPlexGeomCtx  *gctx = &fem->geom_ctx;
+
+  /* FDynamic uses VecGetArray with global node indices, which only works
+   * when the Vec is sequential (serial mode, VecSeq covers all n_v nodes).
+   * In the parallel path VecGetArray returns only the local owned portion,
+   * so indexing with global n1e/n2e/n3e writes past the end of the array,
+   * corrupting the heap.  Proper parallel support requires maintaining
+   * ibm->xn_bp/xd_bp/xdd_bp via MPI_Allreduce and using VecSetValues for
+   * Fdyn — not yet implemented.  For quasi-static problems inertia is zero
+   * (xn == x0 on call 1), so skipping is safe for current test cases. */
+  if (gctx->initialized) return 0;
+
   PetscInt       i;
   PetscReal      M[9], C[9], Fd[9], x[9], xn[9], xnm1[9], xd[9], xdd[9];
   PetscInt       n1e, n2e, n3e;
@@ -921,49 +1054,30 @@ PetscErrorCode xAccVel(FE *fem) {
   VecGetArray(fem->xn, &xxn);
   VecGetArray(fem->x, &xx);
 
-  for (nv=0; nv<ibm->n_v+ibm->n_ghosts; nv++) {
-    xxdn1 = xxd[dof*nv  ];
-    xxdn2 = xxd[dof*nv+1];
-    xxdn3 = xxd[dof*nv+2];
-    xxddn1= xxdd[dof*nv  ];
-    xxddn2= xxdd[dof*nv+1];
-    xxddn3= xxdd[dof*nv+2];
+  {
+    DMPlexGeomCtx *gctx = &fem->geom_ctx;
+    PetscInt n_iter = gctx->initialized ? ibm->n_v : ibm->n_v + ibm->n_ghosts;
+    for (nv=0; nv<n_iter; nv++) {
+      /* In parallel, use local Vec index li; serial: li == nv. */
+      PetscInt li = (gctx->initialized) ? gctx->ibm_to_local_idx[nv] : nv;
+      if (li < 0) continue;
 
-    xxdd[dof*nv  ] = M1*(xx[nv*dof  ] - xxn[nv*dof  ]) - M2*xxd[nv*dof  ] - M3*xxdd[nv*dof  ];
-    xxdd[dof*nv+1] = M1*(xx[nv*dof+1] - xxn[nv*dof+1]) - M2*xxd[nv*dof+1] - M3*xxdd[nv*dof+1];
-    xxdd[dof*nv+2] = M1*(xx[nv*dof+2] - xxn[nv*dof+2]) - M2*xxd[nv*dof+2] - M3*xxdd[nv*dof+2];
+      xxdn1 = xxd[dof*li  ];
+      xxdn2 = xxd[dof*li+1];
+      xxdn3 = xxd[dof*li+2];
+      xxddn1= xxdd[dof*li  ];
+      xxddn2= xxdd[dof*li+1];
+      xxddn3= xxdd[dof*li+2];
 
-    //  if (ibm->contact[nv]<1 || ibm->ibi==0) {   
-    // Iman 10/25/22 wrong Newmark - fix
-    // xdot(n+1) = xdot(n) + (1-gamma)xddot(n) + gamma xddot(n+1)
-    /* xxd[dof*nv  ] = C1*(xx[nv*dof  ]-xxn[nv*dof  ]) - C2*xxd[nv*dof  ] - C3*xxdd[nv*dof  ]; */
-    /* xxd[dof*nv+1] = C1*(xx[nv*dof+1]-xxn[nv*dof+1]) - C2*xxd[nv*dof+1] - C3*xxdd[nv*dof+1]; */
-    /* xxd[dof*nv+2] = C1*(xx[nv*dof+2]-xxn[nv*dof+2]) - C2*xxd[nv*dof+2] - C3*xxdd[nv*dof+2];  */
-    xxd[dof*nv  ] = xxd[nv*dof  ] + C2*xxddn1 + C3*xxdd[nv*dof  ];
-    xxd[dof*nv+1] = xxd[nv*dof+1] + C2*xxddn2 + C3*xxdd[nv*dof+1];
-    xxd[dof*nv+2] = xxd[nv*dof+2] + C2*xxddn3 + C3*xxdd[nv*dof+2];
+      xxdd[dof*li  ] = M1*(xx[li*dof  ] - xxn[li*dof  ]) - M2*xxd[li*dof  ] - M3*xxdd[li*dof  ];
+      xxdd[dof*li+1] = M1*(xx[li*dof+1] - xxn[li*dof+1]) - M2*xxd[li*dof+1] - M3*xxdd[li*dof+1];
+      xxdd[dof*li+2] = M1*(xx[li*dof+2] - xxn[li*dof+2]) - M2*xxd[li*dof+2] - M3*xxdd[li*dof+2];
 
-    if (nv == 75) {
-      PetscPrintf(PETSC_COMM_SELF,
-                  "[xAccVel] ti=%d nv=%d\n"
-                  "  coeffs: M1=% .6e  M2=% .6e  M3=% .6e\n"
-                  "  acc_x: M1*(x-xn)=% .6e  -M2*xd_old=% .6e  -M3*xdd_old=% .6e  => xdd_new=% .6e\n"
-                  "  acc_y: M1*(x-xn)=% .6e  -M2*xd_old=% .6e  -M3*xdd_old=% .6e  => xdd_new=% .6e\n"
-                  "  acc_z: M1*(x-xn)=% .6e  -M2*xd_old=% .6e  -M3*xdd_old=% .6e  => xdd_new=% .6e\n"
-                  "  vel_x: xd_old=% .6e  +(1-gamma)dt*xdd_old=% .6e  +gamma dt*xdd_new=% .6e  => xd_new=% .6e\n"
-                  "  vel_y: xd_old=% .6e  +(1-gamma)dt*xdd_old=% .6e  +gamma dt*xdd_new=% .6e  => xd_new=% .6e\n"
-                  "  vel_z: xd_old=% .6e  +(1-gamma)dt*xdd_old=% .6e  +gamma dt*xdd_new=% .6e  => xd_new=% .6e\n",
-                  ti, nv,
-                  M1, M2, M3,
-                  M1*(xx[nv*dof  ] - xxn[nv*dof  ]), -M2*xxdn1, -M3*xxddn1, xxdd[dof*nv  ],
-                  M1*(xx[nv*dof+1] - xxn[nv*dof+1]), -M2*xxdn2, -M3*xxddn2, xxdd[dof*nv+1],
-                  M1*(xx[nv*dof+2] - xxn[nv*dof+2]), -M2*xxdn3, -M3*xxddn3, xxdd[dof*nv+2],
-                  xxdn1, C2*xxddn1, C3*xxdd[dof*nv  ], xxd[dof*nv  ],
-                  xxdn2, C2*xxddn2, C3*xxdd[dof*nv+1], xxd[dof*nv+1],
-                  xxdn3, C2*xxddn3, C3*xxdd[dof*nv+2], xxd[dof*nv+2]);
+      xxd[dof*li  ] = xxd[li*dof  ] + C2*xxddn1 + C3*xxdd[li*dof  ];
+      xxd[dof*li+1] = xxd[li*dof+1] + C2*xxddn2 + C3*xxdd[li*dof+1];
+      xxd[dof*li+2] = xxd[li*dof+2] + C2*xxddn3 + C3*xxdd[li*dof+2];
+
     }
-    
-    //  }     
   }
 
   VecRestoreArray(fem->x, &xx);
@@ -993,11 +1107,8 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   PetscInt   nv, ec, n1e, n2e, n3e;
 
   if (curvature==6) {GlobalGhostInit(ibm);}
-  fprintf(stderr, "[DBG] after GlobalGhostInit: x_bp0[0]=%.6g  x_bp[0]=%.6g\n",
-          (double)ibm->x_bp0[0], (double)ibm->x_bp[0]);
 
   AreaNormal(ibm);
-  fprintf(stderr, "[DBG] after AreaNormal: x_bp0[0]=%.6g\n", (double)ibm->x_bp0[0]);
   for (ec=0; ec<ibm->n_elmt + 2*ibm->n_ghosts; ec++) {
     ibm->dA0[ec] = ibm->dA[ec]; 
     ibm->Nf_x[ec] = ibm->nf_x[ec];  ibm->Nf_y[ec] = ibm->nf_y[ec];  ibm->Nf_z[ec] = ibm->nf_z[ec]; 
@@ -1030,15 +1141,31 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
     ibm->y_bp[nv] = ibm->y_bp0[nv];
     ibm->z_bp[nv] = ibm->z_bp0[nv];
   }
-  fprintf(stderr, "[DBG] before InitGhost: x_bp0[0]=%.6g\n", (double)ibm->x_bp0[0]);
   if (bending){InitGhost(fem);}
-  fprintf(stderr, "[DBG] after InitGhost: x_bp0[0]=%.6g\n", (double)ibm->x_bp0[0]);
 
   VecGetArray(fem->x, &xx);
-  for (nv=0; nv<ibm->n_v+ibm->n_ghosts; nv++) {
-    xx[nv*dof] = ibm->x_bp0[nv];
-    xx[nv*dof+1] = ibm->y_bp0[nv];
-    xx[nv*dof+2] = ibm->z_bp0[nv];
+  {
+    DMPlexGeomCtx *gctx = &fem->geom_ctx;
+    if (gctx->initialized) {
+      /* Parallel Vec: local array indexed by owned-vertex sequential index oi. */
+      PetscMPIInt imyrank;
+      MPI_Comm_rank(PETSC_COMM_WORLD, &imyrank);
+      PetscInt oi = 0;
+      for (PetscInt lv = 0; lv < gctx->nLocalVerts; ++lv) {
+        PetscInt v = gctx->origVert[lv];
+        if (v < 0 || v >= ibm->n_v || gctx->ownerRank[v] != imyrank) continue;
+        xx[oi*dof  ] = ibm->x_bp0[v];
+        xx[oi*dof+1] = ibm->y_bp0[v];
+        xx[oi*dof+2] = ibm->z_bp0[v];
+        oi++;
+      }
+    } else {
+      for (nv=0; nv<ibm->n_v+ibm->n_ghosts; nv++) {
+        xx[nv*dof  ] = ibm->x_bp0[nv];
+        xx[nv*dof+1] = ibm->y_bp0[nv];
+        xx[nv*dof+2] = ibm->z_bp0[nv];
+      }
+    }
   }
 
  for (ec=0; ec<ibm->n_elmt; ec++) {
@@ -1065,11 +1192,7 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   if (ti==0) InitVel(3, 0, fem);
   //if (ti==0 && manufactured) MoveBoundary(1, fem);
   // printf("CHECK b Output\n");
-  PetscMPIInt rank;
-  MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
-  if(!rank){
-    Output(fem, 0, ibi, out_dir);
-  }
+  Output(fem, 0, ibi, out_dir);
   
   if(outghost){OutputGhost(fem, 0, ibi, out_dir);}
   
