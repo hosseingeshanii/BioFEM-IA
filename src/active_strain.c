@@ -25,6 +25,7 @@
 #include "variables.h" /* Project-local header */
 #include "manufactured_active_strain.h"
 #include "cuda_bridge.h"
+#include "dmplex_geom.h"
 #include <petscsys.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,7 +94,9 @@ PetscErrorCode GetUserActParams(FE *fem){
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cart_fib_act", &cart_fib_act, PETSC_NULL);
-    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);    
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-gamma_ramp_type",  &(fem->act_data.muscle_act_params.gamma_ramp_type), PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-gamma_T",          &(fem->act_data.muscle_act_params.gamma_T), PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_gamma0", &manufactured_gamma0, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_T", &manufactured_T, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-bulk_modulus", &(fem->act_data.K), PETSC_NULL);
@@ -1145,6 +1148,33 @@ static PetscErrorCode PrintElemCC(FE *fem, PetscInt ec)
     PetscFunctionReturn(0);
 }
 
+/**
+ * Return the active-strain gamma at the current time step.
+ *
+ * gamma_ramp_type = 0 (default): constant gamma.
+ * gamma_ramp_type = 1: full sin^2 cardiac cycle (systole + diastole).
+ *   gamma(t) = gamma_peak * sin^2(pi * t / T)
+ *   T = gamma_T if > 0, otherwise tisteps * dt (full simulation = one cycle).
+ *   0 at t=0, peak at t=T/2, 0 again at t=T.
+ * gamma_ramp_type = 2: half sin^2 ramp — systole only (monotonic 0 → peak).
+ *   gamma(t) = gamma_peak * sin^2(pi/2 * t / T)
+ *   T = gamma_T if > 0, otherwise tisteps * dt.
+ *   Reaches gamma_peak at t=T; no return path, no unloading bifurcation.
+ */
+static PetscReal GammaOfTime(const MuscleActParams *p)
+{
+    if (p->gamma_ramp_type == 0) return p->gamma;
+    PetscReal T = (p->gamma_T > 0.0) ? p->gamma_T : (PetscReal)tisteps * dt;
+    PetscReal t = (PetscReal)ti * dt;
+    if (p->gamma_ramp_type == 1) {
+        PetscReal s = PetscSinReal(PETSC_PI * t / T);
+        return p->gamma * s * s;
+    }
+    /* type 2: half-sin^2 — smooth monotonic ramp, systole only */
+    PetscReal s = PetscSinReal(PETSC_PI * 0.5 * t / T);
+    return p->gamma * s * s;
+}
+
 /* Deformation gradient */
 PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
 {
@@ -1158,7 +1188,17 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
     PetscReal S[3][3], ST[3][3];
     PetscReal tmp[3][3];
 
-    PetscReal gamma = fem->act_data.muscle_act_params.gamma;
+    PetscReal gamma = GammaOfTime(&fem->act_data.muscle_act_params);
+
+    /* Print gamma once per timestep to confirm ramp. */
+    if (ec == 0) {
+        static PetscInt last_ti = -1;
+        if (ti != last_ti) {
+            last_ti = ti;
+            PetscPrintf(PETSC_COMM_WORLD, "[gamma] ti=%d  t=%.4f  gamma=%.6f\n",
+                        (int)ti, (double)(ti * dt), (double)gamma);
+        }
+    }
 
     /*------------------------------------------------------------*/
     /* 1. Active deformation gradient in Cartesian basis          */
@@ -1173,23 +1213,6 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
         for (PetscInt i = 0; i < 3; i++)
             for (PetscInt j = 0; j < 3; j++)
                 Fa_cart[i][j] = (i == j ? 1.0 : 0.0) - gamma * nfiber[i] * nfiber[j];
-
-        /* Diagnostic: print nfiber and Fa_cart once per run for ec=0 and ec=100 */
-        {
-            static PetscInt printed[2];
-            PetscInt slot = (ec == 0) ? 0 : (ec == 100) ? 1 : -1;
-            if (slot >= 0 && !printed[slot]) {
-                printed[slot] = 1;
-                PetscReal f0 = nfiber[0], f1 = nfiber[1], f2 = nfiber[2];
-                PetscPrintf(PETSC_COMM_SELF,
-                    "\n[ElemActDefGrad] ec=%d  gamma=%.4f\n"
-                    "  nfiber = (%.6f, %.6f, %.6f)  |f|=%.6f\n",
-                    (int)ec, (double)gamma,
-                    (double)f0, (double)f1, (double)f2,
-                    (double)PetscSqrtReal(f0*f0 + f1*f1 + f2*f2));
-                PrintMat3x3("  Fa_cart (I - gamma*f.f)", Fa_cart);
-            }
-        }
     }
     else
     {
@@ -2095,102 +2118,43 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
 
 PetscErrorCode FInternalPreCalc(FE *fem) {
   PetscFunctionBeginUser;
-  
+
   PetscErrorCode ierr = 0;
 
-  UpdateElements(fem, ElemUpdateGeom0Subdiv);  
-  UpdateElements(fem, ElemUpdateGeomSubdiv);  
-  
+  /* Geometry via persistent DMPlex context (set up once in main after Init). */
+  PetscCall(FEM_DMPlexGeomUpdate(fem));
+  // UpdateElements(fem, ElemUpdateGeom0Subdiv);
+  // UpdateElements(fem, ElemUpdateGeomSubdiv);
+
   // ierr = DebugPrintGeomForElement(fem, 100); CHKERRQ(ierr);
 
-  // if (cuda_metric_tensor) {
-  //   ierr = RunCudaMetricTensorKernel(fem); CHKERRQ(ierr);
-  // } else {
-    UpdateElements(fem, ElemUpdateG);
-  // }
-  // PetscInt ec = 100;
-  // PetscInt qp = 0; /* choose qp you want to inspect */
-  // PrintElemG_(fem, ec, qp);
+  /* Run per-element physics pipeline in parallel over locally owned cells. */
+  {
+    DMPlexGeomCtx *ctx = &fem->geom_ctx;
+    for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
+      const PetscInt ec = ctx->layout.orig_cell[lc];
+      if (ec < 0 || ec >= fem->ibm->n_elmt) continue;
+      PetscCall(ElemUpdateG(fem, ec));
+      PetscCall(ElemActDefGrad(fem, ec));
+      PetscCall(ElemCGDefTens(fem, ec));
+      PetscCall(ElemC33Solve(fem, ec));
+    }
+  }
 
-  UpdateElements(fem, ElemActDefGrad);  
-  UpdateElements(fem, ElemCGDefTens);  
-  // PrintElemC(fem, 100);  /* uncomment to print element 100's C tensor */
-  
-  UpdateElements(fem, ElemC33Solve);
-
-  /* Calculate and print average S33 values */
-  // {
-  //   IBMNodes *ibm = fem->ibm;
-  //   PetscInt n_elmt = ibm->n_elmt;
-  //   PetscInt n_qp = fem->act_data.n_qp;
-  //   PetscReal sum_S33 = 0.0;
-  //   PetscInt total_qp = 0;
-    
-  //   for (PetscInt ec = 0; ec < n_elmt; ec++) {
-  //     ElemActData *ead = &fem->act_data.elem_act_data[ec];
-  //     for (PetscInt qp = 0; qp < n_qp; qp++) {
-  //       sum_S33 += ead->S[qp].Cont[2][2];
-  //       total_qp++;
-  //     }
-  //   }
-    
-  //   PetscReal avg_S33 = (total_qp > 0) ? sum_S33 / total_qp : 0.0;
-  //   PetscPrintf(PETSC_COMM_SELF, "Average S33: %e (over %d QPs in %d elements)\n", avg_S33, total_qp, n_elmt);
-  // }
+  /* Debug stats (all-element loop; disabled in parallel — only local cells have valid C).
   {
     IBMNodes *ibm = fem->ibm;
     PetscInt n_elmt = ibm->n_elmt;
     PetscInt n_qp = fem->act_data.n_qp;
     PetscReal sum_C33 = 0.0;
     PetscInt total_qp = 0;
-
     for (PetscInt ec = 0; ec < n_elmt; ec++) {
       ElemActData *ead = &fem->act_data.elem_act_data[ec];
-      for (PetscInt qp = 0; qp < n_qp; qp++) {
-        sum_C33 += ead->C[qp].Cov[2][2];
-        total_qp++;
-      }
+      for (PetscInt qp = 0; qp < n_qp; qp++) { sum_C33 += ead->C[qp].Cov[2][2]; total_qp++; }
     }
-
     PetscReal avg_C33 = (total_qp > 0) ? sum_C33 / total_qp : 0.0;
     PetscPrintf(PETSC_COMM_SELF, "Average C33: %e (over %d QPs in %d elements)\n", (double)avg_C33, total_qp, n_elmt);
-    /* DEBUG: print gm0 and C33 for ec=0 */
-    {
-      ElemActData *ead0 = &fem->act_data.elem_act_data[0];
-      PetscPrintf(PETSC_COMM_SELF, "ec=0: gm0.Cov = [[%e,%e,%e],[%e,%e,%e],[%e,%e,%e]]\n",
-        (double)ead0->gm0[0].Cov[0][0], (double)ead0->gm0[0].Cov[0][1], (double)ead0->gm0[0].Cov[0][2],
-        (double)ead0->gm0[0].Cov[1][0], (double)ead0->gm0[0].Cov[1][1], (double)ead0->gm0[0].Cov[1][2],
-        (double)ead0->gm0[0].Cov[2][0], (double)ead0->gm0[0].Cov[2][1], (double)ead0->gm0[0].Cov[2][2]);
-      PetscPrintf(PETSC_COMM_SELF, "ec=0: C.Cov = [[%e,%e,%e],[%e,%e,%e],[%e,%e,%e]]  C33=%e  n_fib=(%e,%e,%e)\n",
-        (double)ead0->C[0].Cov[0][0], (double)ead0->C[0].Cov[0][1], (double)ead0->C[0].Cov[0][2],
-        (double)ead0->C[0].Cov[1][0], (double)ead0->C[0].Cov[1][1], (double)ead0->C[0].Cov[1][2],
-        (double)ead0->C[0].Cov[2][0], (double)ead0->C[0].Cov[2][1], (double)ead0->C[0].Cov[2][2],
-        (double)ead0->C[0].Cov[2][2],
-        (double)ibm->n_fib[0].x, (double)ibm->n_fib[0].y, (double)ibm->n_fib[0].z);
-      PetscPrintf(PETSC_COMM_SELF, "ec=0: nv1=%d nv2=%d nv3=%d  ire=%d  val=%d\n",
-        (int)ibm->nv1[0], (int)ibm->nv2[0], (int)ibm->nv3[0], (int)ibm->ire[0], (int)ibm->val[0]);
-      PetscPrintf(PETSC_COMM_SELF, "ec=0: ref n1=(%e,%e,%e) n2=(%e,%e,%e) n3=(%e,%e,%e)\n",
-        (double)ibm->x_bp0[ibm->nv1[0]], (double)ibm->y_bp0[ibm->nv1[0]], (double)ibm->z_bp0[ibm->nv1[0]],
-        (double)ibm->x_bp0[ibm->nv2[0]], (double)ibm->y_bp0[ibm->nv2[0]], (double)ibm->z_bp0[ibm->nv2[0]],
-        (double)ibm->x_bp0[ibm->nv3[0]], (double)ibm->y_bp0[ibm->nv3[0]], (double)ibm->z_bp0[ibm->nv3[0]]);
-      PetscPrintf(PETSC_COMM_SELF, "ec=0: cur n1=(%e,%e,%e) n2=(%e,%e,%e) n3=(%e,%e,%e)\n",
-        (double)ibm->x_bp[ibm->nv1[0]], (double)ibm->y_bp[ibm->nv1[0]], (double)ibm->z_bp[ibm->nv1[0]],
-        (double)ibm->x_bp[ibm->nv2[0]], (double)ibm->y_bp[ibm->nv2[0]], (double)ibm->z_bp[ibm->nv2[0]],
-        (double)ibm->x_bp[ibm->nv3[0]], (double)ibm->y_bp[ibm->nv3[0]], (double)ibm->z_bp[ibm->nv3[0]]);
-    }
-    /* DEBUG: print elements with extreme C33 */
-    for (PetscInt ec2 = 0; ec2 < n_elmt && ec2 < 70; ec2++) {
-      ElemActData *ead2 = &fem->act_data.elem_act_data[ec2];
-      PetscReal c33 = ead2->C[0].Cov[2][2];
-      if (c33 > 1.5 || c33 < 0.3) {
-        PetscInt nob2 = 1;
-        PetscInt nen2 = (ibm->ire[ec2]==0) ? 12 : ibm->val[ec2]+6;
-        for (PetscInt ii = 0; ii < nen2 && ii < 16; ii++) if (ibm->patch[16*ec2+ii] == 1000000) { nob2 = 0; break; }
-        PetscPrintf(PETSC_COMM_SELF, "  ec=%4d ire=%d nob=%d val=%d C33=%e\n",
-                    (int)ec2, (int)ibm->ire[ec2], nob2, (int)ibm->val[ec2], (double)c33);
-      }
-    }
-  }
+  } */
   PetscFunctionReturn(0);
 }
 
@@ -2198,50 +2162,42 @@ PetscErrorCode FInternalAct(FE *fem){
   PetscFunctionBeginUser;
   PetscErrorCode ierr = 0;
 
-  IBMNodes       *ibm=fem->ibm;
-  PetscInt       i, ec;
-  // PetscReal      Fm[9], Fb[42], Fint[9];
-
-  // for (i=0; i<9; i++) {Fm[i]=0.0; Fint[i]=0.0;}
-  // for (i=0; i<42; i++) {Fb[i]=0.0;}
+  IBMNodes      *ibm = fem->ibm;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscInt       i;
 
   FInternalPreCalc(fem);
-  // PetscPrintf(PETSC_COMM_SELF, "FInternalPreCalc completed\n");
-  PetscReal  *FF;
-  VecGetArray(fem->Fint, &FF);
 
-  for (ec=0; ec<ibm->n_elmt; ec++) {
-    PetscInt  node, v = ibm->val[ec];
-    PetscInt nloc = dof*(v+6);
+  /* Assemble Fint via VecSetValues so PETSc routes off-process contributions
+   * to the correct rank during VecAssemblyBegin/End. */
+  for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
+    const PetscInt ec = ctx->layout.orig_cell[lc];
+    if (ec < 0 || ec >= ibm->n_elmt) continue;
+    PetscInt v    = ibm->val[ec];
+    /* Regular elements (val==0) have 12 subdivision control points; irregular
+     * elements have val+6 control points.  ElemUpdFint always writes 12*dof
+     * entries for regular elements, so allocate accordingly. */
+    PetscInt nen  = (ibm->ire[ec] == 0) ? 12 : (v + 6);
+    PetscInt nloc = dof * nen;
 
     PetscReal *Fb;
-    ierr = PetscCalloc1(nloc, &Fb); CHKERRQ(ierr);   // zeroed
-
+    ierr = PetscCalloc1(nloc, &Fb); CHKERRQ(ierr);
     ElemUpdFint(fem, ec, Fb);
 
-
-
-    for (i=0; i<(v+6); i++) {
-      if (ibm->patch[16*ec+i]!=1000000) {
-        node = ibm->patch[16*ec+i];
-
-        FF[dof*node] += Fb[dof*i];
-        FF[dof*node+1] += Fb[dof*i+1];
-        FF[dof*node+2] += Fb[dof*i+2];
-        
-      //   if (ec == 100) {
-      //   PetscPrintf(PETSC_COMM_SELF, "ec=100 node %" PetscInt_FMT "  FF_after  = [% .12e, % .12e, % .12e]\n",
-      //               node,
-      //               (double)FF[dof*node], (double)FF[dof*node+1], (double)FF[dof*node+2]);
-      // }
-        
-      }
-    } 
-    /* free element-local force vector */
+    for (i=0; i<nen; i++) {
+      PetscInt node = ibm->patch[16*ec+i];
+      if (node == 1000000 || node < 0 || node >= ibm->n_v) continue;
+      PetscInt gdof0 = ctx->ibm_to_global_dof0[node];
+      if (gdof0 < 0) continue;
+      PetscInt  dofs[3] = {gdof0, gdof0+1, gdof0+2};
+      PetscReal vals[3] = {Fb[dof*i], Fb[dof*i+1], Fb[dof*i+2]};
+      ierr = VecSetValues(fem->Fint, 3, dofs, vals, ADD_VALUES); CHKERRQ(ierr);
+    }
     ierr = PetscFree(Fb); CHKERRQ(ierr);
   }
+  ierr = VecAssemblyBegin(fem->Fint); CHKERRQ(ierr);
+  ierr = VecAssemblyEnd(fem->Fint);   CHKERRQ(ierr);
 
-  VecRestoreArray(fem->Fint, &FF); 
   PetscFunctionReturn(0);
 }
 

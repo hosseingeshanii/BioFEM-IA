@@ -76,9 +76,11 @@ typedef struct {
 
 /** @brief Active-muscle model parameters. */
 typedef struct {
-  PetscReal  gamma; /**< Activation magnitude. */
-  PetscReal  a_1;   /**< Fiber-direction anisotropy parameter 1. */
-  PetscReal  a_2;   /**< Fiber-direction anisotropy parameter 2. */
+  PetscReal  gamma;           /**< Peak activation magnitude (used as constant when gamma_ramp_type=0). */
+  PetscReal  a_1;             /**< Fiber-direction anisotropy parameter 1. */
+  PetscReal  a_2;             /**< Fiber-direction anisotropy parameter 2. */
+  PetscInt   gamma_ramp_type; /**< 0=constant (default), 1=sin^2 full cycle, 2=half-sin^2 systole ramp. */
+  PetscReal  gamma_T;         /**< Ramp period [s]; 0 → use tisteps*dt automatically. */
 } MuscleActParams;
 
 /** @brief Global active-strain data stored in FE context. */
