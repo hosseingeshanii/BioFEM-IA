@@ -10,13 +10,14 @@
  * from the PETSc options database (command line / control.dat).
  * ----------------------------------------------------------------------- */
 typedef struct {
-  PetscReal  a;          /* polar semi-axis, apex-to-centre [cm]         */
-  PetscReal  b;          /* equatorial semi-axis [cm]                     */
-  PetscReal  f_cut;      /* axial fraction of spheroid retained (0,1]     */
-  PetscInt   N_theta;    /* number of latitude rings (excl. apex point)   */
-  PetscInt   N_phi;      /* number of nodes per ring                      */
-  PetscReal  alpha_endo; /* Streeter helix angle at endocardium [degrees] */
-  PetscReal  alpha_epi;  /* Streeter helix angle at epicardium [degrees]  */
+  PetscReal  a;             /* polar semi-axis, apex-to-centre [cm]              */
+  PetscReal  b;             /* equatorial semi-axis [cm]                          */
+  PetscReal  f_cut;         /* axial fraction of spheroid retained (0,1]          */
+  PetscInt   N_theta;       /* number of latitude rings (excl. apex point)        */
+  PetscInt   N_phi;         /* number of nodes per ring                           */
+  PetscInt   N_apex_extra;  /* extra rings inserted near apex to shrink hole      */
+  PetscReal  alpha_endo;    /* Streeter helix angle at endocardium [degrees]      */
+  PetscReal  alpha_epi;     /* Streeter helix angle at epicardium [degrees]       */
 } LVParams;
 
 /*
@@ -25,8 +26,9 @@ typedef struct {
  *   -lv_a          [4.5]    polar semi-axis
  *   -lv_b          [2.5]    equatorial semi-axis
  *   -lv_f_cut      [0.55]   height fraction  (0.5 = hemisphere)
- *   -lv_N_theta    [16]     latitude rings
- *   -lv_N_phi      [32]     nodes per ring
+ *   -lv_N_theta       [16]   latitude rings
+ *   -lv_N_phi         [32]   nodes per ring
+ *   -lv_N_apex_extra  [0]    extra rings near apex to shrink the apex hole
  *   -lv_alpha_endo [60.0]   endocardial helix angle [deg]  (Bayer: 40°)
  *   -lv_alpha_epi  [-60.0]  epicardial helix angle  [deg]  (Bayer: -50°)
  *

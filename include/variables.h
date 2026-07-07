@@ -5,6 +5,7 @@
 #include  <math.h>
 #include  <petscvec.h>
 #include  "act_variables.h"
+#include  "dmplex_types.h"
 
 #ifdef __cplusplus
 /* 'explicit' is a C++ keyword; when this header is included from C++ files
@@ -93,8 +94,9 @@ typedef struct {
   PetscReal  ****Jac_Fung;
   Mat        Jacobian; 
   Mat        J_Seq;
-  ActData    act_data;
-  IBMNodes   *ibm;
+  ActData       act_data;
+  DMPlexGeomCtx geom_ctx;  /* persistent DMPlex geometry context; built once at init */
+  IBMNodes     *ibm;
   // UserCtx    userctx;
 } FE;
 

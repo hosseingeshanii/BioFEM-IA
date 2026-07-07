@@ -1,44 +1,98 @@
+#------------------------- Project -------------------------
 PROJECT_NAME           = "BioFEM-IA"
-PROJECT_BRIEF          = "Biological Finite Element with Immersed Boundary and Active Strain"
-PROJECT_NUMBER         = ""
+PROJECT_NUMBER         = "0.1.0"
+PROJECT_BRIEF          = "Biological Finite Element with Immersed Boundary and Active Strain (PETSc + MPI + CUDA + Kokkos)"
 
-OUTPUT_DIRECTORY       = /scratch/user/hgeshani/Research/BioFEM-IA/docs/doxygen
+#------------------------- Output --------------------------
+OUTPUT_DIRECTORY       = docs_build
+CREATE_SUBDIRS         = NO
+OUTPUT_LANGUAGE        = English
 
-INPUT                  = /scratch/user/hgeshani/Research/BioFEM-IA/src \
-                         /scratch/user/hgeshani/Research/BioFEM-IA/include
-FILE_PATTERNS          = *.c *.h
+#------------------------- Input ---------------------------
+INPUT                  = README.md \
+                         include \
+                         src
+
+FILE_PATTERNS          = *.h *.hpp *.c *.cc *.cpp *.cu
 RECURSIVE              = YES
 
+EXCLUDE_PATTERNS       = */build/* */bin/* */docs_build/*
+EXCLUDE                =
+
+USE_MDFILE_AS_MAINPAGE = README.md
+MARKDOWN_SUPPORT       = YES
+
+#------------------------- Extraction ----------------------
 EXTRACT_ALL            = YES
 EXTRACT_STATIC         = YES
-EXTRACT_PRIVATE        = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_LOCAL_CLASSES  = YES
+TYPEDEF_HIDES_STRUCT   = YES
 
+#------------------------- Brief-doc style -----------------
+OPTIMIZE_OUTPUT_FOR_C  = YES
+JAVADOC_AUTOBRIEF      = YES
+MULTILINE_CPP_IS_BRIEF = NO
+QT_AUTOBRIEF           = NO
+
+#------------------------- Sorting -------------------------
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+
+#------------------------- Warnings ------------------------
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_LOGFILE           = /scratch/user/hgeshani/Research/BioFEM-IA/docs_build/doxygen.warnings
+QUIET                  = NO
+
+#------------------------- HTML ----------------------------
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 HTML_COLORSTYLE        = LIGHT
 GENERATE_TREEVIEW      = YES
 DISABLE_INDEX          = NO
 FULL_SIDEBAR           = NO
+HTML_DYNAMIC_MENUS     = YES
+SEARCHENGINE           = YES
 
+#------------------------- LaTeX --------------------------
 GENERATE_LATEX         = NO
 
-OPTIMIZE_OUTPUT_FOR_C  = YES
-JAVADOC_AUTOBRIEF      = NO
-QT_AUTOBRIEF           = NO
-
-WARN_IF_UNDOCUMENTED   = NO
-QUIET                  = NO
-WARNINGS               = YES
-
-SHOW_INCLUDE_FILES     = YES
+#------------------------- Source Browsing -----------------
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+STRIP_CODE_COMMENTS    = NO
+SHOW_FILES             = YES
 SHOW_USED_FILES        = YES
+SHOW_INCLUDE_FILES     = YES
+FULL_PATH_NAMES        = NO
 
-HAVE_DOT               = NO
-
-SORT_MEMBER_DOCS       = NO
-SORT_BRIEF_DOCS        = NO
-
-TYPEDEF_HIDES_STRUCT   = YES
-
+#------------------------- Preprocessor -------------------
 ENABLE_PREPROCESSING   = YES
-MACRO_EXPANSION        = NO
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+# PETSc macros that confuse the parser
+PREDEFINED             = PETSC_EXTERN=extern \
+                         PETSC_STATIC_INLINE=static\ inline
+
+#------------------------- Diagrams -----------------------
+# dot lives in the Graphviz module: module load GCCcore/13.2.0 Graphviz/9.0.0
+HAVE_DOT               = YES
+DOT_PATH               = /sw/eb/sw/Graphviz/9.0.0-GCCcore-13.2.0/bin
+DOT_NUM_THREADS        = 4
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+COLLABORATION_GRAPH    = YES
+CLASS_GRAPH            = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+DOT_MULTI_TARGETS      = YES
+GENERATE_LEGEND        = YES
+DOT_GRAPH_MAX_NODES    = 100
+MAX_DOT_GRAPH_DEPTH    = 5

@@ -1,7 +1,7 @@
 %% dmplex_geom.tex
 %% Technical documentation of the distributed DMPlex geometry kernel in BioFEM-IA.
 %% Self-contained: compile standalone or \input into a larger document.
-%% Requires: amsmath, booktabs, listings, xcolor, hyperref, tikz, pgfplots (optional).
+%% Requires: amsmath, booktabs, listings, xcolor, hyperref, tikz.
 
 \documentclass[11pt]{article}
 \usepackage[margin=1.2in]{geometry}
@@ -38,8 +38,8 @@
   tabsize=2,
   showstringspaces=false,
   morekeywords={PetscErrorCode,PetscInt,PetscReal,PetscBool,PetscMPIInt,
-                PetscSF,PetscSFNode,DM,DMLabel,IBMNodes,FE,
-                DMPlexPatchLayout,DMPlexPatchExchange}
+                PetscSF,PetscSFNode,DM,IBMNodes,FE,
+                DMPlexPatchLayout,DMPlexPatchExchange,DMPlexGeomCtx}
 }
 
 \title{\textbf{Distributed Geometry Kernel for Loop Subdivision Surfaces}\\
@@ -60,20 +60,25 @@
 for triangulated immersed-boundary surfaces discretized with Loop subdivision
 stencils.  The mesh is distributed across MPI ranks using PETSc's \textsc{DMPlex}
 infrastructure.  Patch stencils that span partition boundaries are handled by
-a \textsc{PetscSF} (Star Forest) coordinate exchange that is constructed once
-at initialization and reused every geometry iteration.
+a \textsc{PetscSF} (Star Forest) coordinate exchange built once at initialization
+and reused every geometry iteration.
 
-The module is relevant to large-scale fluid--structure interaction and
-immersed-boundary simulations where the surface geometry must be updated
-every time step and scalability of the geometry kernel is critical.
+The public API consists of four functions called in order:
 
-\subsection{Motivation for DMPlex}
+\begin{center}
+\begin{tabular}{lp{8cm}}
+\toprule
+Function & Purpose \\
+\midrule
+\texttt{FEM\_DMPlexGeomSetup(fem, comm)} & One-time setup: distribute mesh, build ownership table, layout, SF. \\
+\texttt{FEM\_DMPlexGeomBuildNodeMap(fem)} & Build \texttt{ibm\_to\_global\_dof0} after Vecs are created. \\
+\texttt{FEM\_DMPlexGeomUpdate(fem)} & Per-Newton-step: sync coordinates, recompute local geometry. \\
+\texttt{FEM\_DMPlexGeomDestroy(fem)} & Free all context memory. \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-The legacy implementation evaluates subdivision geometry on a single MPI rank,
-making it the dominant serial bottleneck for meshes above roughly 50{,}000 elements.
-Distributing the mesh with \textsc{DMPlex} allows each rank to compute geometry
-for its own subdomain, with only the coordinates needed for cross-boundary stencils
-communicated via an SF broadcast.
+All context is stored in \texttt{fem->geom\_ctx} (type \texttt{DMPlexGeomCtx}).
 
 %% ============================================================
 \section{Background Concepts}
@@ -89,63 +94,95 @@ of an irregular vertex) or 12 vertices for regular stencils.
 These patch indices are precomputed and stored in \texttt{ibm->patch[16*e + i]},
 using original vertex indices $\in [0, N_v)$.
 
-\subsection{PETSc DMPlex}
+\subsection{Replicated IBM Arrays vs Distributed PETSc Vecs}
 
-\textsc{DMPlex} represents a mesh as a Directed Acyclic Graph (DAG) of \emph{points}:
-cells (height 0), edges (height 1), and vertices (depth 0).  All points on a given
-rank share a single flat \emph{chart} $[\texttt{pStart}, \texttt{pEnd})$.
+A key architectural choice is that \texttt{IBMNodes} arrays (\texttt{x\_bp},
+\texttt{nv1/nv2/nv3}, \texttt{patch}, \texttt{ire}, etc.) are \emph{fully replicated}
+on every MPI rank.  For the LV mesh this costs only $608 \times (\text{few arrays})$
+of memory per rank.  Because the mesh is generated analytically, every rank can
+compute the same result independently --- no file I/O or broadcast is needed.
 
+PETSc \emph{Vecs} (\texttt{Fint}, \texttt{xd}, etc.) are by contrast
+\emph{distributed} (MPI Vecs): each rank owns a contiguous slice of the global DOF
+range.  The two layers communicate via:
 \begin{itemize}
-  \item \texttt{DMPlexGetHeightStratum(dm, 0, \&cStart, \&cEnd)} --- returns the
-        range of cell point indices.
-  \item \texttt{DMPlexGetDepthStratum(dm, 0, \&vStart, \&vEnd)} --- returns the
-        range of vertex point indices.
-  \item After \texttt{DMPlexDistribute()}, each rank holds an owned subdomain.
-        The current implementation uses \texttt{overlap=0} (no ghost cell layers);
-        cross-boundary stencil nodes are handled entirely by the PetscSF coordinate
-        exchange rather than ghost topology.
+  \item \textbf{Coordinate reads}: the exchange SF broadcasts updated coordinates from
+        owning ranks into the local \texttt{ibm->x/y/z\_bp} arrays, keeping the
+        replicated C arrays fresh.
+  \item \textbf{Force writes}: \texttt{VecSetValues} with global DOF indices routes
+        off-process contributions to their owning rank via PETSc's internal stash,
+        flushed by \texttt{VecAssemblyBegin/End}.
 \end{itemize}
 
-\textbf{Original-index arrays.}
-After distribution, each rank holds two flat arrays built from the migration Star Forest
-(see \S\ref{sec:createdist}):
+\subsection{PETSc DMPlex: Chart, Height, Depth}
+
+\textsc{DMPlex} represents mesh topology as a Directed Acyclic Graph (DAG) of
+\emph{points}: cells, edges (if interpolated), and vertices.  All points on a rank
+share a flat integer range called the \textbf{chart} $[\texttt{pStart}, \texttt{pEnd})$.
+
+\textbf{Height} counts distance down from the top of the DAG; \textbf{depth} counts
+up from the bottom:
 \begin{center}
-\begin{tabular}{lll}
+\begin{tabular}{lcc}
 \toprule
-Array & Size & Value \\
+Entity & Height & Depth \\
 \midrule
-\texttt{origCell[lc]} & $N_\text{local cells}$ & original IBMNodes cell index for local cell $lc$; $-1$ if unknown \\
-\texttt{origVert[lv]} & $N_\text{local verts}$ & original IBMNodes vertex index for local vertex $lv$; $-1$ if unknown \\
+Cell (triangle) & 0 & $d$ (mesh dim) \\
+Edge & 1 & $d-1$ \quad (if interpolated) \\
+Vertex & max & 0 \\
 \bottomrule
 \end{tabular}
 \end{center}
-These arrays are the only thread from distributed-DM point indices back to the
-global \texttt{IBMNodes} arrays.  Unlike the previous design, no \texttt{DMLabel}
-is created or queried; the mapping is extracted from the migration SF in a single
-$\mathcal{O}(n_\text{leaves})$ walk immediately after \texttt{DMPlexDistribute}.
+
+BioFEM-IA uses an \emph{uninterpolated} mesh (no edges stored), so height~0 = cells,
+height~1 = vertices, depth~0 = vertices.  After \texttt{DMPlexDistribute(overlap=0)},
+each rank holds its own sub-DM with an independent chart.  The ranks have no shared
+DM object; all cross-rank communication is explicit through PetscSF.
+
+\textbf{Ghost vertices.}
+With overlap=0, cells are partitioned with no ghost cell layers.  However,
+a rank that owns triangle~$T$ must also hold all three of $T$'s vertices locally,
+even if some of those vertices are shared with triangles on other ranks.  A
+\emph{ghost vertex} is a vertex that is physically present in this rank's chart
+(memory is allocated, coordinates are stored) but whose authoritative owner is
+another rank.  Ghost vertices appear as \emph{leaves} in the DM's point SF
+(\texttt{DMGetPointSF}): a leaf entry says ``my local point~$p$ is a copy of
+rank~$r$'s point~$q$''.  Interior vertices (no sharing) are roots with no leaves.
 
 \subsection{PetscSF: Star Forest}
 \label{sec:sf}
 
-A \texttt{PetscSF} encodes a one-to-many MPI communication pattern as a bipartite graph:
+A \texttt{PetscSF} encodes a point-to-many MPI communication pattern.
 
 \begin{itemize}
-  \item \textbf{Roots} --- authoritative data.  Each rank declares \texttt{nroots}
-        root slots; other ranks' leaves may point to any of them.
-  \item \textbf{Leaves} --- remote copies.  Each rank has \texttt{nleaves} leaves,
-        each described by a \texttt{PetscSFNode\{rank, index\}} pointing to
-        the root that owns the data.
+  \item \textbf{Roots} --- authoritative data; each rank declares \texttt{nroots}
+        root slots.  A root slot is simply an element of the root data array passed
+        to \texttt{PetscSFBcast}.
+  \item \textbf{Leaves} --- remote copies; each leaf is described by a
+        \texttt{PetscSFNode\{rank, index\}} pointing to its root's location.
 \end{itemize}
+
+\texttt{PetscSFSetGraph(sf, nroots, nleaves, ilocal, ..., remote, ...)} defines the
+graph: \texttt{remote[i].rank} and \texttt{remote[i].index} specify where leaf~$i$
+fetches its data from.  The root data array has \texttt{nroots} elements; a leaf
+pointing to \texttt{\{r, j\}} reads \texttt{rootdata[j]} on rank~$r$.
 
 The two fundamental operations are:
 \begin{align*}
-\texttt{PetscSFBcast}:& \quad \text{root} \rightarrow \text{leaf} \quad
-  (\text{owner sends, all needing ranks receive}) \\
-\texttt{PetscSFReduce}:& \quad \text{leaf} \rightarrow \text{root} \quad
-  (\text{contributions accumulated at owner})
+\texttt{PetscSFBcast}:& \quad \text{root} \to \text{leaf}
+  \quad (\text{owner sends, all needing ranks receive}) \\
+\texttt{PetscSFReduce}:& \quad \text{leaf} \to \text{root}
+  \quad (\text{contributions accumulated at owner})
 \end{align*}
 
-Figure~\ref{fig:sf} illustrates the SF used in this module.
+\textbf{Root index space.}
+The exchange SF in this module sets \texttt{nroots = ibm->n\_v} on every rank,
+even though each rank only owns $\approx N_v / P$ vertices.  This allows
+\texttt{remote[i].index} to be the global IBM vertex index directly, so
+\texttt{PetscSFBcast} reads \texttt{ibm->x\_bp[remote[i].index]} on the owning rank
+without any remapping.  Unowned root slots are declared but never read.
+
+Figure~\ref{fig:sf} illustrates the coordinate exchange SF.
 
 \begin{figure}[h]
 \centering
@@ -176,28 +213,59 @@ Figure~\ref{fig:sf} illustrates the SF used in this module.
   \node[below=0.1cm of r0box,font=\footnotesize,text width=3.5cm,align=center]
     {owns $v_0,v_1,v_2$\\needs $v_3$ from R1};
   \node[below=0.1cm of r1box,font=\footnotesize,text width=3.5cm,align=center]
-    {owns $v_3,v_4$\\needs $v_1$ from R0, $v_4$ locally cached};
+    {owns $v_3,v_4$\\needs $v_1$ from R0};
 \end{tikzpicture}
 \caption{Star Forest for coordinate exchange.  Blue circles are roots (owned vertices);
 orange circles are leaves (remote coordinates needed by this rank's patch stencils).
-Arrows show the Bcast direction.}
+Arrows show the Bcast direction.  Each leaf's \texttt{PetscSFNode} encodes the
+owning rank and the global IBM vertex index.}
 \label{fig:sf}
 \end{figure}
-
-\textbf{Two distinct index spaces.}
-The SF in this module uses \emph{original vertex indices} as root slots, not
-distributed DM chart indices.  The root data array is \texttt{ibm->x\_bp[0..N\_v)}
-and a leaf pointing to \texttt{\{rank $r$, index $i$\}} fetches
-\texttt{ibm->x\_bp[$i$]} from rank $r$.  The DM is used only during setup
-to determine ownership; once the SF is built, the DM is no longer needed.
 
 %% ============================================================
 \section{Data Structures}
 %% ============================================================
 
-\subsection{\texttt{DMPlexPatchLayout}}
+\subsection{\texttt{DMPlexGeomCtx} --- the overall context}
 
-Per-rank local copy of subdivision stencil data.  All arrays are indexed by
+All per-rank state is stored in \texttt{fem->geom\_ctx}.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Field & Size / Type & Description \\
+\midrule
+\texttt{comm}              & \texttt{MPI\_Comm}    & Communicator (usually \texttt{PETSC\_COMM\_WORLD}). \\
+\texttt{initialized}       & \texttt{PetscBool}    & Set true after \texttt{FEM\_DMPlexGeomSetup}. \\
+\texttt{layout}            & \texttt{DMPlexPatchLayout} & Local cell stencil data (see \S\ref{sec:layout}). \\
+\texttt{exchange}          & \texttt{DMPlexPatchExchange} & Coordinate SF and buffers (see \S\ref{sec:exchange_struct}). \\
+\texttt{origVert}          & $N_\text{local verts}$ & DM local vertex $\to$ global IBM vertex index. \\
+\texttt{ownerRank}         & $N_v$ (replicated)    & MPI rank owning each global IBM vertex. \\
+\texttt{nLocalVerts}       & scalar                & \texttt{vEnd - vStart} in this rank's DM. \\
+\texttt{nOwnedVerts}       & scalar                & Vertices owned by this rank; Vec local size. \\
+\texttt{ibm\_to\_local\_idx}  & $N_v$ (mostly $-1$) & Global IBM vertex $\to$ local Vec index ($-1$ if unowned). \\
+\texttt{ibm\_to\_global\_dof0}& $N_v$ (replicated)  & Global IBM vertex $\to$ first global DOF in MPI Vec. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{\texttt{ibm\_to\_local\_idx}.}
+This array has $N_v$ entries on every rank but most are $-1$.  The non-negative
+entries form a compact sequential mapping $[0, \texttt{nOwnedVerts})$ over the
+vertices this rank owns.  \texttt{VecCreateMPI} is called with
+\texttt{dof * nOwnedVerts} as the local size, so local Vec index $i$ corresponds
+to global IBM vertex \texttt{v} where \texttt{ibm\_to\_local\_idx[v] = i}.
+
+\textbf{\texttt{ibm\_to\_global\_dof0}.}
+Built by \texttt{FEM\_DMPlexGeomBuildNodeMap} \emph{after} Vecs exist.  Entry
+\texttt{ibm\_to\_global\_dof0[v]} is the global DOF index of the $x$-component
+of vertex~$v$ in any MPI Vec.  Used by \texttt{FInternalAct} to call
+\texttt{VecSetValues} with correct global indices when assembling \texttt{Fint}.
+
+\subsection{\texttt{DMPlexPatchLayout}}
+\label{sec:layout}
+
+Per-rank local copy of subdivision stencil data.  All arrays indexed by
 local cell index $\ell_c \in [0, N_\text{local})$.
 
 \begin{center}
@@ -205,20 +273,19 @@ local cell index $\ell_c \in [0, N_\text{local})$.
 \toprule
 Field & Size & Description \\
 \midrule
-\texttt{dm}        & ---                     & Ref-counted distributed DM. \\
-\texttt{orig\_cell}& $N_\text{local}$        & Original cell index $e$ for $\ell_c$; $-1$ for ghosts. \\
-\texttt{ire}       & $N_\text{local}$        & 0 = regular stencil, 1 = irregular. \\
-\texttt{irv}       & $N_\text{local}$        & Irregular-vertex flag. \\
-\texttt{val}       & $N_\text{local}$        & Valence of the irregular vertex. \\
-\texttt{patch}     & $16 \times N_\text{local}$ & Original vertex indices of the stencil.
-                                               Unused slots: \texttt{PATCH\_MISSING}. \\
-\texttt{cStart, cEnd} & ---                  & Cell chart range. \\
-\texttt{nLocalCells}  & ---                  & $N_\text{local} = \texttt{cEnd} - \texttt{cStart}$. \\
+\texttt{dm}        & ---                        & Ref-counted distributed DM (this rank's sub-mesh). \\
+\texttt{orig\_cell}& $N_\text{local}$           & Original IBM cell index $e$ for $\ell_c$; $-1$ for unknown. \\
+\texttt{ire}       & $N_\text{local}$           & 0 = regular stencil, 1 = irregular. \\
+\texttt{irv}       & $N_\text{local}$           & Irregular-vertex flag. \\
+\texttt{val}       & $N_\text{local}$           & Valence of the irregular vertex. \\
+\texttt{patch}     & $16 \times N_\text{local}$ & Original vertex indices of the stencil. Unused: \texttt{PATCH\_MISSING}. \\
+\texttt{nLocalCells}  & ---                     & $N_\text{local} = \texttt{cEnd} - \texttt{cStart}$. \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \subsection{\texttt{DMPlexPatchExchange}}
+\label{sec:exchange_struct}
 
 Holds the SF and coordinate receive buffers.  All arrays indexed by remote node $i
 \in [0, N_\text{remote})$.
@@ -228,164 +295,200 @@ Holds the SF and coordinate receive buffers.  All arrays indexed by remote node 
 \toprule
 Field & Size & Description \\
 \midrule
-\texttt{sf}           & ---              & PetscSF: $N_v$ roots, $N_\text{remote}$ leaves. \\
-\texttt{nRemoteNodes} & ---              & $N_\text{remote}$: unique cross-rank vertices needed. \\
-\texttt{orig\_node}   & $N_\text{remote}$ & Original vertex index of remote node $i$. \\
+\texttt{sf}           & ---               & PetscSF: \texttt{nroots=$N_v$}, \texttt{nleaves=$N_\text{remote}$}. \\
+\texttt{nRemoteNodes} & ---               & Unique cross-rank patch vertices needed by this rank. \\
+\texttt{orig\_node}   & $N_\text{remote}$ & Global IBM vertex index of remote node $i$. \\
 \texttt{owner\_rank}  & $N_\text{remote}$ & MPI rank owning \texttt{orig\_node[$i$]}. \\
 \texttt{owner\_index} & $N_\text{remote}$ & Root slot on owner (= \texttt{orig\_node[$i$]}). \\
-\texttt{x\_remote}    & $N_\text{remote}$ & Receive buffer for $x$ coordinates. \\
+\texttt{x\_remote}    & $N_\text{remote}$ & Receive buffer for $x$ coordinates after Bcast. \\
 \texttt{y\_remote}    & $N_\text{remote}$ & Receive buffer for $y$ coordinates. \\
 \texttt{z\_remote}    & $N_\text{remote}$ & Receive buffer for $z$ coordinates. \\
 \bottomrule
 \end{tabular}
 \end{center}
 
+\subsection{Memory layout summary}
+
+Table~\ref{tab:memory} summarises which arrays are replicated across all ranks
+and which are per-rank.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\toprule
+Array & Size on each rank & Nature & Lives in \\
+\midrule
+\texttt{ibm->x\_bp[]} & $N_v = 608$ (full) & Replicated C array, kept fresh by SF & \texttt{IBMNodes} \\
+\texttt{ibm->nv1/nv2/nv3[]} & $N_e = 1152$ (full) & Replicated & \texttt{IBMNodes} \\
+\texttt{ibm->patch[16*$N_e$]} & full & Replicated & \texttt{IBMNodes} \\
+\texttt{act->elem\_act\_data[]} & $N_e$ (full) & Replicated & \texttt{ActData} \\
+\texttt{ctx->ownerRank[$N_v$]} & full & Replicated (built by Allreduce) & \texttt{DMPlexGeomCtx} \\
+\texttt{ctx->ibm\_to\_local\_idx[$N_v$]} & full, mostly $-1$ & Replicated & \texttt{DMPlexGeomCtx} \\
+\texttt{ctx->ibm\_to\_global\_dof0[$N_v$]} & full & Replicated (built by Allreduce) & \texttt{DMPlexGeomCtx} \\
+\midrule
+\texttt{ctx->origVert[]} & $\approx N_v/P + \text{bdry}$ & Per-rank DM vertex map & \texttt{DMPlexGeomCtx} \\
+\texttt{layout.orig\_cell[]} & $\approx N_e/P$ & Per-rank cell map & \texttt{DMPlexPatchLayout} \\
+\texttt{layout.patch[16*$N_\text{local}$]} & $\approx 16 N_e/P$ & Per-rank stencil slice & \texttt{DMPlexPatchLayout} \\
+\texttt{exchange.orig\_node[]} & $N_\text{remote}$ & Per-rank remote fetch list & \texttt{DMPlexPatchExchange} \\
+\texttt{exchange.x/y/z\_remote[]} & $N_\text{remote}$ & Per-rank receive buffers & \texttt{DMPlexPatchExchange} \\
+\midrule
+\texttt{fem->Fint} (MPI Vec) & $\texttt{dof} \times N_\text{owned}$ & Distributed & PETSc MPI Vec \\
+\texttt{fem->xd} (MPI Vec) & $\texttt{dof} \times N_\text{owned}$ & Distributed & PETSc MPI Vec \\
+\bottomrule
+\end{tabular}
+\caption{Memory layout across MPI ranks for the LV mesh ($N_v=608$, $N_e=1152$, $P=8$).
+Per-rank sizes are approximate.}
+\label{tab:memory}
+\end{table}
+
 %% ============================================================
-\section{Setup Pipeline}
+\section{Setup Pipeline: \texttt{FEM\_DMPlexGeomSetup}}
 %% ============================================================
 
-The one-time setup is orchestrated by \texttt{RunDMPlexGeomProcesses()} and
-consists of four sequential steps, illustrated in Figure~\ref{fig:pipeline}.
+The one-time setup is orchestrated by \texttt{FEM\_DMPlexGeomSetup(fem, comm)}.
+It calls four internal functions in sequence, then builds \texttt{ibm\_to\_local\_idx}
+directly from the resulting ownership table.  Figure~\ref{fig:pipeline} summarises
+the pipeline.
 
 \begin{figure}[h]
 \centering
 \begin{tikzpicture}[
-  box/.style={draw,rounded corners,fill=blue!8,minimum width=5.5cm,
+  box/.style={draw,rounded corners,fill=blue!8,minimum width=5.8cm,
               minimum height=0.75cm,font=\small,align=center},
   arr/.style={-{Stealth},thick},
-  note/.style={font=\footnotesize,text=gray,text width=4.5cm,align=left}
+  note/.style={font=\footnotesize,text=gray,text width=5.2cm,align=left}
 ]
 \node[box] (s1) {\texttt{CreateDistributedDMPlex\_()}};
 \node[box,below=0.5cm of s1] (s2) {\texttt{BuildOriginalVertexOwnerTable\_()}};
 \node[box,below=0.5cm of s2] (s3) {\texttt{DMPlexPatchLayoutCreate\_()}};
 \node[box,below=0.5cm of s3] (s4) {\texttt{BuildPatchCoordinateExchange\_()}};
+\node[box,below=0.5cm of s4] (s5) {Build \texttt{ibm\_to\_local\_idx}, set \texttt{nOwnedVerts}};
 
 \draw[arr] (s1)--(s2);
 \draw[arr] (s2)--(s3);
 \draw[arr] (s3)--(s4);
+\draw[arr] (s4)--(s5);
 
-\node[note,right=0.8cm of s1] {Build serial DM on R0 (no edges), distribute overlap=0; extract origCell[]/origVert[] from migration SF.};
-\node[note,right=0.8cm of s2] {Ghost detection via point SF + \texttt{MPI\_Allreduce(MAX)} $\Rightarrow$ \texttt{ownerRank[0..N\_v)}.};
-\node[note,right=0.8cm of s3] {Copy \texttt{ire/irv/val/patch} from global \texttt{ibm} to local layout.};
-\node[note,right=0.8cm of s4] {Identify cross-rank patch nodes, build PetscSF. $\mathcal{O}(N/P)$ after optimisation.};
+\node[note,right=0.9cm of s1] {Build serial DM on R0 (no edges), distribute overlap=0; extract \texttt{origCell[]}/\texttt{origVert[]} from migration SF.};
+\node[note,right=0.9cm of s2] {Ghost detection via point SF; \texttt{MPI\_Allreduce(MAX)} $\Rightarrow$ \texttt{ownerRank[0..N\_v)}.};
+\node[note,right=0.9cm of s3] {Copy \texttt{ire/irv/val/patch} from global \texttt{ibm} to local layout. No communication.};
+\node[note,right=0.9cm of s4] {Identify cross-rank patch nodes; build PetscSF. $\mathcal{O}(N/P)$.};
+\node[note,right=0.9cm of s5] {Walk \texttt{origVert}: skip ghosts, assign sequential Vec index to owned verts.};
 \end{tikzpicture}
-\caption{One-time setup pipeline.}
+\caption{One-time setup pipeline inside \texttt{FEM\_DMPlexGeomSetup}.}
 \label{fig:pipeline}
 \end{figure}
 
 \subsection{\texttt{BuildSerialDMPlex\_}}
 
-Rank 0 fills the cell connectivity and coordinate arrays from \texttt{ibm} and
+Rank~0 fills the cell connectivity and coordinate arrays from \texttt{ibm} and
 passes them to \texttt{DMPlexCreateFromCellListPetsc} with
-\texttt{interpolate=PETSC\_FALSE}.
-All other ranks pass empty arrays; PETSc collectively constructs the cell--vertex
-topology on rank 0 \emph{without} edge interpolation.
-Skipping edge interpolation avoids PETSc's $\mathcal{O}(N^{3+})$ serial edge-building
-path and is safe because \texttt{overlap=0} distribution of an uninterpolated mesh
+\texttt{interpolate=PETSC\_FALSE}.  All other ranks pass empty arrays.
+Skipping edge interpolation avoids PETSc's $\mathcal{O}(N^{3+})$ serial
+edge-building path; distribution of an uninterpolated mesh at \texttt{overlap=0}
 is fully supported.
-No \texttt{DMLabel} is created at this stage; original indices are recovered from the
-migration SF after distribution (see \S\ref{sec:createdist}).
 
 \subsection{\texttt{CreateDistributedDMPlex\_}}
 \label{sec:createdist}
 
 Calls \texttt{DMPlexDistribute(dm, 0, \&migrationSF, \&distributed)}.
-The migration SF encodes, for each local point on each rank, the serial point on
-rank 0 it originated from.  Both \texttt{origCell[]} and \texttt{origVert[]} are
+The migration SF records, for each local point on each rank, the serial point on
+rank~0 it originated from.  Both \texttt{origCell[]} and \texttt{origVert[]} are
 extracted from this SF in a single $\mathcal{O}(n_\text{leaves})$ pass:
 \begin{itemize}
-  \item For each leaf $i$: local point \texttt{ilocal[i]}, serial point \texttt{iremote[i].index}.
-  \item If the local point falls in the cell chart $[c_\text{start}, c_\text{end})$:
-        $\texttt{origCell}[p - c_\text{start}] = \texttt{iremote}[i].\texttt{index} - \text{serial}\_c_\text{start}$.
-  \item Likewise for vertex points and \texttt{origVert}.
+  \item For each leaf $i$: local point \texttt{ilocal[i]}, serial origin \texttt{iremote[i].index}.
+  \item If the local point is a cell: \texttt{origCell[lc] = iremote[i].index - serial\_cStart}.
+  \item If it is a vertex: \texttt{origVert[lv] = iremote[i].index - serial\_vStart}.
 \end{itemize}
-The resulting distributed DM has \texttt{overlap=0} (no ghost cell layers).
-For \texttt{np=1} the distributed DM is \texttt{NULL} (no migration); the identity
-mapping is applied directly.
+For \texttt{np=1} the distributed DM is \texttt{NULL}; the identity mapping is applied directly.
 
 \subsection{\texttt{BuildOriginalVertexOwnerTable\_}}
 \label{sec:owner}
 
-The goal is to produce \texttt{ownerRank[i]} = MPI rank that owns original vertex $i$,
-globally consistent across all ranks.
+Produces \texttt{ownerRank[i]} = MPI rank that owns original vertex~$i$,
+consistent across all ranks.
 
 \textbf{Step 1: Ghost detection.}
-The DM's point SF (\texttt{DMGetPointSF}) records which local points are ghosts.
-The SF leaves are exactly the ghost points; their local chart positions are extracted
-via \texttt{ilocal} (or the implicit $0,1,2,\ldots$ ordering if \texttt{ilocal == NULL}):
+The DM's point SF (\texttt{DMGetPointSF}) has ghost points as its leaves.
+The leaf's \texttt{ilocal[i]} gives the local chart index of the ghost copy:
 \[
-  \texttt{isGhost}[p - p_\text{start}] = \text{true}
-  \quad \forall p \in \{\text{SF leaf positions}\}
+  \texttt{isGhost}[p - p_\text{start}] = \texttt{true}
+  \quad \forall p \in \{\text{SF leaf local indices}\}
 \]
 
-\textbf{Step 2: Local ownership.}
-Iterate over all local vertices $v \in [v_\text{start}, v_\text{end})$, read
-\texttt{orig = origVert[v - vStart]} (no label lookup), and for non-ghost vertices
-set \texttt{localOwner[orig] = myRank}.
+\textbf{Step 2: Local ownership claim.}
+Walk all local DM vertices $v \in [v_\text{start}, v_\text{end})$.  Read
+\texttt{orig = origVert[v - vStart]}.  For non-ghost vertices only, set
+\texttt{localOwner[orig] = myRank}.  Ghost vertices (shared partition-boundary
+copies owned by another rank) are skipped.
 
 \textbf{Step 3: Global reduction.}
 \[
   \texttt{ownerRank[i]} = \max_{\text{all ranks}} \texttt{localOwner[i]}
 \]
-Non-owners contribute $-1$; the owning rank contributes its rank ID $\geq 0$.
-\texttt{MPI\_MAX} selects the owner.
+Non-owners hold $-1$; the one owning rank holds its rank ID~$\geq 0$.
+\texttt{MPI\_MAX} selects the unique owner.
 
 \subsection{\texttt{DMPlexPatchLayoutCreate\_}}
 
 Iterates over locally owned cells $lc \in [0, N_\text{local})$, reads
-$e = \texttt{origCell}[lc]$ (no label lookup), and copies \texttt{ibm->ire[e]},
-\texttt{ibm->irv[e]}, \texttt{ibm->val[e]}, and \texttt{ibm->patch[16e+i]}
-into the layout arrays.
-Cells with $e < 0$ or $e \geq N_\text{elmt}$ receive \texttt{PATCH\_MISSING}
-in all patch slots.  This step involves no communication.
+$e = \texttt{origCell}[lc]$, and copies \texttt{ibm->ire[e]}, \texttt{irv[e]},
+\texttt{val[e]}, and \texttt{patch[16e+i]} into the layout arrays.
+No communication; each rank reads from its local replicated \texttt{ibm} copy.
 
 \subsection{\texttt{BuildPatchCoordinateExchange\_}}
 \label{sec:exchange}
 
-This is the most algorithmically significant step.  It determines which original
-vertices this rank needs from others and builds the PetscSF accordingly.
+Determines which original vertices this rank needs from others and builds
+the PetscSF.
 
-\subsubsection{Naive algorithm (superseded)}
+\subsubsection{Building \texttt{isLocalOrig}}
 
-The original implementation called \texttt{OriginalVertexIsLocal\_()}, which scanned
-all local vertices $v \in [v_\text{start}, v_\text{end})$ to check whether a given
-original vertex index was present:
-\[
-  \mathcal{O}\!\left(\frac{N_\text{elmt}}{P} \times 16 \times \frac{N_v}{P}\right)
-  = \mathcal{O}\!\left(\frac{N^2}{P^2}\right)
-\]
-A second linear scan (\texttt{IntArrayContains\_}) was used to deduplicate remote nodes.
-For $P=32$ and the nx640 mesh ($N_\text{elmt} \approx 612{,}000$, $N_v \approx 307{,}000$),
-this produced approximately $3 \times 10^9$ label lookups per rank, causing all
-large-mesh jobs to exceed their time limits.
+Repeats the ghost-detection walk from \S\ref{sec:owner} to build
+\texttt{isLocalOrig[i] = true} iff original vertex~$i$ is a non-ghost vertex on
+this rank (i.e.\ this rank owns it and its \texttt{ibm->x\_bp[i]} is authoritative).
 
-\subsubsection{Optimised algorithm}
-
-Two boolean arrays of size $N_v$ are built in a single $\mathcal{O}(N_v/P)$ walk
-before the loop:
-
-\begin{itemize}
-  \item \texttt{isLocalOrig[i]}: \texttt{true} iff original vertex $i$ is a non-ghost
-        vertex on this rank.  Built by the same ghost-detection walk used in
-        \S\ref{sec:owner}, applied to the \texttt{"biofem\_orig\_vertex"} label.
-  \item \texttt{alreadyAdded[i]}: deduplication flag; set when vertex $i$ is
-        registered in the remote list.
-\end{itemize}
-
-The main loop then runs in $\mathcal{O}(N_\text{elmt}/P \times 16)$:
+\subsubsection{Main loop --- collect remote nodes}
 
 \begin{lstlisting}
-for lc in 0..nLocalCells:
-    for i in 0..nen:
+alreadyAdded[n_v] = {false}    /* dedup: each vertex added at most once */
+
+for lc = 0..nLocalCells:
+    nen = 12 if regular, else val+6
+    for i = 0..nen:
         node = layout->patch[16*lc + i]
-        if MISSING or >= n_v: continue
-        if isLocalOrig[node]: continue      // O(1)
-        if alreadyAdded[node]: continue     // O(1)
+        if MISSING or >= n_v: continue   /* empty / auxiliary slot */
+        if isLocalOrig[node]: continue   /* I own it — always fresh */
+        if alreadyAdded[node]: continue  /* already queued */
+
+        /* node is needed but owned by another rank */
+        orig_node[nRemoteNodes]  = node
+        owner_rank[nRemoteNodes] = ownerRank[node]
+        nRemoteNodes++
         alreadyAdded[node] = true
-        // register as SF leaf
 \end{lstlisting}
 
-Table~\ref{tab:complexity} summarises the complexity improvement.
+The two $\mathcal{O}(1)$ hash-array lookups (\texttt{isLocalOrig},
+\texttt{alreadyAdded}) replace the former $\mathcal{O}(N_v/P)$ linear scans,
+reducing the overall complexity from $\mathcal{O}(N^2/P^2)$ to $\mathcal{O}(N/P)$.
+
+\subsubsection{SF construction}
+
+\begin{lstlisting}
+for i = 0..nRemoteNodes:
+    remote[i].rank  = owner_rank[i]
+    remote[i].index = orig_node[i]   /* global IBM vertex index */
+
+PetscSFSetGraph(sf,
+    ibm->n_v,      /* nroots:  full N_v index space — no remapping needed */
+    nRemoteNodes,  /* nleaves: unique cross-rank vertices on this rank */
+    NULL,          /* ilocal:  leaves at x_remote[0,1,...] sequentially */
+    remote);       /* PetscSFNode: {ownerRank, origVertIndex} per leaf */
+\end{lstlisting}
+
+Root slots that no leaf ever points to are never touched during \texttt{PetscSFBcast}.
+
+\subsubsection{Complexity comparison}
 
 \begin{table}[h]
 \centering
@@ -393,68 +496,156 @@ Table~\ref{tab:complexity} summarises the complexity improvement.
 \toprule
 & Naive & Optimised \\
 \midrule
-Setup walk & $\mathcal{O}(N_v/P)$ & $\mathcal{O}(N_v/P)$ \\
-Per patch-node query & $\mathcal{O}(N_v/P)$ & $\mathcal{O}(1)$ \\
+Per patch-node locality check & $\mathcal{O}(N_v/P)$ linear scan & $\mathcal{O}(1)$ array lookup \\
+Per patch-node dedup check    & $\mathcal{O}(N_\text{remote})$ scan & $\mathcal{O}(1)$ flag \\
 Full loop & $\mathcal{O}(N^2/P^2)$ & $\mathcal{O}(N/P)$ \\
 Extra memory & 0 & $2 \times N_v$ booleans \\
 \bottomrule
 \end{tabular}
-\caption{Complexity of \texttt{BuildPatchCoordinateExchange\_} before and after optimisation.}
+\caption{Complexity of \texttt{BuildPatchCoordinateExchange\_}.}
 \label{tab:complexity}
 \end{table}
 
-\subsubsection{SF construction}
+\subsection{Building \texttt{ibm\_to\_local\_idx} and \texttt{nOwnedVerts}}
 
-After the loop, a \texttt{PetscSFNode remote[nRemoteNodes]} array is populated with
-$\{\texttt{ownerRank}[i],\, i\}$ for each remote node $i$, and the SF is configured:
+Immediately after the four sub-functions, \texttt{FEM\_DMPlexGeomSetup} builds
+the Vec local-index map:
+
 \begin{lstlisting}
-PetscSFSetGraph(sf,
-    ibm->n_v,         /* nroots:  full original vertex array */
-    nRemoteNodes,     /* nleaves: unique cross-rank vertices */
-    NULL,             /* ilocal:  leaves at 0,1,...,nRemoteNodes-1 */
-    ...,
-    remote,           /* iremote: {rank, origIndex} for each leaf */
-    ...);
+ctx->nOwnedVerts = 0;
+for lv = 0..nLocalVerts:
+    v = origVert[lv]
+    if v >= 0 && v < n_v && ownerRank[v] == myrank:
+        ibm_to_local_idx[v] = nOwnedVerts++
 \end{lstlisting}
-Root slots that no leaf points to are never involved in communication.
+
+Ghost vertices in \texttt{origVert} (those with \texttt{ownerRank[v] != myrank})
+are skipped, so each global vertex gets exactly one owner's sequential index.
+The sum $\sum_P \texttt{nOwnedVerts} = N_v$ exactly, which is the invariant
+required by \texttt{VecCreateMPI}.
+
+%% ============================================================
+\section{Node Map: \texttt{FEM\_DMPlexGeomBuildNodeMap}}
+%% ============================================================
+
+Called \emph{after} \texttt{InitVecs} (which creates the MPI Vecs), this function
+builds \texttt{ibm\_to\_global\_dof0} --- the bridge from global IBM vertex indices
+to global PETSc Vec DOF indices.
+
+\begin{lstlisting}
+VecGetOwnershipRange(fem->Fint, &lo, &hi);  /* this rank's DOF range [lo, hi) */
+oi = 0;
+for lv = 0..nLocalVerts:
+    v = origVert[lv]
+    if ownerRank[v] != myrank: continue
+    ibm_to_global_dof0[v] = lo + oi * dof
+    oi++
+
+MPI_Allreduce(MPI_IN_PLACE, ibm_to_global_dof0, n_v, MPI_INT, MPI_MAX, comm)
+\end{lstlisting}
+
+Each rank fills only the entries for its owned vertices (using its local DOF offset
+\texttt{lo}).  \texttt{MPI\_Allreduce(MAX)} distributes the complete table to every
+rank.  Result: \texttt{ibm\_to\_global\_dof0[v]} holds the global index of the
+$x$-DOF for vertex~$v$ in any MPI Vec, on every rank.
 
 %% ============================================================
 \section{Per-Iteration Kernel}
 %% ============================================================
 
-Every geometry update calls two functions:
+Every Newton step calls \texttt{FEM\_DMPlexGeomUpdate(fem)}, which:
 
-\subsection{\texttt{UpdatePatchRemoteCoordinates\_}}
-
-Executes three sequential SF broadcasts to fetch updated coordinates of all
-cross-rank patch nodes:
-\begin{align*}
-  \texttt{ibm->x\_bp}[\texttt{orig\_node}[i]] &\leftarrow \texttt{x\_remote}[i] \\
-  \texttt{ibm->y\_bp}[\texttt{orig\_node}[i]] &\leftarrow \texttt{y\_remote}[i] \\
-  \texttt{ibm->z\_bp}[\texttt{orig\_node}[i]] &\leftarrow \texttt{z\_remote}[i]
-\end{align*}
-After the write-back, \texttt{ibm->x/y/z\_bp} is consistent on every rank for
-all vertices referenced by its stencils.
-
-\subsection{\texttt{RunLocalGeometry\_}}
-
-Loops over locally owned cells and calls:
 \begin{enumerate}
-  \item \texttt{ElemUpdateGeom0Subdiv} --- reference-configuration geometry.
-  \item \texttt{ElemUpdateGeomSubdiv} --- current-configuration geometry.
-  \item \texttt{ElemUpdateG} --- metric tensor.
+  \item \textbf{Syncs coordinates.}
+        \texttt{UpdatePatchRemoteCoordinates\_} fires three sequential SF broadcasts:
+        \begin{align*}
+          \texttt{x\_remote}[i] &\leftarrow \texttt{ibm->x\_bp[orig\_node[i]]}
+          \text{ on rank \texttt{owner\_rank[i]}} \\
+          \texttt{ibm->x\_bp[orig\_node[i]]} &\leftarrow \texttt{x\_remote}[i]
+        \end{align*}
+        (repeated for $y$, $z$).  After this call, every rank's \texttt{ibm->x/y/z\_bp}
+        is fresh for all patch-stencil vertices.
+
+  \item \textbf{Recomputes local geometry.}
+        Loops over \texttt{lc = 0..nLocalCells}, calls \texttt{ElemUpdateGeomSubdiv(fem, ec)}
+        for each owned cell.
 \end{enumerate}
-Ghost cells (orig\_cell $<0$ or $\geq N_\text{elmt}$) are skipped.
+
+%% ============================================================
+\section{Parallel Force Assembly: \texttt{FInternalAct}}
+%% ============================================================
+
+\texttt{FInternalAct} assembles the internal force vector \texttt{Fint} in parallel
+using \texttt{VecSetValues}.
+
+\begin{lstlisting}
+for lc = 0..nLocalCells:
+    ec = layout.orig_cell[lc]          /* global IBM cell index */
+    ElemUpdFint(fem, ec, Fb)           /* compute elem force, size nen*dof */
+
+    for i = 0..nen:
+        node  = ibm->patch[16*ec + i]  /* global IBM vertex index */
+        gdof0 = ibm_to_global_dof0[node]   /* first global DOF */
+        dofs = {gdof0, gdof0+1, gdof0+2}
+        vals = {Fb[3i], Fb[3i+1], Fb[3i+2]}
+        VecSetValues(Fint, 3, dofs, vals, ADD_VALUES)
+
+VecAssemblyBegin(Fint)
+VecAssemblyEnd(Fint)
+\end{lstlisting}
+
+\textbf{\texttt{VecSetValues} with global indices.}
+\texttt{Fint} is an MPI Vec; each rank owns global DOFs $[\texttt{lo}, \texttt{hi})$.
+When \texttt{VecSetValues} is called with a global index:
+\begin{itemize}
+  \item In $[\texttt{lo}, \texttt{hi})$: written directly to the local buffer.
+  \item Outside $[\texttt{lo}, \texttt{hi})$: buffered in PETSc's internal
+        \emph{stash} (no MPI yet).
+\end{itemize}
+
+A patch stencil crosses partition boundaries: vertex~$v$ may be owned by rank~1
+while the cell is on rank~0.  Rank~0 computes the force contribution and calls
+\texttt{VecSetValues} at $v$'s global DOF --- that entry enters rank~0's stash.
+
+\textbf{\texttt{VecAssemblyBegin/End}.}
+\texttt{VecAssemblyBegin} initiates MPI sends of all stashed off-process entries.
+\texttt{VecAssemblyEnd} waits for receives and applies \texttt{ADD\_VALUES} to the
+owned local buffer.  After \texttt{VecAssemblyEnd}, every rank's owned slice of
+\texttt{Fint} contains the correct total force accumulated from contributions
+by all ranks whose stencils touched those DOFs.
+
+There is no fixed limit on the number of off-process entries per
+\texttt{VecSetValues} call; PETSc's stash grows dynamically.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners,fill=blue!8,minimum width=5cm,
+              minimum height=0.7cm,font=\small,align=center},
+  arr/.style={-{Stealth},thick},
+  note/.style={font=\footnotesize,text=gray,text width=5cm,align=left}
+]
+\node[box] (a) {\texttt{FEM\_DMPlexGeomUpdate}};
+\node[box,below=0.4cm of a] (b) {\texttt{FInternalPreCalc}};
+\node[box,below=0.4cm of b] (c) {loop: \texttt{ElemUpdFint} + \texttt{VecSetValues}};
+\node[box,below=0.4cm of c] (d) {\texttt{VecAssemblyBegin/End}};
+
+\draw[arr](a)--(b); \draw[arr](b)--(c); \draw[arr](c)--(d);
+
+\node[note,right=0.8cm of a] {Coord sync: SF Bcast $\times 3$ (x,y,z).};
+\node[note,right=0.8cm of b] {Pre-compute kinematics for local cells.};
+\node[note,right=0.8cm of c] {Local compute; off-proc DOFs go to stash.};
+\node[note,right=0.8cm of d] {Flush stash via MPI; ADD\_VALUES at owners.};
+\end{tikzpicture}
+\caption{Force assembly pipeline per Newton step.}
+\label{fig:assembly}
+\end{figure}
 
 %% ============================================================
 \section{Timing and Benchmarks}
 %% ============================================================
 
-\texttt{RunDMPlexGeomProcesses} records wall-clock times (via \texttt{MPI\_Wtime})
-for the full setup and for $n_\text{repeat}=3$ geometry kernel iterations.
-The first iteration is a cold run (cache effects); subsequent iterations give the
-warm steady-state cost.
-
+\texttt{CreateDistributedDMPlex\_} records wall-clock times via \texttt{MPI\_Wtime}.
 Selected results from the mesh sweep (GRACE cluster, \texttt{overlap=0},
 no serial interpolation):
 
@@ -475,31 +666,46 @@ $640\times480$ & 612\,166      & 32 & 0.38    & 0.41079 \\
 \end{tabular}
 \end{center}
 
-Setup times are now dominated by \texttt{DMPlexDistribute} (O(N/P)) rather than
-\texttt{BuildPatchCoordinateExchange\_}, which was the $\mathcal{O}(N^2/P^2)$
-bottleneck before the optimisation.  Iter-1 scales near-linearly with $N/P$.
+Setup is now dominated by \texttt{DMPlexDistribute} rather than
+\texttt{BuildPatchCoordinateExchange\_}, which was the former $\mathcal{O}(N^2/P^2)$
+bottleneck.  Iteration time scales near-linearly with $N/P$.
 
 %% ============================================================
 \section{Call Graph Summary}
 %% ============================================================
 
 \begin{lstlisting}[language={},numbers=none,frame=none,backgroundcolor=\color{white}]
-RunDMPlexGeomProcesses()
-  CreateDistributedDMPlex_()
-    BuildSerialDMPlex_()          // rank 0 only, no edges (PETSC_FALSE)
-    DMPlexDistribute(overlap=0)   // collective; migration SF -> origCell[], origVert[]
-  BuildOriginalVertexOwnerTable_(origVert)
-    DMGetPointSF()
-    MPI_Allreduce(MPI_MAX)        // collective, size N_v
-  DMPlexPatchLayoutCreate_(origCell)  // local, no comms
-  BuildPatchCoordinateExchange_() // local + PetscSFSetUp()
-    [per iteration:]
-  RunLocalGeometry_()
+main()
+  FEM_DMPlexGeomSetup(fem, PETSC_COMM_WORLD)          /* one-time setup */
+    CreateDistributedDMPlex_()
+      BuildSerialDMPlex_()        /* rank 0 only, PETSC_FALSE = no edges */
+      DMPlexDistribute(overlap=0) /* collective; migration SF -> origCell[], origVert[] */
+    BuildOriginalVertexOwnerTable_(origVert)
+      DMGetPointSF()              /* ghost detection */
+      MPI_Allreduce(MPI_MAX)      /* collective, size N_v -> ownerRank[] */
+    DMPlexPatchLayoutCreate_(origCell)  /* local, no comms */
+    BuildPatchCoordinateExchange_()
+      PetscSFSetGraph + PetscSFSetUp   /* build exchange SF */
+    [inline] build ibm_to_local_idx, nOwnedVerts
+
+  InitVecs(fem)                         /* VecCreateMPI(dof*nOwnedVerts, dof*N_v) */
+
+  FEM_DMPlexGeomBuildNodeMap(fem)       /* after Vecs exist */
+    VecGetOwnershipRange()
+    MPI_Allreduce(MPI_MAX)             /* -> ibm_to_global_dof0[] on all ranks */
+
+  [per Newton step:]
+  FEM_DMPlexGeomUpdate(fem)
     UpdatePatchRemoteCoordinates_()
-      PetscSFBcast() x3           // collective
-    ElemUpdateGeom0Subdiv()       // local per cell
-    ElemUpdateGeomSubdiv()        // local per cell
-    ElemUpdateG()                 // local per cell
+      PetscSFBcast() x3               /* collective: x, y, z coords */
+    ElemUpdateGeomSubdiv() per lc     /* local */
+
+  FInternalAct(fem)
+    ElemUpdFint() per lc              /* local */
+    VecSetValues(ADD_VALUES)          /* local + stash for off-proc */
+    VecAssemblyBegin/End()            /* collective: flush stash */
+
+  FEM_DMPlexGeomDestroy(fem)          /* free ctx */
 \end{lstlisting}
 
 %% ============================================================
@@ -517,7 +723,7 @@ Option & Default & Description \\
 \end{center}
 
 The ghost overlap is hardcoded to \texttt{overlap=0}.  Cross-boundary stencil nodes
-are handled entirely by the PetscSF coordinate exchange, so no ghost topology is
-needed.
+are handled entirely by the PetscSF coordinate exchange; no ghost cell topology
+is needed or created.
 
 \end{document}
