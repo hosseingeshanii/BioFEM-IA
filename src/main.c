@@ -942,16 +942,6 @@ PetscErrorCode FDynamic(FE *fem) {
   IBMNodes       *ibm=fem->ibm;
   DMPlexGeomCtx  *gctx = &fem->geom_ctx;
 
-  /* FDynamic uses VecGetArray with global node indices, which only works
-   * when the Vec is sequential (serial mode, VecSeq covers all n_v nodes).
-   * In the parallel path VecGetArray returns only the local owned portion,
-   * so indexing with global n1e/n2e/n3e writes past the end of the array,
-   * corrupting the heap.  Proper parallel support requires maintaining
-   * ibm->xn_bp/xd_bp/xdd_bp via MPI_Allreduce and using VecSetValues for
-   * Fdyn — not yet implemented.  For quasi-static problems inertia is zero
-   * (xn == x0 on call 1), so skipping is safe for current test cases. */
-  if (gctx->initialized) return 0;
-
   PetscInt       i;
   PetscReal      M[9], C[9], Fd[9], x[9], xn[9], xnm1[9], xd[9], xdd[9];
   PetscInt       n1e, n2e, n3e;
@@ -961,6 +951,121 @@ PetscErrorCode FDynamic(FE *fem) {
   for (i=0; i<9; i++) {M[i]=0.0; C[i]=0.0; Fd[i]=0.0;}
   M1=1./(Beta*pow(dt,2));  M2=1./(Beta*dt);  M3=(1./(2*Beta))-1.;
   C1=Gama/(Beta*dt);  C2=(Gama/Beta)-1;  C3=dt*(Gama/(2.*Beta)-1);
+
+  if (gctx->initialized) {
+    /* Parallel path.  x (current position) is already fully replicated in
+     * ibm->x_bp/y_bp/z_bp by FormFunctionFEM before FDynamic runs.  xn/xnm1/
+     * xd/xdd live only in distributed Vecs, so replicate them the same way
+     * (zero, fill owned entries, Allreduce-sum) — mirrors the ibm->x_bp sync
+     * in FormFunctionFEM.  Fdyn contributions are written with VecSetValues
+     * against the global DOF map, mirroring FInternalAct's Fint assembly, so
+     * PETSc routes off-process contributions during VecAssemblyBegin/End. */
+    PetscErrorCode ierr;
+    PetscInt       nv = ibm->n_v;
+    PetscReal      *xn_bp, *yn_bp, *zn_bp, *xnm1_bp, *ynm1_bp, *znm1_bp;
+    PetscReal      *xd_bp, *yd_bp, *zd_bp, *xdd_bp, *ydd_bp, *zdd_bp;
+    PetscMPIInt    myrank;
+
+    MPI_Comm_rank(PETSC_COMM_WORLD, &myrank);
+
+    PetscCall(PetscMalloc1(nv, &xn_bp));   PetscCall(PetscMalloc1(nv, &yn_bp));   PetscCall(PetscMalloc1(nv, &zn_bp));
+    PetscCall(PetscMalloc1(nv, &xnm1_bp)); PetscCall(PetscMalloc1(nv, &ynm1_bp)); PetscCall(PetscMalloc1(nv, &znm1_bp));
+    PetscCall(PetscMalloc1(nv, &xd_bp));   PetscCall(PetscMalloc1(nv, &yd_bp));   PetscCall(PetscMalloc1(nv, &zd_bp));
+    PetscCall(PetscMalloc1(nv, &xdd_bp));  PetscCall(PetscMalloc1(nv, &ydd_bp));  PetscCall(PetscMalloc1(nv, &zdd_bp));
+
+#define FDYN_GATHER(vec, bx, by, bz) do { \
+    const PetscReal *_a; \
+    PetscMemzero((bx), nv * sizeof(PetscReal)); \
+    PetscMemzero((by), nv * sizeof(PetscReal)); \
+    PetscMemzero((bz), nv * sizeof(PetscReal)); \
+    VecGetArrayRead((vec), &_a); \
+    { \
+      PetscInt oi = 0; \
+      for (PetscInt lv = 0; lv < gctx->nLocalVerts; ++lv) { \
+        PetscInt v = gctx->origVert[lv]; \
+        if (v < 0 || v >= nv || gctx->ownerRank[v] != myrank) continue; \
+        (bx)[v] = _a[oi*dof  ]; \
+        (by)[v] = _a[oi*dof+1]; \
+        (bz)[v] = _a[oi*dof+2]; \
+        oi++; \
+      } \
+    } \
+    VecRestoreArrayRead((vec), &_a); \
+    MPI_Allreduce(MPI_IN_PLACE, (bx), nv, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD); \
+    MPI_Allreduce(MPI_IN_PLACE, (by), nv, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD); \
+    MPI_Allreduce(MPI_IN_PLACE, (bz), nv, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD); \
+  } while (0)
+
+    FDYN_GATHER(fem->xn,   xn_bp,   yn_bp,   zn_bp);
+    FDYN_GATHER(fem->xnm1, xnm1_bp, ynm1_bp, znm1_bp);
+    FDYN_GATHER(fem->xd,   xd_bp,   yd_bp,   zd_bp);
+    FDYN_GATHER(fem->xdd,  xdd_bp,  ydd_bp,  zdd_bp);
+#undef FDYN_GATHER
+
+    for (PetscInt lc = 0; lc < gctx->layout.nLocalCells; ++lc) {
+      const PetscInt ec = gctx->layout.orig_cell[lc];
+      if (ec < 0 || ec >= ibm->n_elmt) continue;
+      PetscReal facc, fvel;
+
+      n1e=ibm->nv1[ec]; n2e=ibm->nv2[ec]; n3e=ibm->nv3[ec];
+
+      x[0]=ibm->x_bp[n1e];  x[1]=ibm->y_bp[n1e]; x[2]=ibm->z_bp[n1e];
+      x[3]=ibm->x_bp[n2e];  x[4]=ibm->y_bp[n2e]; x[5]=ibm->z_bp[n2e];
+      x[6]=ibm->x_bp[n3e];  x[7]=ibm->y_bp[n3e]; x[8]=ibm->z_bp[n3e];
+
+      xn[0]=xn_bp[n1e];  xn[1]=yn_bp[n1e];  xn[2]=zn_bp[n1e];
+      xn[3]=xn_bp[n2e];  xn[4]=yn_bp[n2e];  xn[5]=zn_bp[n2e];
+      xn[6]=xn_bp[n3e];  xn[7]=yn_bp[n3e];  xn[8]=zn_bp[n3e];
+
+      xnm1[0]=xnm1_bp[n1e];  xnm1[1]=ynm1_bp[n1e];  xnm1[2]=znm1_bp[n1e];
+      xnm1[3]=xnm1_bp[n2e];  xnm1[4]=ynm1_bp[n2e];  xnm1[5]=znm1_bp[n2e];
+      xnm1[6]=xnm1_bp[n3e];  xnm1[7]=ynm1_bp[n3e];  xnm1[8]=znm1_bp[n3e];
+
+      xd[0]=xd_bp[n1e];  xd[1]=yd_bp[n1e];  xd[2]=zd_bp[n1e];
+      xd[3]=xd_bp[n2e];  xd[4]=yd_bp[n2e];  xd[5]=zd_bp[n2e];
+      xd[6]=xd_bp[n3e];  xd[7]=yd_bp[n3e];  xd[8]=zd_bp[n3e];
+
+      xdd[0]=xdd_bp[n1e];  xdd[1]=ydd_bp[n1e];  xdd[2]=zdd_bp[n1e];
+      xdd[3]=xdd_bp[n2e];  xdd[4]=ydd_bp[n2e];  xdd[5]=zdd_bp[n2e];
+      xdd[6]=xdd_bp[n3e];  xdd[7]=ydd_bp[n3e];  xdd[8]=zdd_bp[n3e];
+
+      Mass(ibm, ec, M);
+      if (damping) { Damp(ibm, M, C); }
+
+      if (timeinteg==0) { //Newmark constant average acceleration
+        for (i=0; i<9; i++) {
+          facc=M[i]*(M1*xn[i]+M2*xd[i]+M3*xdd[i]);
+          fvel=C[i]*(C1*xn[i]+C2*xd[i]+C3*xdd[i]);
+          Fd[i]=M[i]*M1*x[i]+C[i]*C1*x[i]-facc-fvel;
+        }
+      } else if (timeinteg==1) { //central
+        for (i=0; i<9; i++) {
+          Fd[i]=M[i]*(x[i]-2*xn[i]+xnm1[i])/(dt*dt)+C[i]*(x[i]-xn[i])/dt;
+        }
+      }
+
+      {
+        PetscInt nodes[3] = {n1e, n2e, n3e};
+        for (PetscInt k=0; k<3; k++) {
+          PetscInt gdof0 = gctx->ibm_to_global_dof0[nodes[k]];
+          if (gdof0 < 0) continue;
+          PetscInt  dofs[3] = {gdof0, gdof0+1, gdof0+2};
+          PetscReal vals[3] = {Fd[3*k], Fd[3*k+1], Fd[3*k+2]};
+          ierr = VecSetValues(fem->Fdyn, 3, dofs, vals, ADD_VALUES); CHKERRQ(ierr);
+        }
+      }
+    }//end loop over local elements
+
+    ierr = VecAssemblyBegin(fem->Fdyn); CHKERRQ(ierr);
+    ierr = VecAssemblyEnd(fem->Fdyn);   CHKERRQ(ierr);
+
+    PetscCall(PetscFree(xn_bp));   PetscCall(PetscFree(yn_bp));   PetscCall(PetscFree(zn_bp));
+    PetscCall(PetscFree(xnm1_bp)); PetscCall(PetscFree(ynm1_bp)); PetscCall(PetscFree(znm1_bp));
+    PetscCall(PetscFree(xd_bp));   PetscCall(PetscFree(yd_bp));   PetscCall(PetscFree(zd_bp));
+    PetscCall(PetscFree(xdd_bp));  PetscCall(PetscFree(ydd_bp));  PetscCall(PetscFree(zdd_bp));
+
+    return 0;
+  }
 
   PetscReal  *xx,*xxn,*xxnm1,*xxd,*xxdd,*FF,facc,fvel;
   VecGetArray(fem->xd, &xxd);
