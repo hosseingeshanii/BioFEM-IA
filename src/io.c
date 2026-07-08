@@ -538,7 +538,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   /* --- Parallel Vec gather: all ranks must participate before rank-0 early return. ---
    * For each Vec, scatter locally-owned entries into an ibm-node-ordered buffer,
    * then MPI_Allreduce (SUM) so rank 0 has the full array for VTK output.        */
-  PetscReal *g_Fint = NULL, *g_Fdyn = NULL, *g_xd = NULL, *g_Fcnt = NULL;
+  PetscReal *g_Fint = NULL, *g_Fdyn = NULL, *g_xd = NULL, *g_Fcnt = NULL, *g_Fext = NULL;
 
   if (gctx->initialized) {
     PetscInt nbuf = ibm->n_v * dof;
@@ -546,10 +546,12 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
     PetscMalloc1(nbuf, &g_Fdyn);
     PetscMalloc1(nbuf, &g_xd);
     PetscMalloc1(nbuf, &g_Fcnt);
+    PetscMalloc1(nbuf, &g_Fext);
     PetscMemzero(g_Fint,  nbuf * sizeof(PetscReal));
     PetscMemzero(g_Fdyn,  nbuf * sizeof(PetscReal));
     PetscMemzero(g_xd,    nbuf * sizeof(PetscReal));
     PetscMemzero(g_Fcnt,  nbuf * sizeof(PetscReal));
+    PetscMemzero(g_Fext,  nbuf * sizeof(PetscReal));
 
 #define GATHER_NODE_VEC(vec, buf) do { \
       const PetscReal *_a; \
@@ -569,12 +571,14 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
     GATHER_NODE_VEC(fem->Fdyn, g_Fdyn);
     GATHER_NODE_VEC(fem->xd,   g_xd);
     GATHER_NODE_VEC(fem->Fcnt, g_Fcnt);
+    GATHER_NODE_VEC(fem->Fext, g_Fext);
 #undef GATHER_NODE_VEC
   }
 
   if (rank != 0) {
     PetscFree(g_Fint); PetscFree(g_Fdyn);
     PetscFree(g_xd);   PetscFree(g_Fcnt);
+    PetscFree(g_Fext);
     return 0;
   }
 
@@ -694,7 +698,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   } while (0)
 
   OUTPUT_VEC("Fint", fem->Fint, g_Fint);
-  OUTPUT_VEC("Fext", fem->Fext, NULL);   /* Fext is set once on all ranks; no gather needed */
+  OUTPUT_VEC("Fext", fem->Fext, g_Fext);
   OUTPUT_VEC("Fdyn", fem->Fdyn, g_Fdyn);
   OUTPUT_VEC("Fcnt", fem->Fcnt, g_Fcnt);
   OUTPUT_VEC("u",    fem->xd,   g_xd);
@@ -707,6 +711,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 
   PetscFree(g_Fint); PetscFree(g_Fdyn);
   PetscFree(g_xd);   PetscFree(g_Fcnt);
+  PetscFree(g_Fext);
 
   PetscFPrintf(PETSC_COMM_WORLD, f, "CELL_DATA %d\n",ibm->n_elmt);
   

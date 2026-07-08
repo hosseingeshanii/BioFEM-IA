@@ -224,7 +224,7 @@ def cmd_run(args):
     cluster   = detect_cluster()
     account   = args.account or cfg.get("slurm", "account", fallback="")
     mpi_flags = cfg.get("mpi", "extra_flags", fallback="")
-    load_env  = _load_env_line()
+    load_env  = "" if args.local else _load_env_line()
 
     # Build extra PETSc options from --monitor and --petsc-opts
     monitors = [m.strip() for m in args.monitor.split(",") if m.strip()]
