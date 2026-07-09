@@ -599,14 +599,13 @@ def _update():
         try:
             with open(data_file) as f:
                 d = json.load(f)
-            ts0 = d.get("ts0", [])
-            rn0 = d.get("rn0", [])
+            rn = d.get("rn", [])
             ax.cla()
-            if ts0 and rn0:
-                ax.semilogy(ts0, rn0, "b.-", linewidth=1.2, markersize=6)
-            ax.set_xlabel("Time step")
-            ax.set_ylabel("Initial ||R||")
-            ax.set_title("SNES convergence — initial ||R|| per time step")
+            if rn:
+                ax.semilogy(range(len(rn)), rn, "b.-", linewidth=1.2, markersize=6)
+            ax.set_xlabel("Newton iteration (cumulative)")
+            ax.set_ylabel("||R||")
+            ax.set_title("SNES convergence — all Newton iterations")
             ax.grid(True, which="both", alpha=0.3)
             fig.tight_layout()
             # Schedule the canvas flush in tornado's own thread (thread-safe).
@@ -648,21 +647,14 @@ def _parse_residual_log(log_file):
     return timesteps, snes_iters, rnorms
 
 
-def _draw_snes_plot(ax, timesteps, snes_iters, rnorms):
-    """Single-panel: initial SNES ||R|| (Newton iter 0) per completed time step."""
-    ts0_steps, ts0_norms = [], []
-    seen = set()
-    for ts, si, rn in zip(timesteps, snes_iters, rnorms):
-        if si == 0 and ts not in seen:
-            ts0_steps.append(ts)
-            ts0_norms.append(rn)
-            seen.add(ts)
+def _draw_snes_plot(ax, rnorms):
+    """Single-panel: every SNES Newton iteration's ||R||, across all time steps."""
     ax.cla()
-    if ts0_norms:
-        ax.semilogy(ts0_steps, ts0_norms, "b.-", linewidth=1.2, markersize=6)
-    ax.set_xlabel("Time step")
-    ax.set_ylabel("Initial ||R||")
-    ax.set_title("SNES convergence — initial residual per time step")
+    if rnorms:
+        ax.semilogy(range(len(rnorms)), rnorms, "b.-", linewidth=1.2, markersize=6)
+    ax.set_xlabel("Newton iteration (cumulative)")
+    ax.set_ylabel("||R||")
+    ax.set_title("SNES convergence — all Newton iterations")
     ax.grid(True, which="both", alpha=0.3)
 
 
@@ -732,13 +724,8 @@ def _run_with_monitor(shell_cmd, run_dir, port, out_dir="output"):
                         print(f"\r[biofem] step={ts[-1]}  newton={si[-1]}  rnorm={rn[-1]:.3e}",
                               end="", flush=True)
                         if use_webagg:
-                            ts0, rn0 = [], []
-                            seen: set = set()
-                            for t, s, r in zip(ts, si, rn):
-                                if s == 0 and t not in seen:
-                                    ts0.append(t); rn0.append(r); seen.add(t)
                             try:
-                                data_file.write_text(_json.dumps({"ts0": ts0, "rn0": rn0}))
+                                data_file.write_text(_json.dumps({"rn": rn}))
                             except Exception:
                                 pass
 
@@ -772,7 +759,7 @@ def _run_with_monitor(shell_cmd, run_dir, port, out_dir="output"):
             fig2 = _Fig(figsize=(10, 5))
             _FCA(fig2)
             ax2 = fig2.add_subplot(1, 1, 1)
-            _draw_snes_plot(ax2, ts, si, rn)
+            _draw_snes_plot(ax2, rn)
             fig2.tight_layout()
             fig2.savefig(png_file, dpi=100)
             print(f"\n[biofem] plot saved → {png_file}")
