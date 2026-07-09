@@ -635,6 +635,7 @@ import sys, json, time
 data_file = sys.argv[1]
 import matplotlib
 fig = ax = None
+errors = []
 for backend in ("TkAgg", "Qt5Agg", "QtAgg"):
     try:
         matplotlib.use(backend, force=True)
@@ -642,11 +643,13 @@ for backend in ("TkAgg", "Qt5Agg", "QtAgg"):
         fig, ax = plt.subplots(figsize=(10, 5))
         plt.show(block=False)
         break
-    except Exception:
+    except Exception as e:
+        errors.append(f"{backend}: {e}")
         fig = ax = None
         continue
 if fig is None:
-    sys.exit(1)   # no usable GUI backend / no display — caller falls back to WebAgg
+    print("no usable GUI backend / display —\n  " + "\n  ".join(errors), file=sys.stderr)
+    sys.exit(1)   # caller falls back to WebAgg
 
 while True:
     try:
@@ -741,10 +744,12 @@ def _run_with_monitor(shell_cmd, run_dir, port, out_dir="output"):
                 )
                 _time.sleep(1.5)   # give the GUI backend time to open the window
                 if display_proc.poll() is not None:
-                    raise RuntimeError("no usable GUI backend / display")
+                    err = display_proc.stderr.read().decode(errors="replace").strip()
+                    raise RuntimeError(err or "GUI display process exited immediately")
                 use_gui = True
                 print("[biofem] live plot → native window")
-            except Exception:
+            except Exception as e:
+                print(f"[biofem] native window unavailable ({e}); falling back to WebAgg")
                 if display_proc is not None:
                     display_proc.terminate()
                     display_proc = None
