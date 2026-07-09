@@ -626,6 +626,50 @@ threading.Thread(target=_update, daemon=True).start()
 plt.show()   # blocking — tornado owns this thread; subprocess is killed by parent on exit
 """
 
+# Embedded script that opens a native matplotlib window (Tk/Qt) instead of
+# WebAgg. Only usable when a real display is reachable (local X, or ssh -Y/-X
+# forwarding) — VS Code's integrated terminal has no DISPLAY, so this is
+# skipped there and WebAgg is used instead.
+_GUI_DISPLAY_SCRIPT = r"""
+import sys, json, time
+data_file = sys.argv[1]
+import matplotlib
+fig = ax = None
+for backend in ("TkAgg", "Qt5Agg", "QtAgg"):
+    try:
+        matplotlib.use(backend, force=True)
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(10, 5))
+        plt.show(block=False)
+        break
+    except Exception:
+        fig = ax = None
+        continue
+if fig is None:
+    sys.exit(1)   # no usable GUI backend / no display — caller falls back to WebAgg
+
+while True:
+    try:
+        with open(data_file) as f:
+            d = json.load(f)
+        rn = d.get("rn", [])
+        ax.cla()
+        if rn:
+            ax.semilogy(range(len(rn)), rn, "b.-", linewidth=1.2, markersize=6)
+        ax.set_xlabel("Newton iteration (cumulative)")
+        ax.set_ylabel("||R||")
+        ax.set_title("SNES convergence — all Newton iterations")
+        ax.grid(True, which="both", alpha=0.3)
+        fig.tight_layout()
+        fig.canvas.draw_idle()
+    except Exception:
+        pass
+    try:
+        plt.pause(2.0)   # pumps the GUI event loop while waiting
+    except Exception:
+        break   # window was closed by the user
+"""
+
 def _parse_residual_log(log_file):
     timesteps, snes_iters, rnorms = [], [], []
     try:
@@ -674,31 +718,56 @@ def _run_with_monitor(shell_cmd, run_dir, port, out_dir="output"):
     log_file = run_dir / out_dir / "residual.log"
     png_file = run_dir / out_dir / "residual_monitor.png"
 
-    # ── launch WebAgg display subprocess ─────────────────────────────────────
-    data_file    = Path(_tmp.mktemp(suffix="_biofem_webagg.json"))
+    # ── launch a live-plot display subprocess ────────────────────────────────
+    # Prefer a native GUI window (local X11, or ssh -X/-Y forwarding) since
+    # that's usable outside a browser. Only try it when DISPLAY is actually
+    # set — VS Code's integrated terminal has no DISPLAY, so this is skipped
+    # there and we fall straight to WebAgg (a local server + browser tab).
+    data_file    = Path(_tmp.mktemp(suffix="_biofem_plot.json"))
     display_proc = None
     use_webagg   = False
+    use_gui      = False
     try:
         import matplotlib  # check availability only; do NOT import pyplot here
         data_file.write_text("{}")
-        display_proc = subprocess.Popen(
-            [_sys.executable, "-c", _WEBAGG_DISPLAY_SCRIPT, str(port), str(data_file)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            start_new_session=True,   # isolate from terminal Ctrl+C signal
-        )
-        _time.sleep(2.5)              # give tornado time to bind the port
-        if display_proc.poll() is not None:
-            err = display_proc.stderr.read().decode(errors="replace").strip()
-            raise RuntimeError(err or "display process exited immediately")
-        use_webagg = True
-        print(f"[biofem] live plot → http://localhost:{port}")
-        print(f"[biofem] (VSCode: Ports tab → forward {port}, then open in browser)")
+
+        if os.environ.get("DISPLAY"):
+            try:
+                display_proc = subprocess.Popen(
+                    [_sys.executable, "-c", _GUI_DISPLAY_SCRIPT, str(data_file)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True,
+                )
+                _time.sleep(1.5)   # give the GUI backend time to open the window
+                if display_proc.poll() is not None:
+                    raise RuntimeError("no usable GUI backend / display")
+                use_gui = True
+                print("[biofem] live plot → native window")
+            except Exception:
+                if display_proc is not None:
+                    display_proc.terminate()
+                    display_proc = None
+
+        if not use_gui:
+            display_proc = subprocess.Popen(
+                [_sys.executable, "-c", _WEBAGG_DISPLAY_SCRIPT, str(port), str(data_file)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                start_new_session=True,   # isolate from terminal Ctrl+C signal
+            )
+            _time.sleep(2.5)              # give tornado time to bind the port
+            if display_proc.poll() is not None:
+                err = display_proc.stderr.read().decode(errors="replace").strip()
+                raise RuntimeError(err or "display process exited immediately")
+            use_webagg = True
+            print(f"[biofem] live plot → http://localhost:{port}")
+            print(f"[biofem] (VSCode: Ports tab → forward {port}, then open in browser)")
     except Exception as e:
         if display_proc is not None:
             display_proc.terminate()
             display_proc = None
-        print(f"[biofem] WebAgg unavailable ({e})")
+        print(f"[biofem] live plot unavailable ({e})")
         print(f"[biofem] running without live plot — PNG saved to {png_file}")
 
     # ── start solver / sbatch ─────────────────────────────────────────────────
@@ -723,7 +792,7 @@ def _run_with_monitor(shell_cmd, run_dir, port, out_dir="output"):
                     if rn:
                         print(f"\r[biofem] step={ts[-1]}  newton={si[-1]}  rnorm={rn[-1]:.3e}",
                               end="", flush=True)
-                        if use_webagg:
+                        if use_gui or use_webagg:
                             try:
                                 data_file.write_text(_json.dumps({"rn": rn}))
                             except Exception:
