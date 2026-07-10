@@ -57,6 +57,10 @@ extern struct Cmpnts AMULT(PetscReal alpha, struct Cmpnts v1);
  *   interior vertex has valence 6 (regular subdivision surface).      */
 #define RING_NODE(k, j, Np)  ((k)*(Np) + (j))
 
+/* 0-based flat index of apex-cap center node i (0,1,2), stored right after
+ * all ring nodes: index N_total*N_phi + i.                                */
+#define CAP_NODE(i, N_total, Np)  ((N_total)*(Np) + (i))
+
 /* ------------------------------------------------------------------ */
 
 PetscErrorCode LVParamsCreate(LVParams *p)
@@ -98,6 +102,15 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* Total rings = base mesh rings + extra apex rings */
   PetscInt  N_total        = N_theta + N_apex_extra;
 
+  /* Apex cap: 3 interior nodes forming 1 central triangle, fanned out to the
+   * ring-0 boundary (nearest-node assignment split into 3 angular zones).
+   * This trades the old single-node fan's severe singularity (valence
+   * N_phi) for 3 nodes at a more moderate valence (~N_phi/3 + 3), while
+   * most ring-0 nodes only gain +1 valence (one seam node per zone gains
+   * +2) — see design discussion, exact valence 6 throughout is not
+   * reachable with a single-layer 3-node cap when N_phi is large. */
+  const PetscInt N_cap_nodes = 3;
+
   PetscErrorCode ierr;
 
   /* ----------------------------------------------------------------
@@ -113,16 +126,23 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* PetscReal z_apex     = a; */   /* unused: apex cap removed */
   PetscReal z_base     = a * cos(theta_cut);
 
+  /* Cap element count: N_phi-3 zone-interior fan triangles (one per ring-0
+   * edge strictly inside a zone) + 6 seam-bridging triangles (2 per each of
+   * the 3 zone boundaries) + 1 central triangle = N_phi + 4. Every ring-0
+   * edge ends up covered by exactly one new triangle, closing the hole. */
+  PetscInt n_cap_elmt   = N_phi + 4;
+
   PetscInt n_elmt_base  = (N_total - 1) * 2 * N_phi;   /* quad strips only         */
-  PetscInt n_v          = N_total * N_phi;              /* rings only, no apex node */
-  PetscInt n_elmt       = n_elmt_base;                  /* quad strips only         */
-  /* NOTE: apex fan commented out — top boundary is open like the base.
-   *   + N_phi;  simple apex fan */
+  PetscInt n_v          = N_total * N_phi + N_cap_nodes;
+  /* n_elmt_base intentionally EXCLUDES the cap: IrrVer()/Patch() already
+   * skip ec >= n_elmt_base for Loop-subdivision valence classification and
+   * fall back to CST membrane elements there (see bending.c / active_strain.c) —
+   * exactly the mechanism needed for the cap's irregular valence. */
+  PetscInt n_elmt       = n_elmt_base + n_cap_elmt;
   PetscInt n_edge       = 0;  /* base BC via EdgeDirectionalFix, no ghosts */
   PetscInt n_ghosts     = 0;
-  /* Both apex ring AND base ring are boundary for IrrVer's ghost trick.
-     Apex ring BCs are NOT imposed (EdgeDirectionalFix only uses edge_n=1 below). */
-  PetscInt sum_n_bnodes = 2 * N_phi;
+  /* Apex ring, base ring, AND the 3 new fixed apex-cap nodes are boundary groups. */
+  PetscInt sum_n_bnodes = 2 * N_phi + N_cap_nodes;
 
   ibm->n_v          = n_v;
   ibm->n_elmt       = n_elmt;
@@ -157,10 +177,13 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* EdgeDirectionalFix unconditionally reads n_bnodes[0..3]; zero-init 8 slots */
   PetscFree(ibm->n_bnodes);
   ierr = PetscCalloc1(8, &ibm->n_bnodes); CHKERRQ(ierr);
-  /* n_bnodes[0]=N_phi tells IrrVer the apex ring is a boundary (bcount=3+3=6 → regular).
-     No actual force BCs are applied to it — EdgeDirectionalFix only targets edge_n=1. */
+  /* group 0: apex ring — fixed via EdgeDirectionalFix(0,...) in main.c, and also
+   *          tells IrrVer the apex ring is a boundary (bcount=count+3=6 → regular).
+   * group 1: base ring — currently NOT fixed (main.c only calls edge_n=0 and 2).
+   * group 2: the 3 new apex-cap center nodes — fixed via EdgeDirectionalFix(2,...). */
   ibm->n_bnodes[0] = N_phi;
-  ibm->n_bnodes[1] = N_phi;   /* base ring — fixed via EdgeDirectionalFix */
+  ibm->n_bnodes[1] = N_phi;
+  ibm->n_bnodes[2] = N_cap_nodes;
 
   /* ----------------------------------------------------------------
    * 3.  Node coordinates  —  RING_NODE(k,j,N_phi) = k*N_phi + j
@@ -191,17 +214,35 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     }
   }
 
-  /* Apex node removed: top boundary is open. */
-  /* PetscInt n_apex_node = N_theta * N_phi;
-  ibm->x_bp[n_apex_node]  = 0.0;  ibm->x_bp0[n_apex_node] = 0.0;
-  ibm->y_bp[n_apex_node]  = 0.0;  ibm->y_bp0[n_apex_node] = 0.0;
-  ibm->z_bp[n_apex_node]  = z_apex; ibm->z_bp0[n_apex_node] = z_apex; */
+  /* Apex-cap center nodes: 3 nodes on the analytic spheroid surface,
+   * halfway (in theta) between the true apex and ring 0 — using the same
+   * two-segment formula as above so this stays correct whether or not
+   * N_apex_extra squeezes ring 0 closer to the tip — evenly spaced in phi
+   * so they sit at the center of their angular zone (zone i spans phi
+   * roughly [i*120°, (i+1)*120°], see stage 4). */
+  {
+    PetscReal theta_ring0 = (N_apex_extra > 0)
+      ? theta_step / (PetscReal)(N_apex_extra + 1)
+      : theta_step;
+    PetscReal theta_c = 0.5 * theta_ring0;
+    PetscReal sth_c   = sin(theta_c);
+    PetscReal cth_c   = cos(theta_c);
+    for (PetscInt i = 0; i < N_cap_nodes; i++) {
+      PetscReal phi_c = 2.0 * PETSC_PI * ((PetscReal)i + 0.5) / (PetscReal)N_cap_nodes;
+      PetscInt  nc    = CAP_NODE(i, N_total, N_phi);
+      ibm->x_bp[nc]  = b * sth_c * cos(phi_c);
+      ibm->y_bp[nc]  = b * sth_c * sin(phi_c);
+      ibm->z_bp[nc]  = a * cth_c;
+      ibm->x_bp0[nc] = ibm->x_bp[nc];
+      ibm->y_bp0[nc] = ibm->y_bp[nc];
+      ibm->z_bp0[nc] = ibm->z_bp[nc];
+    }
+  }
 
   /* ----------------------------------------------------------------
    * 4.  Element connectivity  (0-based node indices)
    *
-   *   Quad strips only — apex fan commented out.  Top boundary is open
-   *   like the base so every interior vertex has valence 6 (regular).
+   *   Quad strips (base mesh) followed by the 3-node apex cap.
    * ---------------------------------------------------------------- */
   PetscInt ec = 0;
 
@@ -218,14 +259,91 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     }
   }
 
-  /* Apex fan removed: top ring is open boundary.
-  for (PetscInt j = 0; j < N_phi; j++) {
-    PetscInt jn = (j + 1) % N_phi;
-    ibm->nv1[ec] = RING_NODE(0, j,  N_phi);
-    ibm->nv2[ec] = RING_NODE(0, jn, N_phi);
-    ibm->nv3[ec] = n_apex_node;
+  /* n_elmt_base excludes the cap by design (see comment at its definition
+   * above) — ec must equal n_elmt_base exactly at this point. */
+  if (ec != n_elmt_base) {
+    SETERRQ2(PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+             "LV mesh: base element count mismatch (ec=%d, n_elmt_base=%d)",
+             (int)ec, (int)n_elmt_base);
+  }
+
+  /* ----------------------------------------------------------------
+   * 4b.  Apex cap  —  3 center nodes fanned out to ring 0.
+   *
+   *   Ring-0 nodes are split into 3 contiguous angular zones (nearest-
+   *   center assignment). Each zone is fanned to its center node; the 3
+   *   zone boundaries ("seams") are bridged by 2 triangles each, reusing
+   *   the center triangle's edges so every ring-0 edge ends up covered by
+   *   exactly one new triangle and the mesh stays manifold.
+   * ---------------------------------------------------------------- */
+  {
+    PetscInt zone_bound[4];
+    for (PetscInt i = 0; i <= N_cap_nodes; i++) {
+      zone_bound[i] = (PetscInt)round((PetscReal)i * (PetscReal)N_phi
+                                       / (PetscReal)N_cap_nodes);
+    }
+
+    for (PetscInt i = 0; i < N_cap_nodes; i++) {
+      PetscInt c_i = CAP_NODE(i, N_total, N_phi);
+      /* zone-interior fan: one triangle per ring-0 edge strictly inside the zone */
+      for (PetscInt k = zone_bound[i]; k < zone_bound[i + 1] - 1; k++) {
+        ibm->nv1[ec] = RING_NODE(0, k,     N_phi);
+        ibm->nv2[ec] = RING_NODE(0, k + 1, N_phi);
+        ibm->nv3[ec] = c_i;
+        ec++;
+      }
+    }
+
+    for (PetscInt i = 0; i < N_cap_nodes; i++) {
+      PetscInt i_next   = (i + 1) % N_cap_nodes;
+      PetscInt c_i      = CAP_NODE(i,      N_total, N_phi);
+      PetscInt c_next   = CAP_NODE(i_next, N_total, N_phi);
+      PetscInt r_last   = zone_bound[i + 1] - 1;             /* last node of zone i     */
+      PetscInt r_seam   = zone_bound[i + 1] % N_phi;          /* first node of zone i+1  */
+
+      /* seam bridge A: covers the ring-0 boundary edge (r_last, r_seam) */
+      ibm->nv1[ec] = RING_NODE(0, r_last, N_phi);
+      ibm->nv2[ec] = RING_NODE(0, r_seam, N_phi);
+      ibm->nv3[ec] = c_i;
+      ec++;
+
+      /* seam bridge B: fills the gap up to the center triangle's edge */
+      ibm->nv1[ec] = c_next;
+      ibm->nv2[ec] = c_i;
+      ibm->nv3[ec] = RING_NODE(0, r_seam, N_phi);
+      ec++;
+    }
+
+    /* center triangle */
+    ibm->nv1[ec] = CAP_NODE(0, N_total, N_phi);
+    ibm->nv2[ec] = CAP_NODE(1, N_total, N_phi);
+    ibm->nv3[ec] = CAP_NODE(2, N_total, N_phi);
     ec++;
-  } */
+
+    /* Orientation fix: for a star-shaped-about-origin surface like this
+     * spheroid, the outward normal always has positive dot product with
+     * the element centroid. Swap nv2/nv3 on any cap triangle that fails
+     * this test so all cap elements share consistent outward winding with
+     * the rest of the mesh, regardless of the manual ordering above. */
+    for (PetscInt e = n_elmt_base; e < ec; e++) {
+      PetscInt n1 = ibm->nv1[e], n2 = ibm->nv2[e], n3 = ibm->nv3[e];
+      struct Cmpnts p1 = {ibm->x_bp[n1], ibm->y_bp[n1], ibm->z_bp[n1]};
+      struct Cmpnts p2 = {ibm->x_bp[n2], ibm->y_bp[n2], ibm->z_bp[n2]};
+      struct Cmpnts p3 = {ibm->x_bp[n3], ibm->y_bp[n3], ibm->z_bp[n3]};
+      struct Cmpnts centroid = AMULT(1.0 / 3.0, PLUS(PLUS(p1, p2), p3));
+      struct Cmpnts normal   = CROSS(MINUS(p2, p1), MINUS(p3, p1));
+      if (DOT(normal, centroid) < 0.0) {
+        ibm->nv2[e] = n3;
+        ibm->nv3[e] = n2;
+      }
+    }
+  }
+
+  if (ec != n_elmt) {
+    SETERRQ2(PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+             "LV mesh: total element count mismatch (ec=%d, n_elmt=%d)",
+             (int)ec, (int)n_elmt);
+  }
 
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 4: connectivity done (%d elements)\n", (int)ec);
 

@@ -792,10 +792,17 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   //   VecRestoreArray(fem->x, &xx);
   // }
 
-  /* Fix the LV apex ring (edge_n=0) in all 3 directions; base (edge_n=1) is free. */
+  /* Apex ring (edge_n=0) is no longer pinned — the apex cap now spans the
+   * hole with real elements, so fully fixing the ring would over-constrain
+   * it. Only the 3 apex-cap center nodes stay fixed.
   ierr = EdgeDirectionalFix(0, 0, fem, R); CHKERRQ(ierr);
   ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
-  ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr); */
+  /* Fix the 3 apex-cap center nodes (edge_n=2, see lv_geometry.c). No-op
+   * (n_bnodes[2]=0) for any mesh type that doesn't populate this group. */
+  ierr = EdgeDirectionalFix(2, 0, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(2, 1, fem, R); CHKERRQ(ierr);
+  ierr = EdgeDirectionalFix(2, 2, fem, R); CHKERRQ(ierr);
   ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
   // GlobalGhost(ibm);

@@ -1283,6 +1283,13 @@ PetscErrorCode Patch(IBMNodes *ibm) {
       for (i = 0; i < maxPatchWidth; i++) {
         ibm->patch[16*ec + i] = 1000000;
       }
+      /* ElemUpdFint()'s CST fallback (active_strain.c) searches patch[] for
+       * nv1/nv2/nv3 within [0, val[ec]+6) slots — place them at the same
+       * slot positions (3,6,7) the regular-patch case below uses so that
+       * lookup succeeds for cap elements too. */
+      ibm->patch[16*ec + 3] = ibm->nv1[ec];
+      ibm->patch[16*ec + 6] = ibm->nv2[ec];
+      ibm->patch[16*ec + 7] = ibm->nv3[ec];
       continue;
     }
 
