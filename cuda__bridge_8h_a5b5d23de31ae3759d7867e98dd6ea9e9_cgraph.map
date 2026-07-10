@@ -1,0 +1,9 @@
+<map id="PrepareCudaHostWorkspace" name="PrepareCudaHostWorkspace">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,31,212,56"/>
+<area shape="rect" id="Node000002" href="$cuda__wrapper_8cpp.html#af58a317c68baf828e294afef2d80de72" title=" " alt="" coords="260,5,407,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="212,29,246,25,247,30,213,34"/>
+<area shape="rect" id="Node000004" href="$cuda__wrapper_8cpp.html#afbeb0c3bba48ea9eaf049937e95aff2c" title=" " alt="" coords="263,55,404,80"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="213,52,249,56,248,61,212,57"/>
+<area shape="rect" id="Node000003" href="$cuda__wrapper_8cpp.html#af5d59f1f3f208d21777faed2e8763f3f" title=" " alt="" coords="455,5,631,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="407,15,441,15,441,21,407,21"/>
+</map>

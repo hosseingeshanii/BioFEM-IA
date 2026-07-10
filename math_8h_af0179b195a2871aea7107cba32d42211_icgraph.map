@@ -1,0 +1,19 @@
+<map id="TRANS" name="TRANS">
+<area shape="rect" id="Node000001" title=" " alt="" coords="867,31,933,56"/>
+<area shape="rect" id="Node000002" href="$muscle__activation_8c.html#a4c5d08ae67f23baed5c8a45656a64f84" title=" " alt="" coords="684,5,819,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="853,38,818,32,819,27,854,33"/>
+<area shape="rect" id="Node000005" href="$active__strain_8c.html#ade5fbd2ac288952d9b05edaa3cfab167" title="Compute active deformation gradient for one element." alt="" coords="686,55,817,80"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="854,53,817,59,817,54,853,48"/>
+<area shape="rect" id="Node000003" href="$muscle__activation_8c.html#ac332e445f79d1bdc2c6cd1e00514021e" title=" " alt="" coords="522,5,621,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="671,21,621,21,621,15,671,15"/>
+<area shape="rect" id="Node000004" href="$muscle__activation_8c.html#aad998374ae4f3ca2c8f14b4c4b2aaafd" title=" " alt="" coords="295,5,459,31"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="508,21,459,21,459,15,508,15"/>
+<area shape="rect" id="Node000006" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="507,55,636,80"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="673,70,637,70,637,65,673,65"/>
+<area shape="rect" id="Node000007" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="326,55,427,80"/>
+<area shape="poly" id="edge6_Node000006_Node000007" title=" " alt="" coords="493,70,427,70,427,65,493,65"/>
+<area shape="rect" id="Node000008" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="108,55,247,80"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="312,70,247,70,247,65,312,65"/>
+<area shape="rect" id="Node000009" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,55,60,80"/>
+<area shape="poly" id="edge8_Node000008_Node000009" title=" " alt="" coords="94,70,60,70,60,65,94,65"/>
+</map>

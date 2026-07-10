@@ -1,0 +1,29 @@
+<map id="FE" name="FE">
+<area shape="rect" id="Node000001" title=" " alt="" coords="424,607,463,632"/>
+<area shape="rect" id="Node000002" href="$structActData.html" title="Global active&#45;strain data stored in FE context." alt="" coords="269,519,343,544"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="329,552,365,580,396,597,425,609,423,614,393,602,362,585,325,556"/>
+<area shape="rect" id="Node000003" href="$structMuscleActParams.html" title="Active&#45;muscle model parameters." alt="" coords="72,431,209,456"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="149,469,155,482,164,493,188,508,215,518,269,527,268,532,214,523,185,513,160,497,150,485,144,471"/>
+<area shape="rect" id="Node000004" href="$structElemActData.html" title="Element&#45;level active&#45;strain tensors, stresses, and cached basis/geometry." alt="" coords="245,431,351,456"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="303,470,308,518,302,518,298,470"/>
+<area shape="rect" id="Node000005" href="$structElem2DTens.html" title="Second&#45;order tensor in covariant and contravariant forms." alt="" coords="5,196,108,221"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="63,234,72,272,88,319,112,365,128,386,146,404,183,416,245,430,244,435,181,421,143,409,124,390,107,368,83,321,67,274,58,235"/>
+<area shape="rect" id="Node000006" href="$structElem4DTens.html" title="Fourth&#45;order tensor (for example, material tangent)." alt="" coords="132,196,235,221"/>
+<area shape="poly" id="edge5_Node000004_Node000006" title=" " alt="" coords="193,234,222,313,243,360,268,405,288,429,284,432,264,408,238,362,217,315,188,235"/>
+<area shape="rect" id="Node000007" href="$structElemVec.html" title="Vector in covariant and contravariant forms." alt="" coords="259,196,337,221"/>
+<area shape="poly" id="edge6_Node000004_Node000007" title=" " alt="" coords="301,235,301,430,295,430,295,235"/>
+<area shape="rect" id="Node000008" href="$structCmpnts.html" title=" " alt="" coords="387,5,459,31"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="400,41,385,56,358,94,335,134,305,197,300,195,331,132,354,92,381,53,396,38"/>
+<area shape="rect" id="Node000009" href="$structSubdivGeomQP.html" title="Cached subdivision&#45;surface geometry quantities at one quadrature point." alt="" coords="362,196,485,221"/>
+<area shape="poly" id="edge9_Node000009_Node000008" title=" " alt="" coords="426,45,426,196,421,196,421,45"/>
+<area shape="rect" id="Node000013" href="$structIBMNodes.html" title=" " alt="" coords="406,313,494,339"/>
+<area shape="poly" id="edge14_Node000013_Node000008" title=" " alt="" coords="458,37,472,53,490,90,496,122,499,196,499,222,481,275,460,314,455,312,476,273,494,221,494,196,491,122,485,92,468,56,454,40"/>
+<area shape="poly" id="edge8_Node000004_Node000009" title=" " alt="" coords="371,230,351,247,338,267,332,286,331,322,333,361,330,383,323,408,310,432,305,429,318,406,325,382,327,361,325,322,327,285,333,265,347,244,368,225"/>
+<area shape="rect" id="Node000010" href="$structDMPlexGeomCtx.html" title="Persistent DMPlex geometry context stored in FE." alt="" coords="490,519,623,544"/>
+<area shape="poly" id="edge10_Node000001_Node000010" title=" " alt="" coords="532,554,460,609,457,604,529,550"/>
+<area shape="rect" id="Node000011" href="$structDMPlexPatchLayout.html" title="Per&#45;rank local copy of Loop subdivision patch stencil data." alt="" coords="481,431,632,456"/>
+<area shape="poly" id="edge11_Node000010_Node000011" title=" " alt="" coords="559,470,559,518,554,518,554,470"/>
+<area shape="rect" id="Node000012" href="$structDMPlexPatchExchange.html" title="MPI coordinate exchange for cross&#45;rank patch stencil nodes." alt="" coords="657,431,827,456"/>
+<area shape="poly" id="edge12_Node000010_Node000012" title=" " alt="" coords="706,464,583,521,581,516,703,460"/>
+<area shape="poly" id="edge13_Node000001_Node000013" title=" " alt="" coords="452,352,446,606,441,606,447,352"/>
+</map>
