@@ -101,7 +101,12 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   PetscMalloc((ibm->n_elmt + 2*ibm->n_ghosts)*sizeof(PetscInt), &(ibm->nv3));
   
   PetscMalloc(ibm->n_elmt*sizeof(struct Cmpnts), &(ibm->n_fib));
-  
+
+  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->gamma_scale));
+  for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->gamma_scale[i] = 1.0;
+
+  ibm->n_apex_pin = 0;
+
   PetscMalloc(ibm->n_edge*sizeof(PetscInt), &(ibm->n_bnodes));
   
   PetscMalloc(ibm->n_elmt*sizeof(PetscInt), &(ibm->nv4));

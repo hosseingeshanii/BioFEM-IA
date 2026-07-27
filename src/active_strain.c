@@ -1189,6 +1189,9 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
     PetscReal tmp[3][3];
 
     PetscReal gamma = GammaOfTime(&fem->act_data.muscle_act_params);
+    /* Per-element activation scale (e.g. LV apex-cap taper, see
+     * lv_geometry.c); defaults to 1.0 for mesh types that don't set it. */
+    gamma *= ibm->gamma_scale[ec];
 
     /* Print gamma once per timestep to confirm ramp. */
     if (ec == 0) {

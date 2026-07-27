@@ -610,47 +610,60 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* Direction vector pointing from apex toward base along the z axis */
   struct Cmpnts e_down = {0.0, 0.0, -1.0};
 
-  /* Apex cap: no active fiber contribution at all. The circumferential/
-   * meridional frame (e_c, e_l) has a genuine coordinate singularity right
-   * at the true apex point (like the "hairy ball" pole of a sphere) —
-   * direction rotates with azimuthal angle at a fixed polar angle, so
-   * neighboring elements around the (few, coarse) apex-cap fan get
-   * near-orthogonal fiber directions while sharing the same apex vertex,
-   * fighting each other in the active-stress term F_a = I - gamma*(f (x) f).
-   * The cap isn't real myocardium anyway (it's a numerical closure of the
-   * analytic mesh, not tissue) — simplest and most robust treatment for now
-   * is to make it fully passive: n_fib = 0 there, so F_a = I identically and
-   * the fiber direction never has to be resolved.
+  /* Apex cap: no active fiber contribution at all, via gamma_scale=0 (see
+   * ElemActDefGrad in active_strain.c, which multiplies gamma by
+   * ibm->gamma_scale[ec]) rather than zeroing n_fib itself — n_fib stays a
+   * genuine unit direction everywhere so nothing downstream that assumes a
+   * unit fiber vector breaks. The circumferential/meridional frame (e_c,
+   * e_l) still has a coordinate singularity right at the true apex point
+   * (like the "hairy ball" pole of a sphere), but since the cap carries no
+   * active stress at all that singularity never matters mechanically.
    *
-   * Ring 0 is ALSO pinned now (see main.c EdgeDirectionalFix(0,...)), but
-   * unlike the cap it's real LV wall — going straight from 0% (cap) to
-   * 100% activation right at that pinned boundary produced the same
-   * tearing/spiking one layer further out that pinning ring 0 was meant to
-   * fix in the first place: a hard on/off activation switch right next to
-   * a rigid wall concentrates all the strain into whatever is immediately
-   * adjacent to it, no matter where that boundary sits. Instead, ramp
-   * |n_fib| linearly from 0 at theta_ring0 (the pinned boundary) up to 1
-   * over -lv_N_taper_rings ring spacings, so nearby elements pick up
-   * contraction gradually rather than being yanked at full strength right
-   * next to an immovable wall. Elements fully beyond the taper zone are
-   * completely unaffected (weight clamps to 1). */
+   * Ring 0 is free (not pinned — see main.c), but going straight from 0%
+   * (cap) to 100% activation right at the cap/ring-0 boundary produced
+   * tearing/spiking there: a hard on/off activation switch right next to a
+   * rigid boundary concentrates all the strain into whatever is
+   * immediately adjacent to it. Instead, ramp gamma itself (via
+   * gamma_scale) linearly from 0 at theta_ring0 (the cap edge) up to 1 over
+   * -lv_N_taper_rings ring spacings, so nearby elements pick up contraction
+   * gradually. Elements fully beyond the taper zone are unaffected
+   * (gamma_scale clamps to 1). */
   PetscReal theta_ring0_for_taper = (N_apex_extra > 0)
     ? theta_step / (PetscReal)(N_apex_extra + 1)
     : theta_step;
   PetscReal theta_taper_width = (PetscReal)N_taper_rings * theta_step;
 
   for (ec = 0; ec < n_elmt; ec++) {
+    PetscInt n1e, n2e, n3e;
+    struct Cmpnts c;
+
     if (ec >= n_elmt_base) {
-      ibm->n_fib[ec].x = 0.0;
-      ibm->n_fib[ec].y = 0.0;
-      ibm->n_fib[ec].z = 0.0;
+      /* Cap elements: use the element's own vertex centroid for direction
+       * (harmless — gamma_scale=0 makes the direction mechanically inert)
+       * and fully deactivate via gamma_scale. */
+      n1e = ibm->nv1[ec]; n2e = ibm->nv2[ec]; n3e = ibm->nv3[ec];
+      c.x = (ibm->x_bp[n1e] + ibm->x_bp[n2e] + ibm->x_bp[n3e]) / 3.0;
+      c.y = (ibm->y_bp[n1e] + ibm->y_bp[n2e] + ibm->y_bp[n3e]) / 3.0;
+      c.z = (ibm->z_bp[n1e] + ibm->z_bp[n2e] + ibm->z_bp[n3e]) / 3.0;
+
+      struct Cmpnts grad_F = {c.x / (b * b), c.y / (b * b), c.z / (a * a)};
+      struct Cmpnts e_n = UNIT(grad_F);
+      struct Cmpnts e_x = {1.0, 0.0, 0.0};
+      PetscReal d2 = DOT(e_x, e_n);
+      struct Cmpnts e_l_raw = {e_x.x - d2 * e_n.x, e_x.y - d2 * e_n.y, e_x.z - d2 * e_n.z};
+      struct Cmpnts e_l = UNIT(e_l_raw);
+      struct Cmpnts e_c = CROSS(e_n, e_l);
+
+      ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
+      ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
+      ibm->n_fib[ec].z = cos(alpha) * e_c.z + sin(alpha) * e_l.z;
+      ibm->gamma_scale[ec] = 0.0;
       continue;
     }
 
-    PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
+    n1e = ibm->nv1[ec]; n2e = ibm->nv2[ec]; n3e = ibm->nv3[ec];
 
     /* Element centroid */
-    struct Cmpnts c;
     c.x = (ibm->x_bp[n1e] + ibm->x_bp[n2e] + ibm->x_bp[n3e]) / 3.0;
     c.y = (ibm->y_bp[n1e] + ibm->y_bp[n2e] + ibm->y_bp[n3e]) / 3.0;
     c.z = (ibm->z_bp[n1e] + ibm->z_bp[n2e] + ibm->z_bp[n3e]) / 3.0;
@@ -689,7 +702,8 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     /* Ring-0 activation taper: theta from centroid z (c.z ~= a*cos(theta)
      * near the surface); clamp for centroids that land fractionally
      * outside [-1,1] due to averaging, then ramp linearly 0 (at
-     * theta_ring0, the pinned boundary) -> 1 (theta_ring0 + taper width). */
+     * theta_ring0, the cap edge) -> 1 (theta_ring0 + taper width). Applied
+     * to gamma_scale, not n_fib — see comment above the loop. */
     PetscReal cos_theta_c = c.z / a;
     if (cos_theta_c > 1.0)  cos_theta_c = 1.0;
     if (cos_theta_c < -1.0) cos_theta_c = -1.0;
@@ -701,10 +715,11 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     if (taper < 0.0) taper = 0.0;
 
     /* Fiber vector in the tangent plane — Bayer 2012 Eq.(7) direction,
-     * magnitude tapered near ring 0 (see comment above). */
-    ibm->n_fib[ec].x = taper * (cos(alpha) * e_c.x + sin(alpha) * e_l.x);
-    ibm->n_fib[ec].y = taper * (cos(alpha) * e_c.y + sin(alpha) * e_l.y);
-    ibm->n_fib[ec].z = taper * (cos(alpha) * e_c.z + sin(alpha) * e_l.z);
+     * always unit magnitude; activation strength lives in gamma_scale. */
+    ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
+    ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
+    ibm->n_fib[ec].z = cos(alpha) * e_c.z + sin(alpha) * e_l.z;
+    ibm->gamma_scale[ec] = taper;
   }
 
   PetscPrintf(PETSC_COMM_WORLD,

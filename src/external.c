@@ -1707,6 +1707,37 @@ PetscErrorCode EdgeDirectionalFix(PetscInt edge_n, PetscInt dir, FE *fem, Vec R)
   PetscFunctionReturn(0);
 }
 
+/* Pin a single node's coordinate, in one direction, to its reference value —
+ * same residual-substitution trick as EdgeDirectionalFix (R[dof] := current -
+ * reference, which -fem_snes_mf's finite-difference JVP handles with no extra
+ * Jacobian bookkeeping), but for one explicit node index instead of a whole
+ * boundary group. Used to build minimal ("3-2-1") rigid-body constraint sets
+ * that pin exactly 6 DOFs across 3 non-collinear points, instead of fully
+ * pinning every node in a group (which also freezes local relative shape). */
+PetscErrorCode NodeDirectionalFix(PetscInt nb, PetscInt dir, FE *fem, Vec R) {
+  PetscFunctionBeginUser;
+
+  IBMNodes      *ibm  = fem->ibm;
+  DMPlexGeomCtx *gctx = &fem->geom_ctx;
+  PetscErrorCode ierr;
+  PetscReal     *RRes;
+  PetscInt       li = gctx->initialized ? gctx->ibm_to_local_idx[nb] : nb;
+
+  if (li >= 0) {
+    ierr = VecGetArray(R, &RRes); CHKERRQ(ierr);
+    switch (dir) {
+    case 0: RRes[li*dof  ] = ibm->x_bp[nb] - ibm->x_bp0[nb]; break;
+    case 1: RRes[li*dof+1] = ibm->y_bp[nb] - ibm->y_bp0[nb]; break;
+    case 2: RRes[li*dof+2] = ibm->z_bp[nb] - ibm->z_bp0[nb]; break;
+    default:
+      SETERRQ(PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
+              "Direction must be between 0 and 2");
+    }
+    ierr = VecRestoreArray(R, &RRes); CHKERRQ(ierr);
+  }
+  PetscFunctionReturn(0);
+}
+
 PetscErrorCode EdgeFreeR(FE *fem, Vec R) {
 
   IBMNodes *ibm=fem->ibm;

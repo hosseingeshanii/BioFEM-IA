@@ -77,6 +77,22 @@ PetscErrorCode LVParamsCreate(LVParams *p);
 PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p);
 
 /*
+ * CreateLVMeshUnstructured — load a pre-generated unstructured Delaunay
+ * triangulation of the LV surface (see
+ * BioFEM-studies/lv_test/unstructured_mesh/lv_unstructured_mesh.py and
+ * src/lv_geometry_unstructured.c) and assign the same Bayer/Streeter fiber
+ * architecture and near-apex gamma taper CreateLVMesh uses. Unlike
+ * CreateLVMesh there is no explicit apex cap: the apex is one ordinary
+ * mesh vertex. Requires -lv_unstructured_mesh_file <path>.
+ *
+ * After this call, in addition to everything CreateLVMesh sets:
+ *   ibm->n_apex_pin       = 3 (or fewer)
+ *   ibm->apex_pin_nodes[] = minimal ("3-2-1") rigid-body pin node indices,
+ *                           consumed directly by main.c FormFunctionFEM
+ */
+PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *p);
+
+/*
  * WriteLVFiberVTK — write the surface mesh + per-element fiber vectors to a
  * legacy VTK file for inspection in ParaView (Glyph filter on fiber_direction).
  */

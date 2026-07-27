@@ -53,6 +53,10 @@ typedef struct {
   PetscReal      *kve0, *kve;
   PetscInt       *nv1, *nv2, *nv3, *nv4, *nv5, *nv6;
   struct Cmpnts  *n_fib;
+  PetscReal      *gamma_scale;  /* per-element multiplier on gamma (1.0 = full activation) */
+  PetscInt       n_apex_pin;         /* 0 = unused (structured LV mesh, all other mesh types) */
+  PetscInt       apex_pin_nodes[3];  /* minimal ("3-2-1") rigid-body pin node indices, see
+                                       * lv_geometry_unstructured.c / main.c FormFunctionFEM */
   PetscInt       *bnodes, *n_bnodes, *belmts, *edgefrontnodes, *edgefrontnodesI, *belmtsedge;
   PetscReal	     *nf_x, *nf_y, *nf_z, *Nf_x, *Nf_y, *Nf_z;  // Normal direction
   PetscReal      *dA, *dA0, *m, rho, h0; 

@@ -36,6 +36,9 @@ PetscInt   cuda_process = 0;
 PetscInt   kokkos_process = 0;
 PetscInt   dmplex_geom_process = 0;
 PetscInt   lv_geom_process  = 0;     /* use analytic LV mesh instead of file input */
+PetscInt   lv_geom_unstructured = 0; /* within lv_geom_process: load an unstructured Delaunay
+                                       * mesh (-lv_unstructured_mesh_file) instead of the
+                                       * structured ring mesh -- see lv_geometry_unstructured.c */
 
 
 
@@ -194,6 +197,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-kokkos_process", &kokkos_process, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-dmplex_geom_process", &dmplex_geom_process, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_geom_process", &lv_geom_process, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_geom_unstructured", &lv_geom_unstructured, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-monitor_residual", &monitor_residual, PETSC_NULL);
 
   PetscCheck(!(cuda_process && kokkos_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
@@ -247,7 +251,11 @@ int main(int argc, char **argv)
                     lv_p.a, lv_p.b, lv_p.f_cut, (int)lv_p.N_theta, (int)lv_p.N_phi,
                     lv_p.alpha_endo, lv_p.alpha_epi);
       }
-      ierr = CreateLVMesh(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);
+      if (lv_geom_unstructured) {
+        ierr = CreateLVMeshUnstructured(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);
+      } else {
+        ierr = CreateLVMesh(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);
+      }
       if (rank == 0) {
         char lv_vtk_path[512];
         snprintf(lv_vtk_path, sizeof(lv_vtk_path), "%s/lv_fiber_%02d.vtk", out_dir, (int)ibi);
@@ -792,21 +800,76 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   //   VecRestoreArray(fem->x, &xx);
   // }
 
-  /* Apex ring (edge_n=0, ring 0) is now ALSO pinned — the layer immediately
-   * next to the already-fixed cap (edge_n=2). The cap-to-ring0 transition
-   * band elements were still tearing/inverting under load with only the
-   * cap fixed (a sharp free/fixed boundary right at the cap edge); fixing
-   * ring 0 too pushes that boundary one layer further out, onto the
-   * regular, well-shaped k=0 quad-strip elements instead of the irregular
-   * cap-transition ones. */
-  ierr = EdgeDirectionalFix(0, 0, fem, R); CHKERRQ(ierr);
-  ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
-  ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
-  /* Fix the whole cap (edge_n=2, see lv_geometry.c). No-op
-   * (n_bnodes[2]=0) for any mesh type that doesn't populate this group. */
+  /* Ring 0 is NOT pinned. Pinning ring 0 in addition to the cap left two
+   * full rigid rings sitting at their undeformed apex position while gamma
+   * (tapered per-element via ibm->gamma_scale, see lv_geometry.c) ramped up
+   * over the very next rings — a rigid plug embedded in actively
+   * contracting wall, producing a needle-like protrusion. */
+  /* --- Previous method: fully pin the whole cap (all N_final nodes, all 3
+   * directions). Correct for rigid-body removal but also freezes the cap's
+   * own relative shape — the cap stays at its small reference size forever
+   * while the actively-contracting wall next to it grows much larger,
+   * producing the same needle one layer further out. Kept here, commented,
+   * for reference / easy revert.
   ierr = EdgeDirectionalFix(2, 0, fem, R); CHKERRQ(ierr);
   ierr = EdgeDirectionalFix(2, 1, fem, R); CHKERRQ(ierr);
   ierr = EdgeDirectionalFix(2, 2, fem, R); CHKERRQ(ierr);
+  */
+  /* --- 3-2-1 minimal rigid-body constraint (6 DOFs across 3 cap nodes):
+   * removed the redundant over-constraint of fully pinning the whole cap,
+   * but c0 itself was still a hard-pinned point at its small reference
+   * radius, and that alone was apparently enough to anchor the neighborhood
+   * near that small size — ring 0 stayed ~2x the cap's radius either way,
+   * same needle. Kept here, commented, for reference / easy revert.
+  if (ibm->n_bnodes[2] >= 3) {
+    PetscInt cap_start = ibm->n_bnodes[0] + ibm->n_bnodes[1];
+    PetscInt c0 = ibm->bnodes[cap_start];
+    PetscInt c1 = ibm->bnodes[cap_start + 1];
+    PetscInt c2 = ibm->bnodes[cap_start + 2];
+
+    ierr = NodeDirectionalFix(c0, 0, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 1, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 2, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c1, 1, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c1, 2, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c2, 2, fem, R); CHKERRQ(ierr);
+  }
+  */
+  /* --- Single-node pin: only c0's translation (3 DOFs, 1 node) is fixed —
+   * just enough to remove rigid-body translation drift, nothing else. This
+   * deliberately leaves all 3 rotational rigid-body modes unconstrained
+   * (nothing else in the model pins rotation currently); if KSP starts
+   * stagnating or the shape drifts/rotates unphysically, that's the
+   * tradeoff being tested here. Goal: let the entire cap, including c0,
+   * shrink freely with the surrounding wall instead of being anchored at
+   * its small reference size. */
+  if (ibm->n_bnodes[2] >= 1) {
+    PetscInt cap_start = ibm->n_bnodes[0] + ibm->n_bnodes[1];
+    PetscInt c0 = ibm->bnodes[cap_start];
+
+    ierr = NodeDirectionalFix(c0, 0, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 1, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 2, fem, R); CHKERRQ(ierr);
+  }
+  /* --- Unstructured LV mesh (lv_geom_unstructured, see
+   * lv_geometry_unstructured.c): the apex is one ordinary vertex, not a
+   * pinned disc, so go straight to the 3-2-1 minimal rigid-body scheme
+   * (the single-node-only experiment above showed uncontrolled rotational
+   * drift when only translation is pinned) using ibm->apex_pin_nodes, set
+   * by the mesh loader (apex node + its first 2 Delaunay neighbors). No-op
+   * (n_apex_pin=0) for the structured mesh and any other mesh type. */
+  if (ibm->n_apex_pin >= 3) {
+    PetscInt c0 = ibm->apex_pin_nodes[0];
+    PetscInt c1 = ibm->apex_pin_nodes[1];
+    PetscInt c2 = ibm->apex_pin_nodes[2];
+
+    ierr = NodeDirectionalFix(c0, 0, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 1, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 2, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c1, 1, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c1, 2, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c2, 2, fem, R); CHKERRQ(ierr);
+  }
   ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
   // GlobalGhost(ibm);
@@ -1340,7 +1403,7 @@ PetscErrorCode Free(FE *fem) {
   PetscFree(ibm->x_bp0);  PetscFree(ibm->y_bp0);  PetscFree(ibm->z_bp0);
   PetscFree(ibm->nv1);  PetscFree(ibm->nv2);  PetscFree(ibm->nv3);
   PetscFree(ibm->nv4);  PetscFree(ibm->nv5);  PetscFree(ibm->nv6);
-  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->kve0); 
+  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->gamma_scale);  PetscFree(ibm->kve0);
   PetscFree(ibm->kve);  PetscFree(fem->StressM);  PetscFree(fem->StrainM);   PetscFree(fem->IE);  PetscFree(fem->CE);  PetscFree(fem->KE);  PetscFree(ibm->m); 
   PetscFree(fem->FC); 
   PetscFree(fem->StressB);  PetscFree(fem->StrainB);
