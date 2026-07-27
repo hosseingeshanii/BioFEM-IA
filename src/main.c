@@ -792,13 +792,17 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   //   VecRestoreArray(fem->x, &xx);
   // }
 
-  /* Apex ring (edge_n=0) is no longer pinned — the apex cap now spans the
-   * hole with real elements, so fully fixing the ring would over-constrain
-   * it. Only the 3 apex-cap center nodes stay fixed.
+  /* Apex ring (edge_n=0, ring 0) is now ALSO pinned — the layer immediately
+   * next to the already-fixed cap (edge_n=2). The cap-to-ring0 transition
+   * band elements were still tearing/inverting under load with only the
+   * cap fixed (a sharp free/fixed boundary right at the cap edge); fixing
+   * ring 0 too pushes that boundary one layer further out, onto the
+   * regular, well-shaped k=0 quad-strip elements instead of the irregular
+   * cap-transition ones. */
   ierr = EdgeDirectionalFix(0, 0, fem, R); CHKERRQ(ierr);
   ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
-  ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr); */
-  /* Fix the 3 apex-cap center nodes (edge_n=2, see lv_geometry.c). No-op
+  ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
+  /* Fix the whole cap (edge_n=2, see lv_geometry.c). No-op
    * (n_bnodes[2]=0) for any mesh type that doesn't populate this group. */
   ierr = EdgeDirectionalFix(2, 0, fem, R); CHKERRQ(ierr);
   ierr = EdgeDirectionalFix(2, 1, fem, R); CHKERRQ(ierr);

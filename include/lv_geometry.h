@@ -16,8 +16,15 @@ typedef struct {
   PetscInt   N_theta;       /* number of latitude rings (excl. apex point)        */
   PetscInt   N_phi;         /* number of nodes per ring                           */
   PetscInt   N_apex_extra;  /* extra rings inserted near apex to shrink hole      */
+  PetscInt   N_cap_final;   /* target coarse-ring width for the single apex-cap
+                               reduction jump (see CreateLVMesh cap coarsening);
+                               must evenly divide N_phi, nearest valid divisor
+                               used otherwise                                    */
   PetscReal  alpha_endo;    /* Streeter helix angle at endocardium [degrees]      */
   PetscReal  alpha_epi;     /* Streeter helix angle at epicardium [degrees]       */
+  PetscInt   N_taper_rings; /* rings beyond ring 0 over which active fiber
+                               magnitude ramps 0 -> 1 (see stage 7 comment
+                               in CreateLVMesh); 0 = hard on/off at ring 0   */
 } LVParams;
 
 /*
@@ -29,8 +36,23 @@ typedef struct {
  *   -lv_N_theta       [16]   latitude rings
  *   -lv_N_phi         [32]   nodes per ring
  *   -lv_N_apex_extra  [0]    extra rings near apex to shrink the apex hole
+ *   -lv_N_cap_final   [4]    target width of the single coarse ring the whole
+ *                            cap collapses ring 0 down to before fanning to
+ *                            the apex point (see CreateLVMesh cap coarsening
+ *                            comment) — must evenly divide N_phi; the
+ *                            nearest valid divisor is used otherwise. Smaller
+ *                            means fewer total cap elements but a bigger
+ *                            single jump (worse element shape right at the
+ *                            ring-0 attachment, which is not pinned)
  *   -lv_alpha_endo [60.0]   endocardial helix angle [deg]  (Bayer: 40°)
  *   -lv_alpha_epi  [-60.0]  epicardial helix angle  [deg]  (Bayer: -50°)
+ *   -lv_N_taper_rings [2]   rings beyond ring 0 (which is pinned, along with
+ *                           the cap) over which active fiber magnitude
+ *                           ramps linearly from 0 up to 1, instead of
+ *                           switching straight from 0% to 100% activation
+ *                           at the pinned/free boundary — that hard switch
+ *                           right next to a rigid wall is what was tearing
+ *                           elements just outside whatever was pinned.
  *
  * The mid-wall fiber angle is α_mid = (α_endo + α_epi)/2, constant over the
  * surface, consistent with Bayer et al. 2012 Eq.(2) evaluated at d=0.5.

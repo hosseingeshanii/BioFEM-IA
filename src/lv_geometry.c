@@ -58,8 +58,13 @@ extern struct Cmpnts AMULT(PetscReal alpha, struct Cmpnts v1);
 #define RING_NODE(k, j, Np)  ((k)*(Np) + (j))
 
 /* 0-based flat index of apex-cap center node i (0,1,2), stored right after
- * all ring nodes: index N_total*N_phi + i.                                */
+ * all ring nodes: index N_total*N_phi + i. (Superseded by the multi-level
+ * cap coarsening rings below; kept only for the #if 0 reference blocks.) */
 #define CAP_NODE(i, N_total, Np)  ((N_total)*(Np) + (i))
+
+/* Max halving levels for apex cap coarsening (see CreateLVMesh) — 16 is far
+ * more than any realistic N_phi (2^16) would ever need. */
+#define LV_MAX_CAP_LEVELS 16
 
 /* ------------------------------------------------------------------ */
 
@@ -71,8 +76,10 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   p->N_theta      = 16;
   p->N_phi        = 32;
   p->N_apex_extra = 0;
+  p->N_cap_final  = 4;
   p->alpha_endo   = 60.0;
   p->alpha_epi    = -60.0;
+  p->N_taper_rings = 2;
 
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_a",             &p->a,            PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_b",             &p->b,            PETSC_NULL);
@@ -80,8 +87,10 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_theta",       &p->N_theta,      PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_phi",         &p->N_phi,        PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_apex_extra",  &p->N_apex_extra, PETSC_NULL);
+  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_cap_final",   &p->N_cap_final,  PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_endo",    &p->alpha_endo,   PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_epi",     &p->alpha_epi,    PETSC_NULL);
+  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_taper_rings", &p->N_taper_rings, PETSC_NULL);
 
   return 0;
 }
@@ -98,18 +107,61 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   PetscInt  N_apex_extra   = p->N_apex_extra;
   PetscReal alpha_endo_deg = p->alpha_endo;
   PetscReal alpha_epi_deg  = p->alpha_epi;
+  PetscInt  N_taper_rings  = p->N_taper_rings;
 
   /* Total rings = base mesh rings + extra apex rings */
   PetscInt  N_total        = N_theta + N_apex_extra;
 
-  /* Apex cap: 3 interior nodes forming 1 central triangle, fanned out to the
-   * ring-0 boundary (nearest-node assignment split into 3 angular zones).
-   * This trades the old single-node fan's severe singularity (valence
-   * N_phi) for 3 nodes at a more moderate valence (~N_phi/3 + 3), while
-   * most ring-0 nodes only gain +1 valence (one seam node per zone gains
-   * +2) — see design discussion, exact valence 6 throughout is not
-   * reachable with a single-layer 3-node cap when N_phi is large. */
+#if 0
+  /* --- superseded apex-cap design: fanned ring 0 (N_phi nodes) straight to
+   * 3 interior nodes in a single jump. With N_phi as large as 32, that's a
+   * ~10:1 collapse per zone — the ring-0 edges are short arcs near the
+   * apex while the two edges to the far-off interior node are much longer,
+   * so the resulting triangles are thin slivers, which is exactly what
+   * made convergence hard near the cap. Kept here for reference; see the
+   * replacement coarsening scheme below. */
   const PetscInt N_cap_nodes = 3;
+#endif
+
+  /* Apex cap coarsening: instead of collapsing all of ring 0 straight to a
+   * handful of interior nodes (see #if 0 block above), do ONE "ring
+   * reduction" band straight from ring 0 (N_phi nodes) down to a small
+   * coarse ring of -lv_N_cap_final nodes, then close THAT small ring
+   * directly by connecting its own nodes to each other — no separate apex
+   * vertex at all. A fan converging on one shared center point is
+   * inherently cone-shaped, and pinning only that one point while
+   * everything nearby pulls on it under load is exactly what produced a
+   * needle-like spike there; removing the point removes the singularity,
+   * not just its motion. The whole cap is pinned rigid and carries no
+   * active fiber force (see stage 6 / stage 7 below), so its own element
+   * shape no longer drives solver conditioning — the one thing that still
+   * matters is that the transition band's triangles touch ring 0, which is
+   * NOT pinned. Segment i of the transition band spans fine-ring indices
+   * [zone_bound[i], zone_bound[i+1]) (nearly-even split of N_phi across the
+   * C coarse segments, allowing -lv_N_cap_final to be any value >= 3, not
+   * just a divisor of N_phi); each segment gets K_i fan triangles (split as
+   * evenly as possible between the two coarse nodes bounding it) plus 1
+   * "closing" triangle for the coarse-ring edge itself, using the fine
+   * ring's own shared split-point node as its third vertex. The coarse
+   * ring's own C nodes are then closed with a plain (C-2)-triangle fan
+   * from one of its own nodes — for C=3 that's exactly 1 triangle: "just
+   * an element at the apex cap", all 3 of whose nodes are pinned. */
+  PetscInt cap_level_n[LV_MAX_CAP_LEVELS];      /* node count of coarsening ring m (only m=0 used) */
+  PetscInt cap_level_offset[LV_MAX_CAP_LEVELS]; /* flat node-index base of coarsening ring m */
+  PetscInt n_cap_levels = 0;
+  {
+    PetscInt want = p->N_cap_final;
+    if (want < 3) want = 3;
+    if (want < N_phi) {
+      cap_level_n[0] = want;
+      n_cap_levels   = 1;
+    }
+  }
+  /* Ring closed directly (no apex vertex): the single coarsening ring, or
+   * ring 0 itself if N_phi was already too small to coarsen at all. */
+  PetscInt N_final = (n_cap_levels > 0) ? cap_level_n[0] : N_phi;
+
+  PetscInt n_cap_ring_nodes = (n_cap_levels > 0) ? cap_level_n[0] : 0;
 
   PetscErrorCode ierr;
 
@@ -126,14 +178,24 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* PetscReal z_apex     = a; */   /* unused: apex cap removed */
   PetscReal z_base     = a * cos(theta_cut);
 
-  /* Cap element count: N_phi-3 zone-interior fan triangles (one per ring-0
-   * edge strictly inside a zone) + 6 seam-bridging triangles (2 per each of
-   * the 3 zone boundaries) + 1 central triangle = N_phi + 4. Every ring-0
-   * edge ends up covered by exactly one new triangle, closing the hole. */
-  PetscInt n_cap_elmt   = N_phi + 4;
+  /* Cap element count: the transition band contributes F+C triangles total
+   * (sum of each segment's K_i fan triangles, which sum to F, plus one
+   * closing triangle per segment, C of them) if a coarsening ring exists;
+   * the innermost ring (C nodes, or N_phi if there's no coarsening ring at
+   * all) is then closed directly with a (ring_size - 2)-triangle fan among
+   * its own nodes — no apex vertex. */
+  PetscInt n_cap_elmt = N_final - 2;
+  if (n_cap_levels > 0) n_cap_elmt += N_phi + N_final;
 
   PetscInt n_elmt_base  = (N_total - 1) * 2 * N_phi;   /* quad strips only         */
-  PetscInt n_v          = N_total * N_phi + N_cap_nodes;
+  {
+    PetscInt off = N_total * N_phi;
+    for (PetscInt m = 0; m < n_cap_levels; m++) {
+      cap_level_offset[m] = off;
+      off += cap_level_n[m];
+    }
+  }
+  PetscInt n_v           = N_total * N_phi + n_cap_ring_nodes;
   /* n_elmt_base intentionally EXCLUDES the cap: IrrVer()/Patch() already
    * skip ec >= n_elmt_base for Loop-subdivision valence classification and
    * fall back to CST membrane elements there (see bending.c / active_strain.c) —
@@ -141,8 +203,10 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   PetscInt n_elmt       = n_elmt_base + n_cap_elmt;
   PetscInt n_edge       = 0;  /* base BC via EdgeDirectionalFix, no ghosts */
   PetscInt n_ghosts     = 0;
-  /* Apex ring, base ring, AND the 3 new fixed apex-cap nodes are boundary groups. */
-  PetscInt sum_n_bnodes = 2 * N_phi + N_cap_nodes;
+  /* Apex ring, base ring, AND every cap-only node (all coarsening-ring
+   * nodes — there's no separate apex vertex any more) are boundary groups —
+   * see the n_bnodes[2] comment below for why the whole cap is pinned. */
+  PetscInt sum_n_bnodes = 2 * N_phi + n_cap_ring_nodes;
 
   ibm->n_v          = n_v;
   ibm->n_elmt       = n_elmt;
@@ -157,6 +221,10 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     "N_theta=%d  N_apex_extra=%d  N_phi=%d  n_v=%d  n_elmt=%d\n",
     a, b, f_cut, theta_cut * 180.0 / PETSC_PI,
     (int)N_theta, (int)N_apex_extra, (int)N_phi, (int)n_v, (int)n_elmt);
+  PetscPrintf(PETSC_COMM_WORLD,
+    "LV apex cap: %d coarsening level(s) (N_phi=%d -> N_final=%d), "
+    "no apex vertex, %d cap element(s)\n",
+    (int)n_cap_levels, (int)N_phi, (int)N_final, (int)n_cap_elmt);
 
   /* ----------------------------------------------------------------
    * 2.  Allocate all standard IBMNodes / FE arrays
@@ -180,10 +248,18 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* group 0: apex ring — fixed via EdgeDirectionalFix(0,...) in main.c, and also
    *          tells IrrVer the apex ring is a boundary (bcount=count+3=6 → regular).
    * group 1: base ring — currently NOT fixed (main.c only calls edge_n=0 and 2).
-   * group 2: the 3 new apex-cap center nodes — fixed via EdgeDirectionalFix(2,...). */
+   * group 2: the WHOLE cap (every coarsening-ring node, NOT ring 0) — fixed
+   *          via EdgeDirectionalFix(2,...). There is no separate apex
+   *          vertex to pin: earlier designs funneled the cap to one shared
+   *          center point, and pinning only that point while everything
+   *          nearby pulled on it under load produced a sharp needle-like
+   *          spike. Removing the center vertex (see cap coarsening comment
+   *          above) removes the singularity itself, not just its motion —
+   *          ring 0 and everything outward (the actual LV wall) remains
+   *          fully free. */
   ibm->n_bnodes[0] = N_phi;
   ibm->n_bnodes[1] = N_phi;
-  ibm->n_bnodes[2] = N_cap_nodes;
+  ibm->n_bnodes[2] = n_cap_ring_nodes;
 
   /* ----------------------------------------------------------------
    * 3.  Node coordinates  —  RING_NODE(k,j,N_phi) = k*N_phi + j
@@ -214,12 +290,11 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     }
   }
 
-  /* Apex-cap center nodes: 3 nodes on the analytic spheroid surface,
-   * halfway (in theta) between the true apex and ring 0 — using the same
-   * two-segment formula as above so this stays correct whether or not
-   * N_apex_extra squeezes ring 0 closer to the tip — evenly spaced in phi
-   * so they sit at the center of their angular zone (zone i spans phi
-   * roughly [i*120°, (i+1)*120°], see stage 4). */
+#if 0
+  /* --- superseded: 3 apex-cap center nodes clustered halfway (in theta)
+   * between the true apex and ring 0, regardless of how large N_phi was —
+   * see the #if 0 block at the top of this function for why that made
+   * poorly-shaped triangles. Kept here for reference. */
   {
     PetscReal theta_ring0 = (N_apex_extra > 0)
       ? theta_step / (PetscReal)(N_apex_extra + 1)
@@ -238,11 +313,42 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
       ibm->z_bp0[nc] = ibm->z_bp[nc];
     }
   }
+#endif
+
+  /* Apex-cap coarsening ring node coordinates — no apex vertex. Coarsening
+   * ring m sits at theta_m = theta_ring0 * (cap_level_n[m] / N_phi) —
+   * proportional to its own node count relative to ring 0's — which keeps
+   * circumferential node spacing (arc length ~ r*dphi, and r ~ theta near
+   * the apex) approximately constant across every coarsening ring, so the
+   * transition band doesn't introduce its own aspect-ratio jump on top of
+   * the deliberate radial coarsening. */
+  {
+    PetscReal theta_ring0 = (N_apex_extra > 0)
+      ? theta_step / (PetscReal)(N_apex_extra + 1)
+      : theta_step;
+
+    for (PetscInt m = 0; m < n_cap_levels; m++) {
+      PetscInt  cnt   = cap_level_n[m];
+      PetscReal theta = theta_ring0 * (PetscReal)cnt / (PetscReal)N_phi;
+      PetscReal sth   = sin(theta);
+      PetscReal cth   = cos(theta);
+      for (PetscInt j = 0; j < cnt; j++) {
+        PetscReal phi = 2.0 * PETSC_PI * (PetscReal)j / (PetscReal)cnt;
+        PetscInt  nc  = cap_level_offset[m] + j;
+        ibm->x_bp[nc]  = b * sth * cos(phi);
+        ibm->y_bp[nc]  = b * sth * sin(phi);
+        ibm->z_bp[nc]  = a * cth;
+        ibm->x_bp0[nc] = ibm->x_bp[nc];
+        ibm->y_bp0[nc] = ibm->y_bp[nc];
+        ibm->z_bp0[nc] = ibm->z_bp[nc];
+      }
+    }
+  }
 
   /* ----------------------------------------------------------------
    * 4.  Element connectivity  (0-based node indices)
    *
-   *   Quad strips (base mesh) followed by the 3-node apex cap.
+   *   Quad strips (base mesh) followed by the coarsened apex cap.
    * ---------------------------------------------------------------- */
   PetscInt ec = 0;
 
@@ -267,15 +373,12 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
              (int)ec, (int)n_elmt_base);
   }
 
-  /* ----------------------------------------------------------------
-   * 4b.  Apex cap  —  3 center nodes fanned out to ring 0.
-   *
-   *   Ring-0 nodes are split into 3 contiguous angular zones (nearest-
-   *   center assignment). Each zone is fanned to its center node; the 3
-   *   zone boundaries ("seams") are bridged by 2 triangles each, reusing
-   *   the center triangle's edges so every ring-0 edge ends up covered by
-   *   exactly one new triangle and the mesh stays manifold.
-   * ---------------------------------------------------------------- */
+#if 0
+  /* --- superseded apex cap connectivity: ring-0 (N_phi nodes) split into
+   * 3 zones, each fanned in one jump straight to 1 of 3 interior center
+   * nodes. See the #if 0 block near the top of this function for why this
+   * produced badly-shaped (sliver) triangles. Kept here for reference;
+   * replaced by the multi-level ring-reduction cap below. */
   {
     PetscInt zone_bound[4];
     for (PetscInt i = 0; i <= N_cap_nodes; i++) {
@@ -319,6 +422,87 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     ibm->nv2[ec] = CAP_NODE(1, N_total, N_phi);
     ibm->nv3[ec] = CAP_NODE(2, N_total, N_phi);
     ec++;
+  }
+#endif
+
+  /* ----------------------------------------------------------------
+   * 4b.  Apex cap  —  a single ring-reduction transition band
+   *      (N_phi -> N_final), closed by connecting the coarse ring's own
+   *      nodes directly to each other — no apex vertex.
+   *
+   *   The transition band fully triangulates the annulus between ring 0
+   *   (F=N_phi nodes) and the coarse ring (C=N_final nodes). Segment i
+   *   spans fine-ring indices [zone_bound[i], zone_bound[i+1]) — a
+   *   nearly-even split of F across the C segments, allowing C to be any
+   *   value >= 3, not just a divisor of F — and gets K_i = zone_bound[i+1]
+   *   - zone_bound[i] "fan" triangles covering its fine-ring edges (the
+   *   first ~K_i/2 apexed at c(i), the rest at c(i+1)), plus 1 "closing"
+   *   triangle covering the coarse-ring edge (c(i),c(i+1)) itself, using
+   *   the fine ring's own split-point node as its third vertex. Every
+   *   fine-ring edge and every coarse-ring edge ends up covered by exactly
+   *   one triangle from this band; the coarse-ring edges get their second
+   *   (closing) face from the self-fan below. The coarse ring is then
+   *   closed directly — a fan from its own node 0 to nodes 2..C-1, C-2
+   *   triangles, no new vertex. For C=3 that's exactly 1 triangle.
+   * ---------------------------------------------------------------- */
+  {
+    PetscInt fine_offset = -1;   /* -1 sentinel: use RING_NODE(0,j) for ring 0 */
+    PetscInt fine_count  = N_phi;
+
+    for (PetscInt m = 0; m < n_cap_levels; m++) {
+      PetscInt coarse_offset = cap_level_offset[m];
+      PetscInt coarse_count  = cap_level_n[m];
+
+      PetscInt *zone_bound;
+      ierr = PetscMalloc1(coarse_count + 1, &zone_bound); CHKERRQ(ierr);
+      for (PetscInt i = 0; i <= coarse_count; i++) {
+        zone_bound[i] = (PetscInt)round((PetscReal)i * (PetscReal)fine_count
+                                         / (PetscReal)coarse_count);
+      }
+
+      for (PetscInt i = 0; i < coarse_count; i++) {
+        PetscInt i_next    = (i + 1) % coarse_count;
+        PetscInt c_i       = coarse_offset + i;
+        PetscInt c_next    = coarse_offset + i_next;
+        PetscInt seg_start = zone_bound[i];
+        PetscInt K         = zone_bound[i + 1] - seg_start;
+        PetscInt split     = K / 2;   /* fan edges [0,split) -> c_i, [split,K) -> c_next */
+
+        for (PetscInt j = 0; j < K; j++) {
+          PetscInt fa_idx = seg_start + j;
+          PetscInt fb_idx = (fa_idx + 1) % fine_count;
+          PetscInt fa = (fine_offset < 0) ? RING_NODE(0, fa_idx, N_phi) : fine_offset + fa_idx;
+          PetscInt fb = (fine_offset < 0) ? RING_NODE(0, fb_idx, N_phi) : fine_offset + fb_idx;
+          PetscInt apex = (j < split) ? c_i : c_next;
+          ibm->nv1[ec] = fa;  ibm->nv2[ec] = fb;  ibm->nv3[ec] = apex;  ec++;
+        }
+
+        /* closing triangle: coarse edge (c_i,c_next), apex at the fine
+         * ring's split-point node shared by both fan halves above */
+        PetscInt fs_idx = (seg_start + split) % fine_count;
+        PetscInt fs = (fine_offset < 0) ? RING_NODE(0, fs_idx, N_phi) : fine_offset + fs_idx;
+        ibm->nv1[ec] = fs;  ibm->nv2[ec] = c_next;  ibm->nv3[ec] = c_i;  ec++;
+      }
+
+      ierr = PetscFree(zone_bound); CHKERRQ(ierr);
+
+      fine_offset = coarse_offset;
+      fine_count  = coarse_count;
+    }
+
+    /* Close the innermost ring (fine_offset/fine_count, still ring 0 if no
+     * coarsening ran) directly by fanning from its own node 0 — no apex
+     * vertex, count-2 triangles. For count==3 this is exactly 1 triangle:
+     * "just an element at the apex cap", all 3 of its nodes pinned. */
+    {
+      PetscInt count = fine_count;
+      PetscInt n0 = (fine_offset < 0) ? RING_NODE(0, 0, N_phi) : fine_offset;
+      for (PetscInt j = 1; j < count - 1; j++) {
+        PetscInt na = (fine_offset < 0) ? RING_NODE(0, j,     N_phi) : fine_offset + j;
+        PetscInt nb = (fine_offset < 0) ? RING_NODE(0, j + 1, N_phi) : fine_offset + (j + 1);
+        ibm->nv1[ec] = n0;  ibm->nv2[ec] = na;  ibm->nv3[ec] = nb;  ec++;
+      }
+    }
 
     /* Orientation fix: for a star-shaped-about-origin surface like this
      * spheroid, the outward normal always has positive dot product with
@@ -382,7 +566,7 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 5: patch nodes done\n");
 
   /* ----------------------------------------------------------------
-   * 6.  Boundary rings  —  top (ring 0) and base (ring N_theta-1)
+   * 6.  Boundary rings  —  top (ring 0), base (ring N_theta-1), whole cap
    * ---------------------------------------------------------------- */
   PetscPrintf(PETSC_COMM_WORLD, "[lv] stage 6: boundary edge info\n");
   /* Both apex ring (edge_n=0) and base ring (edge_n=1) in bnodes[].
@@ -393,6 +577,16 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     ibm->bnodes[j] = RING_NODE(0, j, N_phi);               /* apex ring  (edge_n=0) */
   for (PetscInt j = 0; j < N_phi; j++)
     ibm->bnodes[N_phi + j] = RING_NODE(N_total - 1, j, N_phi); /* base ring (edge_n=1) */
+  /* Whole cap (edge_n=2): every coarsening-ring node — there's no separate
+   * apex vertex — fixed via EdgeDirectionalFix(2,...) in main.c. */
+  {
+    PetscInt off = 2 * N_phi;
+    for (PetscInt m = 0; m < n_cap_levels; m++) {
+      for (PetscInt j = 0; j < cap_level_n[m]; j++) {
+        ibm->bnodes[off++] = cap_level_offset[m] + j;
+      }
+    }
+  }
 
   /* ----------------------------------------------------------------
    * 7.  Fiber directions  —  Streeter helical rule
@@ -416,7 +610,43 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
   /* Direction vector pointing from apex toward base along the z axis */
   struct Cmpnts e_down = {0.0, 0.0, -1.0};
 
+  /* Apex cap: no active fiber contribution at all. The circumferential/
+   * meridional frame (e_c, e_l) has a genuine coordinate singularity right
+   * at the true apex point (like the "hairy ball" pole of a sphere) —
+   * direction rotates with azimuthal angle at a fixed polar angle, so
+   * neighboring elements around the (few, coarse) apex-cap fan get
+   * near-orthogonal fiber directions while sharing the same apex vertex,
+   * fighting each other in the active-stress term F_a = I - gamma*(f (x) f).
+   * The cap isn't real myocardium anyway (it's a numerical closure of the
+   * analytic mesh, not tissue) — simplest and most robust treatment for now
+   * is to make it fully passive: n_fib = 0 there, so F_a = I identically and
+   * the fiber direction never has to be resolved.
+   *
+   * Ring 0 is ALSO pinned now (see main.c EdgeDirectionalFix(0,...)), but
+   * unlike the cap it's real LV wall — going straight from 0% (cap) to
+   * 100% activation right at that pinned boundary produced the same
+   * tearing/spiking one layer further out that pinning ring 0 was meant to
+   * fix in the first place: a hard on/off activation switch right next to
+   * a rigid wall concentrates all the strain into whatever is immediately
+   * adjacent to it, no matter where that boundary sits. Instead, ramp
+   * |n_fib| linearly from 0 at theta_ring0 (the pinned boundary) up to 1
+   * over -lv_N_taper_rings ring spacings, so nearby elements pick up
+   * contraction gradually rather than being yanked at full strength right
+   * next to an immovable wall. Elements fully beyond the taper zone are
+   * completely unaffected (weight clamps to 1). */
+  PetscReal theta_ring0_for_taper = (N_apex_extra > 0)
+    ? theta_step / (PetscReal)(N_apex_extra + 1)
+    : theta_step;
+  PetscReal theta_taper_width = (PetscReal)N_taper_rings * theta_step;
+
   for (ec = 0; ec < n_elmt; ec++) {
+    if (ec >= n_elmt_base) {
+      ibm->n_fib[ec].x = 0.0;
+      ibm->n_fib[ec].y = 0.0;
+      ibm->n_fib[ec].z = 0.0;
+      continue;
+    }
+
     PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
 
     /* Element centroid */
@@ -456,10 +686,25 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     /* Circumferential direction (right-hand: outward-normal × meridional) */
     struct Cmpnts e_c = CROSS(e_n, e_l);
 
-    /* Fiber unit vector in the tangent plane — Bayer 2012 Eq.(7) */
-    ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
-    ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
-    ibm->n_fib[ec].z = cos(alpha) * e_c.z + sin(alpha) * e_l.z;
+    /* Ring-0 activation taper: theta from centroid z (c.z ~= a*cos(theta)
+     * near the surface); clamp for centroids that land fractionally
+     * outside [-1,1] due to averaging, then ramp linearly 0 (at
+     * theta_ring0, the pinned boundary) -> 1 (theta_ring0 + taper width). */
+    PetscReal cos_theta_c = c.z / a;
+    if (cos_theta_c > 1.0)  cos_theta_c = 1.0;
+    if (cos_theta_c < -1.0) cos_theta_c = -1.0;
+    PetscReal theta_c = acos(cos_theta_c);
+    PetscReal taper = (theta_taper_width > 0.0)
+      ? (theta_c - theta_ring0_for_taper) / theta_taper_width
+      : 1.0;
+    if (taper > 1.0) taper = 1.0;
+    if (taper < 0.0) taper = 0.0;
+
+    /* Fiber vector in the tangent plane — Bayer 2012 Eq.(7) direction,
+     * magnitude tapered near ring 0 (see comment above). */
+    ibm->n_fib[ec].x = taper * (cos(alpha) * e_c.x + sin(alpha) * e_l.x);
+    ibm->n_fib[ec].y = taper * (cos(alpha) * e_c.y + sin(alpha) * e_l.y);
+    ibm->n_fib[ec].z = taper * (cos(alpha) * e_c.z + sin(alpha) * e_l.z);
   }
 
   PetscPrintf(PETSC_COMM_WORLD,
