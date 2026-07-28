@@ -853,11 +853,12 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   }
   /* --- Unstructured LV mesh (lv_geom_unstructured, see
    * lv_geometry_unstructured.c): the apex is one ordinary vertex, not a
-   * pinned disc, so go straight to the 3-2-1 minimal rigid-body scheme
-   * (the single-node-only experiment above showed uncontrolled rotational
-   * drift when only translation is pinned) using ibm->apex_pin_nodes, set
-   * by the mesh loader (apex node + its first 2 Delaunay neighbors). No-op
-   * (n_apex_pin=0) for the structured mesh and any other mesh type. */
+   * pinned disc.
+   * --- 3-2-1 minimal rigid-body scheme (6 DOFs across 3 nodes) using
+   * ibm->apex_pin_nodes (apex node + its first 2 Delaunay neighbors), set
+   * by the mesh loader. Correctly removes all 6 rigid-body modes without
+   * over-constraining local shape. Kept here, commented, for reference /
+   * easy revert.
   if (ibm->n_apex_pin >= 3) {
     PetscInt c0 = ibm->apex_pin_nodes[0];
     PetscInt c1 = ibm->apex_pin_nodes[1];
@@ -869,6 +870,23 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     ierr = NodeDirectionalFix(c1, 1, fem, R); CHKERRQ(ierr);
     ierr = NodeDirectionalFix(c1, 2, fem, R); CHKERRQ(ierr);
     ierr = NodeDirectionalFix(c2, 2, fem, R); CHKERRQ(ierr);
+  }
+  */
+  /* --- Single-node pin: only the apex node's translation (3 DOFs) is
+   * fixed. Leaves all 3 rotational rigid-body modes unconstrained (nothing
+   * else in the model pins rotation) -- the earlier structured-mesh
+   * single-node experiment showed this can let the pinned region tumble
+   * (uncontrolled rotational drift) since GMRES/JFNK just finds *a*
+   * solution in that null space, not necessarily the physical one. Using
+   * it here anyway per request; watch for unphysical rotation/tumbling
+   * near the apex if results look off. No-op (n_apex_pin=0) for the
+   * structured mesh and any other mesh type. */
+  if (ibm->n_apex_pin >= 1) {
+    PetscInt c0 = ibm->apex_pin_nodes[0];
+
+    ierr = NodeDirectionalFix(c0, 0, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 1, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 2, fem, R); CHKERRQ(ierr);
   }
   ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
