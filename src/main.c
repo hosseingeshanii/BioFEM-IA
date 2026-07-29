@@ -880,7 +880,8 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
    * solution in that null space, not necessarily the physical one. Using
    * it here anyway per request; watch for unphysical rotation/tumbling
    * near the apex if results look off. No-op (n_apex_pin=0) for the
-   * structured mesh and any other mesh type. */
+   * structured mesh and any other mesh type. Kept here, commented, for
+   * reference / easy revert.
   if (ibm->n_apex_pin >= 1) {
     PetscInt c0 = ibm->apex_pin_nodes[0];
 
@@ -888,6 +889,16 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     ierr = NodeDirectionalFix(c0, 1, fem, R); CHKERRQ(ierr);
     ierr = NodeDirectionalFix(c0, 2, fem, R); CHKERRQ(ierr);
   }
+  */
+  /* --- No apex BC at all (testing what happens with the apex fully free).
+   * All 6 rigid-body modes (3 translation + 3 rotation) are now
+   * unconstrained anywhere in the model -- nothing else pins the base ring
+   * either (see EdgeDirectionalFix(1,...), never called). Expect the
+   * matrix-free Newton-Krylov solve to struggle: the linear system is
+   * singular/rank-deficient (rigid-body motion is an exact zero-energy
+   * direction for this material with no gravity/external reference), so
+   * GMRES may stagnate, drift, or fail to converge rather than cleanly
+   * erroring out. */
   ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
   // GlobalGhost(ibm);
