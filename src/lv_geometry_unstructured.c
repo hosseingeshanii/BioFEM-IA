@@ -206,10 +206,7 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
 
   /* theta_pin: angular distance from the apex out to the pinned apex-pin
    * nodes (average over however many there are) -- the taper's zero point,
-   * analogous to theta_ring0 in the structured mesh. theta_taper_width
-   * reuses -lv_N_taper_rings, scaled by the mesh's average nearest-neighbor
-   * angular spacing near the apex, since there's no discrete ring spacing
-   * here to multiply directly. */
+   * analogous to theta_ring0 in the structured mesh. */
   PetscReal theta_pin = 0.0;
   for (PetscInt i = 0; i < ibm->n_apex_pin; i++) {
     PetscInt nb = ibm->apex_pin_nodes[i];
@@ -219,13 +216,21 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
   }
   if (ibm->n_apex_pin > 0) theta_pin /= (PetscReal)ibm->n_apex_pin;
 
-  /* Average element "radius" in theta near the apex, used as one taper-ring
-   * equivalent, so -lv_N_taper_rings means roughly the same physical taper
-   * width as it did for the structured mesh at similar point density. */
-  PetscReal avg_theta_spacing = p->f_cut > 0
-    ? (PetscReal)acos(1.0 - 2.0*p->f_cut) / PetscSqrtReal((PetscReal)n_elmt)
-    : 0.1;
-  PetscReal theta_taper_width = (PetscReal)p->N_taper_rings * avg_theta_spacing * 4.0;
+  /* theta_taper_width: a direct physical angle (-lv_taper_theta_deg),
+   * NOT derived from mesh density. An earlier version scaled it off
+   * avg_theta_spacing = theta_cut/sqrt(n_elmt) (an attempt to reuse
+   * -lv_N_taper_rings by faking a "ring spacing"), but that makes the
+   * taper zone shrink as the mesh is refined -- coarse (~249-elmt) and
+   * fine (~805-elmt) meshes ended up with ~48deg vs ~27deg taper zones
+   * under the SAME -lv_N_taper_rings setting, which silently changes the
+   * activation profile between mesh-refinement runs instead of holding it
+   * fixed. Default (24 deg) matches what the structured mesh's default
+   * -lv_N_taper_rings 2 / -lv_N_theta 8 combination works out to
+   * (2 * theta_cut/N_theta = 2 * 11.97 = 23.94 deg), so behavior is
+   * unchanged unless you explicitly set this. */
+  PetscReal taper_theta_deg = 24.0;
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_taper_theta_deg", &taper_theta_deg, PETSC_NULL);
+  PetscReal theta_taper_width = taper_theta_deg * PETSC_PI / 180.0;
 
   for (PetscInt ec = 0; ec < n_elmt; ec++) {
     PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
