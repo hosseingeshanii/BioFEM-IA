@@ -1,0 +1,7 @@
+<map id="compute_act_Fa_element" name="compute_act_Fa_element">
+<area shape="rect" id="Node000001" title="High&#45;Level Procedure for Muscle Activation Update." alt="" coords="380,5,568,31"/>
+<area shape="rect" id="Node000002" href="$muscle__activation_8c.html#a0dda352c79a3d0150ff314d8c63e0054" title="Updates all active Fa values for each element." alt="" coords="217,5,332,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="366,21,332,21,332,15,366,15"/>
+<area shape="rect" id="Node000003" href="$muscle__activation_8c.html#aad998374ae4f3ca2c8f14b4c4b2aaafd" title=" " alt="" coords="5,5,169,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="203,21,170,21,170,15,203,15"/>
+</map>
