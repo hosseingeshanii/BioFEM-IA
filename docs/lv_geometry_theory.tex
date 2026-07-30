@@ -226,6 +226,19 @@ of the LV free wall.  The default angle parameters
 $\alpha_{\rm apex} = +60^\circ$, $\alpha_{\rm base} = -60^\circ$ are taken
 directly from Streeter's midwall data~\cite{Streeter1969}.
 
+\paragraph{Limitation: no distinct endocardial/epicardial surfaces.}
+Because only one representative surface is tracked, boundary conditions and
+kinematic statements such as ``the apex is fixed'' refer to that single
+midmyocardial surface, not to the endocardium or epicardium individually.
+In vivo LV imaging shows the endocardial surface near the apex can move
+appreciably (e.g.\ inward/upward as the wall thickens) even while the
+epicardial apex stays comparatively stationary — a genuine transmural
+kinematic difference this formulation cannot represent, since it has no
+independent endocardial/epicardial degrees of freedom to move differently.
+Capturing that distinction would require either a fully three-dimensional
+solid discretisation, or a shell theory that explicitly tracks offset
+top/bottom surfaces from the director (rather than a single midsurface).
+
 \subsection{Motivation}
 
 Myocardial fibers in the LV wall follow a helical path that rotates
@@ -327,6 +340,22 @@ $-\alpha_{\rm base}$ at the base, crossing $0^\circ$ at the midpoint
 $z^* = \alpha_{\rm apex}/(\alpha_{\rm apex} - \alpha_{\rm base})$ (at
 $z^* = 0.5$ for the symmetric default values).
 
+\paragraph{Implementation status (as of 2026-07-30).} Equations
+\eqref{eq:helix_angle}--\eqref{eq:zstar} above describe the intended model,
+but for an extended period the implementation (\texttt{src/lv\_geometry.c},
+\texttt{src/lv\_geometry\_unstructured.c}) instead assigned a single
+\emph{constant} angle $\alpha = (\alpha_{\rm apex}+\alpha_{\rm base})/2$
+everywhere, ignoring $z^*$ entirely — i.e.\ no latitude variation at all,
+only the transmural (single-midsurface) simplification of
+Table~\ref{tab:transmural} was actually in effect. This was compounded by
+an unrelated bug: the code read PETSc options named
+\texttt{-lv\_alpha\_endo}/\texttt{-lv\_alpha\_epi}, which never matched
+\texttt{control.dat}'s \texttt{-lv\_alpha\_apex}/\texttt{-lv\_alpha\_base}
+(Table~\ref{tab:options}), so those values were silently ignored (visible
+only as an ``unused options'' warning in the run log). Both are now fixed:
+the code implements Eq.~\eqref{eq:helix_angle} exactly, and the option names
+match this document and \texttt{control.dat}.
+
 \begin{figure}[h]
 \centering
 % Placeholder — replace with actual figure once generated from ParaView.
@@ -373,6 +402,61 @@ biofem run --backend dmplex --np 8 \        # submit to SLURM
 All \texttt{-lv\_*} parameters are read from \texttt{control.dat} via PETSc's options
 database; no flags need to be passed on the command line unless overriding a
 value from the file.
+
+\subsection{Alternative: Unstructured Mesh}
+A second geometry path, \texttt{-lv\_geom\_unstructured~1}
+(\texttt{src/lv\_geometry\_unstructured.c}), loads a pre-generated Delaunay
+triangulation from \texttt{-lv\_unstructured\_mesh\_file} instead of building
+the structured ring mesh described above. The mesh itself is generated
+offline by \texttt{BioFEM-studies/lv\_test/unstructured\_mesh/}\allowbreak
+\texttt{lv\_unstructured\_mesh.py}: the truncated cap is mapped onto a flat
+disk via a conformal (shape-preserving) radial coordinate, point density
+follows the true physical surface area rather than flat-disk area, and the
+apex is one ordinary interior mesh vertex — no coarsening ring, no
+coordinate singularity, no special-cased apex element fan. Both paths share
+the same fiber-assignment (Eq.~\eqref{eq:helix_angle}) and
+boundary-condition machinery described below.
+
+% -----------------------------------------------------------------------
+\section{Boundary Conditions and Activation (Current Status)}
+\label{sec:bc-status}
+
+This section documents the boundary-condition and activation scheme as
+currently implemented, which should be read as an interim numerical
+scheme, \emph{not} a validated physiological model.
+
+\subsection{Apex Pin, Free Base}
+The apex is pinned (translation, single node) and the base rim is left
+completely unconstrained. This is the anatomically correct direction: the
+LV apex is the relatively stationary point near the fibrous skeleton, while
+the base/atrioventricular-valve plane is the mobile one, descending toward
+the apex during systole (``AV plane displacement''). An earlier version of
+this model had this backwards (base pinned, apex free); that is now known
+to be wrong and has been corrected.
+
+\subsection{Activation ($\gamma$) Taper Near Free/Pinned Edges}
+A hard on/off jump in active fiber tension (governed by the activation
+parameter $\gamma$, see \texttt{ibm->gamma\_scale} in the source) right next
+to a pinned point or a completely free edge causes local tearing/buckling
+under load — observed independently at both the apex (needle-like
+protrusion) and the base rim (visible element distortion once $\gamma$
+grows during the systolic ramp). The mitigation is a smooth linear taper of
+$\gamma$ from 0 at the boundary up to full strength over a controllable
+angular width, applied at the apex and (as of this revision) the base rim
+independently, each toggleable via \texttt{control.dat} — see the
+implementation for the exact option names, which are read inside the
+geometry source files rather than \texttt{main.c}.
+
+\subsection{Known Limitation: $\gamma$ Has No Physiological Basis Yet}
+Neither the spatial taper described above nor the temporal ramp
+(half-sin$^2$ systole curve, \texttt{GammaOfTime} in
+\texttt{active\_strain.c}) is derived from electrophysiology. The taper is
+loosely motivated by the real (but much thinner in vivo) fibrous transition
+zone at the valve annulus, where working myocardium blends into
+non-contractile connective tissue — but it should not be read as an
+activation map. Replacing it with a genuine spatial and temporal $\gamma(\bx,t)$
+field, derived from solving for cardiac electrical activation and the
+resulting excitation timing, is planned future work.
 
 % -----------------------------------------------------------------------
 \section{Output}
