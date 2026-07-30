@@ -201,7 +201,10 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
    * the Python generator, but we still need them here for the normal /
    * taper formulas -- read the same -lv_a/-lv_b options CreateLVMesh uses.
    * ---------------------------------------------------------------- */
-  PetscReal alpha = 0.5 * (p->alpha_endo + p->alpha_epi) * PETSC_PI / 180.0;
+  PetscReal alpha_apex_rad = p->alpha_apex * PETSC_PI / 180.0;
+  PetscReal alpha_base_rad = p->alpha_base * PETSC_PI / 180.0;
+  PetscReal theta_cut_for_alpha = acos(1.0 - 2.0 * p->f_cut);
+  PetscReal z_base = p->a * cos(theta_cut_for_alpha);
   struct Cmpnts e_down = {0.0, 0.0, -1.0};
 
   /* theta_pin: angular distance from the apex out to the pinned apex-pin
@@ -232,6 +235,25 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_taper_theta_deg", &taper_theta_deg, PETSC_NULL);
   PetscReal theta_taper_width = taper_theta_deg * PETSC_PI / 180.0;
 
+  /* Base rim taper: mirrors the apex taper, ramping gamma_scale 1 -> 0
+   * approaching theta_cut (the completely free base edge) instead of 0 -> 1
+   * leaving the apex. The base rim carries full-strength gamma with
+   * nothing beyond it to react against, same free-edge instability
+   * mechanism as the un-tapered apex -- confirmed by measurement: element
+   * quality in the base region degrades steadily once gamma ramps up
+   * (min angle 21deg -> 5.6deg over 29 steps on the same run, nowhere else
+   * in the mesh). Both tapers independently toggleable for A/B testing;
+   * options read here, not main.c, matching where the rest of the
+   * mesh/gamma_scale setup already lives. */
+  PetscBool apex_taper_on = PETSC_TRUE;
+  PetscBool base_taper_on = PETSC_TRUE;
+  PetscReal base_taper_theta_deg = 24.0;
+  PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-lv_apex_taper", &apex_taper_on, PETSC_NULL);
+  PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-lv_base_taper", &base_taper_on, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_base_taper_theta_deg", &base_taper_theta_deg, PETSC_NULL);
+  PetscReal base_taper_width = base_taper_theta_deg * PETSC_PI / 180.0;
+  PetscReal theta_cut = theta_cut_for_alpha;
+
   for (PetscInt ec = 0; ec < n_elmt; ec++) {
     PetscInt n1e = ibm->nv1[ec], n2e = ibm->nv2[ec], n3e = ibm->nv3[ec];
 
@@ -260,11 +282,31 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
     if (cos_theta_c > 1.0) cos_theta_c = 1.0;
     if (cos_theta_c < -1.0) cos_theta_c = -1.0;
     PetscReal theta_c = acos(cos_theta_c);
-    PetscReal taper = (theta_taper_width > 0.0)
-      ? (theta_c - theta_pin) / theta_taper_width
-      : 1.0;
-    if (taper > 1.0) taper = 1.0;
-    if (taper < 0.0) taper = 0.0;
+    PetscReal taper = 1.0;
+    if (apex_taper_on) {
+      taper = (theta_taper_width > 0.0)
+        ? (theta_c - theta_pin) / theta_taper_width
+        : 1.0;
+      if (taper > 1.0) taper = 1.0;
+      if (taper < 0.0) taper = 0.0;
+    }
+
+    PetscReal base_taper = 1.0;
+    if (base_taper_on) {
+      base_taper = (base_taper_width > 0.0)
+        ? (theta_cut - theta_c) / base_taper_width
+        : 1.0;
+      if (base_taper > 1.0) base_taper = 1.0;
+      if (base_taper < 0.0) base_taper = 0.0;
+    }
+    taper *= base_taper;
+
+    /* Latitude-interpolated helix angle, same formula as CreateLVMesh
+     * (docs/lv_geometry_theory.tex §3.6 Eq.4-5). */
+    PetscReal zstar = (p->a - c.z) / (p->a - z_base);
+    if (zstar < 0.0) zstar = 0.0;
+    if (zstar > 1.0) zstar = 1.0;
+    PetscReal alpha = (1.0 - zstar) * alpha_apex_rad + zstar * alpha_base_rad;
 
     ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
     ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
@@ -273,10 +315,13 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
   }
 
   PetscPrintf(PETSC_COMM_WORLD,
-    "[lv-unstruct] fibers assigned: alpha_endo=%.1f alpha_epi=%.1f  "
-    "apex_pin=%d nodes  theta_pin=%.2f deg  taper_width=%.2f deg\n",
-    p->alpha_endo, p->alpha_epi, (int)ibm->n_apex_pin,
-    theta_pin * 180.0 / PETSC_PI, theta_taper_width * 180.0 / PETSC_PI);
+    "[lv-unstruct] fibers assigned: alpha_apex=%.1f alpha_base=%.1f  "
+    "(linear latitude blend)  apex_pin=%d nodes  theta_pin=%.2f deg  "
+    "apex_taper=%s(%.2f deg)  base_taper=%s(%.2f deg)\n",
+    p->alpha_apex, p->alpha_base, (int)ibm->n_apex_pin,
+    theta_pin * 180.0 / PETSC_PI,
+    apex_taper_on ? "on" : "off", theta_taper_width * 180.0 / PETSC_PI,
+    base_taper_on ? "on" : "off", base_taper_width * 180.0 / PETSC_PI);
 
   PetscPrintf(PETSC_COMM_WORLD, "[lv-unstruct] subdivision surface topology (IrrVer + Patch)\n");
   ierr = IrrVer(ibm); CHKERRQ(ierr);

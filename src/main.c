@@ -247,9 +247,9 @@ int main(int argc, char **argv)
       LVParams lv_p;
       ierr = LVParamsCreate(&lv_p); CHKERRQ(ierr);
       if (rank == 0) {
-        PetscPrintf(PETSC_COMM_SELF, "[lv] a=%.2f b=%.2f f_cut=%.2f N_theta=%d N_phi=%d alpha_endo=%.1f alpha_epi=%.1f\n",
+        PetscPrintf(PETSC_COMM_SELF, "[lv] a=%.2f b=%.2f f_cut=%.2f N_theta=%d N_phi=%d alpha_apex=%.1f alpha_base=%.1f\n",
                     lv_p.a, lv_p.b, lv_p.f_cut, (int)lv_p.N_theta, (int)lv_p.N_phi,
-                    lv_p.alpha_endo, lv_p.alpha_epi);
+                    lv_p.alpha_apex, lv_p.alpha_base);
       }
       if (lv_geom_unstructured) {
         ierr = CreateLVMeshUnstructured(&ibm[ibi], &fem[ibi], &lv_p); CHKERRQ(ierr);

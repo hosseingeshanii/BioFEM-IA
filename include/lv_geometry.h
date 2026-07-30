@@ -20,8 +20,8 @@ typedef struct {
                                reduction jump (see CreateLVMesh cap coarsening);
                                must evenly divide N_phi, nearest valid divisor
                                used otherwise                                    */
-  PetscReal  alpha_endo;    /* Streeter helix angle at endocardium [degrees]      */
-  PetscReal  alpha_epi;     /* Streeter helix angle at epicardium [degrees]       */
+  PetscReal  alpha_apex;    /* helix angle at the apex (latitude endpoint) [degrees] */
+  PetscReal  alpha_base;    /* helix angle at the base (latitude endpoint) [degrees] */
   PetscInt   N_taper_rings; /* rings beyond ring 0 over which active fiber
                                magnitude ramps 0 -> 1 (see stage 7 comment
                                in CreateLVMesh); 0 = hard on/off at ring 0   */
@@ -44,8 +44,14 @@ typedef struct {
  *                            means fewer total cap elements but a bigger
  *                            single jump (worse element shape right at the
  *                            ring-0 attachment, which is not pinned)
- *   -lv_alpha_endo [60.0]   endocardial helix angle [deg]  (Bayer: 40°)
- *   -lv_alpha_epi  [-60.0]  epicardial helix angle  [deg]  (Bayer: -50°)
+ *   -lv_alpha_apex [60.0]   helix angle at the apex latitude [deg]
+ *   -lv_alpha_base [-60.0]  helix angle at the base latitude [deg]
+ *   (previously named -lv_alpha_endo/-lv_alpha_epi and read as a constant
+ *   transmural mid-wall average; control.dat had already been setting
+ *   -lv_alpha_apex/-lv_alpha_base, which those old option names never
+ *   matched, so control.dat's values were silently ignored -- see the
+ *   "unused options" warning every run printed. Renamed to match both
+ *   control.dat and the actual latitude-interpolated usage below.)
  *   -lv_N_taper_rings [2]   rings beyond ring 0 (which is pinned, along with
  *                           the cap) over which active fiber magnitude
  *                           ramps linearly from 0 up to 1, instead of
@@ -54,8 +60,11 @@ typedef struct {
  *                           right next to a rigid wall is what was tearing
  *                           elements just outside whatever was pinned.
  *
- * The mid-wall fiber angle is α_mid = (α_endo + α_epi)/2, constant over the
- * surface, consistent with Bayer et al. 2012 Eq.(2) evaluated at d=0.5.
+ * The helix angle varies linearly by latitude, α(z*) = (1-z*)·α_apex +
+ * z*·α_base with z* the normalized apex(0)->base(1) axial coordinate
+ * (docs/lv_geometry_theory.tex §3.6 Eq.4-5). Still a single constant
+ * transmurally (one representative mid-wall surface per element, per
+ * §3.3) — no depth (endo/epi) variation, only latitude variation.
  */
 PetscErrorCode LVParamsCreate(LVParams *p);
 
