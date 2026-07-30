@@ -21,6 +21,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
+PetscInt   write_3d_shell=0;  /* visualization-only wedge-mesh reconstruction, see Write3DShellVTK() in io.c */
 PetscInt   timeinteg=0, nbody=1, contact=0, explicit=0;
 PetscInt   ec, nc, ti, tiout, tistart=0, rstart_flg, tisteps=1, curvature=6, manufactured=0, inverse=1, dR_dE_flag=0;
 PetscInt   n_epochs=100, init_flag=1, epoch_start=0, epoch_output = 100;
@@ -167,6 +168,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-contact", &contact, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-ConstitutiveLawNonLinear", &ConstitutiveLawNonLinear, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-outghost", &outghost, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-write_3d_shell", &write_3d_shell, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-curvature", &curvature, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-manufactured", &manufactured, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-inverse", &inverse, PETSC_NULL);
@@ -447,6 +449,11 @@ int main(int argc, char **argv)
 
 	        if (reason >= 0) {
 	          VecCopy(U, fem[ibi].x);
+	          /* Advance per-element thickness ONCE per converged timestep (not
+	           * per Newton iteration, unlike the C33 solve itself which runs
+	           * every residual evaluation inside FInternalPreCalc) -- see
+	           * UpdateElementThickness() for the exact update rule. */
+	          ierr = UpdateElementThickness(&fem[ibi]); CHKERRQ(ierr);
 	        } else {
 	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "Skipping solution update because SNES diverged (reason=%d) for body %d at step %d\n",
@@ -559,6 +566,7 @@ int main(int argc, char **argv)
         /* ti+1: file 0 = reference (Init), file 1..N = post-SNES deformed states */
         Output(&fem[ibi], ti+1, ibi, out_dir);
         if (outghost) {OutputGhost(&fem[ibi], ti, ibi, out_dir);}
+        if (write_3d_shell) {Write3DShellVTK(&fem[ibi], ti+1, ibi, out_dir);}
       }
     }
   }// ti
@@ -1401,8 +1409,9 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   //if (ti==0 && manufactured) MoveBoundary(1, fem);
   // printf("CHECK b Output\n");
   Output(fem, 0, ibi, out_dir);
-  
+
   if(outghost){OutputGhost(fem, 0, ibi, out_dir);}
+  if(write_3d_shell){Write3DShellVTK(fem, 0, ibi, out_dir);}
   
   return(0);
 }
@@ -1432,7 +1441,7 @@ PetscErrorCode Free(FE *fem) {
   PetscFree(ibm->x_bp0);  PetscFree(ibm->y_bp0);  PetscFree(ibm->z_bp0);
   PetscFree(ibm->nv1);  PetscFree(ibm->nv2);  PetscFree(ibm->nv3);
   PetscFree(ibm->nv4);  PetscFree(ibm->nv5);  PetscFree(ibm->nv6);
-  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->gamma_scale);  PetscFree(ibm->kve0);
+  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->gamma_scale);  PetscFree(ibm->thickness);  PetscFree(ibm->kve0);
   PetscFree(ibm->kve);  PetscFree(fem->StressM);  PetscFree(fem->StrainM);   PetscFree(fem->IE);  PetscFree(fem->CE);  PetscFree(fem->KE);  PetscFree(ibm->m); 
   PetscFree(fem->FC); 
   PetscFree(fem->StressB);  PetscFree(fem->StrainB);

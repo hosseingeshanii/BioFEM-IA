@@ -54,6 +54,10 @@ typedef struct {
   PetscInt       *nv1, *nv2, *nv3, *nv4, *nv5, *nv6;
   struct Cmpnts  *n_fib;
   PetscReal      *gamma_scale;  /* per-element multiplier on gamma (1.0 = full activation) */
+  PetscReal      *thickness;    /* per-element current wall thickness, persists across timesteps.
+                                  * Initialized to h0, updated once per CONVERGED timestep (not per
+                                  * Newton iteration) via thickness *= C33 -- see
+                                  * UpdateElementThickness() in active_strain.c. */
   PetscInt       n_apex_pin;         /* 0 = unused (structured LV mesh, all other mesh types) */
   PetscInt       apex_pin_nodes[3];  /* minimal ("3-2-1") rigid-body pin node indices, see
                                        * lv_geometry_unstructured.c / main.c FormFunctionFEM */
