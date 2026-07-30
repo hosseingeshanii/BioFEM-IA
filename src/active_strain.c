@@ -2065,7 +2065,7 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     // PetscPrintf(PETSC_COMM_SELF, "before ModElemC33 on elem = %d \n", ec);
         // PrintElemS(fem, ec);
 
-    ModElemC33(fem, ec, &delta);        
+    ModElemC33(fem, ec, &delta);
 
     // if (ec == 100)
     // {
@@ -2158,6 +2158,49 @@ PetscErrorCode FInternalPreCalc(FE *fem) {
     PetscReal avg_C33 = (total_qp > 0) ? sum_C33 / total_qp : 0.0;
     PetscPrintf(PETSC_COMM_SELF, "Average C33: %e (over %d QPs in %d elements)\n", (double)avg_C33, total_qp, n_elmt);
   } */
+  PetscFunctionReturn(0);
+}
+
+/* UpdateElementThickness — call ONCE per converged timestep (not per Newton
+ * iteration, unlike FInternalPreCalc/ElemC33Solve above, which re-solve C33
+ * every residual evaluation).
+ *
+ * ead->C[qp].Cov[2][2] is built from ead->geom vs ead->geom0 (see
+ * ElemUpdateG above) -- geom0 is the REFERENCE configuration cached once at
+ * t=0, not the previous timestep -- so C33 is the standard, CUMULATIVE
+ * right-Cauchy-Green component C33 = lambda3^2, the through-thickness
+ * stretch *squared*, relative to t=0, not an incremental step-to-step
+ * ratio. An earlier version of this function compounded it multiplicatively
+ * onto the running thickness each timestep (thickness *= C33), which
+ * double-counts the already-cumulative quantity every step and collapsed
+ * thickness toward zero within ~10 steps (measured: 0.30 -> 0.23 by step 5,
+ * with per-step C33 itself steadily *decreasing*, compounding the error
+ * further). Corrected to the non-compounding relation, recomputed fresh
+ * from h0 every call instead of building on the previous thickness. */
+PetscErrorCode UpdateElementThickness(FE *fem)
+{
+  PetscFunctionBeginUser;
+  IBMNodes      *ibm = fem->ibm;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscInt       n_qp = fem->act_data.n_qp;
+
+  PetscReal *local_thickness;
+  PetscCall(PetscCalloc1(ibm->n_elmt, &local_thickness));
+
+  for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
+    const PetscInt ec = ctx->layout.orig_cell[lc];
+    if (ec < 0 || ec >= ibm->n_elmt) continue;
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    PetscReal sum_C33 = 0.0;
+    for (PetscInt qp = 0; qp < n_qp; qp++) sum_C33 += ead->C[qp].Cov[2][2];
+    PetscReal C33 = (n_qp > 0) ? sum_C33 / (PetscReal)n_qp : 1.0;
+    PetscReal lambda3 = (C33 > 0.0) ? PetscSqrtReal(C33) : 1.0;
+    local_thickness[ec] = h0 * lambda3;
+  }
+
+  PetscCallMPI(MPIU_Allreduce(local_thickness, ibm->thickness, ibm->n_elmt, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD));
+  PetscCall(PetscFree(local_thickness));
+
   PetscFunctionReturn(0);
 }
 

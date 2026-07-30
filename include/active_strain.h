@@ -67,6 +67,10 @@ PetscErrorCode FInternalPreCalc(FE *fem);
 /** @brief Assemble global internal force vector for active-strain mechanics. */
 PetscErrorCode FInternalAct(FE *fem);
 
+/** @brief Advance ibm->thickness[] by C33 once per CONVERGED timestep (not
+ *  per Newton iteration) -- see definition for the exact update rule. */
+PetscErrorCode UpdateElementThickness(FE *fem);
+
 /** @brief Apply an element callback to all mesh elements. */
 PetscErrorCode UpdateElements(FE *fem, ElemFunc func);
 

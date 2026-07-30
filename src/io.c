@@ -10,6 +10,7 @@ extern PetscInt   dof, outghost, ConstitutiveLawNonLinear, contact, n_Fung_Coeff
 extern PetscInt   lv_geom_process;
 
 extern PetscReal  dt, char_length_x, char_length_y, char_length_z;
+extern PetscReal  h0;
 
 extern char in_dir[256];
 
@@ -104,6 +105,9 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
 
   PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->gamma_scale));
   for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->gamma_scale[i] = 1.0;
+
+  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->thickness));
+  for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->thickness[i] = h0;
 
   ibm->n_apex_pin = 0;
 
@@ -914,6 +918,107 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   /* fclose(f); */
  
   return(0);
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------
+/* Write3DShellVTK — visualization-only 3D reconstruction of the shell wall:
+ * one layer of triangular-prism (VTK_WEDGE) elements built by offsetting
+ * each surface node inward/outward along its local normal by half the
+ * node-averaged wall thickness (ibm->thickness[], updated once per
+ * timestep by UpdateElementThickness() -- see active_strain.c). Does NOT
+ * feed back into the mechanics; the shell simulation is unaffected. Same
+ * technique (and same C prototype/gather assumptions) as
+ * BioFEM-studies/lv_test/build_3d_shell.py, just run in-line during the
+ * simulation instead of as an offline post-process, and using the real
+ * per-element C33-derived thickness instead of that script's placeholder.
+ *
+ * Rank-0 only, like Output() -- assumes ibm->x_bp/y_bp/z_bp/thickness are
+ * already globally valid on rank 0 (true after Output()'s own gather step
+ * and UpdateElementThickness()'s Allreduce).                                */
+PetscErrorCode Write3DShellVTK(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
+
+  PetscMPIInt rank;
+  MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
+  if (rank != 0) return 0;
+
+  IBMNodes *ibm = fem->ibm;
+  PetscInt  n_v = ibm->n_v, n_elmt = ibm->n_elmt;
+
+  /* Per-node normal: area-weighted sum of incident (already outward-
+   * oriented) face normals, normalized. Same convention as the Python
+   * reference implementation. */
+  PetscReal *nx, *ny, *nz;
+  PetscCalloc1(n_v, &nx); PetscCalloc1(n_v, &ny); PetscCalloc1(n_v, &nz);
+  PetscReal *node_thick_sum;
+  PetscInt  *node_thick_cnt;
+  PetscCalloc1(n_v, &node_thick_sum);
+  PetscCalloc1(n_v, &node_thick_cnt);
+
+  for (PetscInt ec = 0; ec < n_elmt; ec++) {
+    PetscInt n1 = ibm->nv1[ec], n2 = ibm->nv2[ec], n3 = ibm->nv3[ec];
+    struct Cmpnts p0 = {ibm->x_bp[n1], ibm->y_bp[n1], ibm->z_bp[n1]};
+    struct Cmpnts p1 = {ibm->x_bp[n2], ibm->y_bp[n2], ibm->z_bp[n2]};
+    struct Cmpnts p2 = {ibm->x_bp[n3], ibm->y_bp[n3], ibm->z_bp[n3]};
+    struct Cmpnts e1 = MINUS(p1, p0), e2 = MINUS(p2, p0);
+    struct Cmpnts fn = CROSS(e1, e2);  /* area-weighted (not normalized) face normal */
+
+    nx[n1] += fn.x; ny[n1] += fn.y; nz[n1] += fn.z;
+    nx[n2] += fn.x; ny[n2] += fn.y; nz[n2] += fn.z;
+    nx[n3] += fn.x; ny[n3] += fn.y; nz[n3] += fn.z;
+
+    node_thick_sum[n1] += ibm->thickness[ec]; node_thick_cnt[n1]++;
+    node_thick_sum[n2] += ibm->thickness[ec]; node_thick_cnt[n2]++;
+    node_thick_sum[n3] += ibm->thickness[ec]; node_thick_cnt[n3]++;
+  }
+
+  PetscReal *node_thick;
+  PetscMalloc1(n_v, &node_thick);
+  for (PetscInt v = 0; v < n_v; v++) {
+    PetscReal len = sqrt(nx[v]*nx[v] + ny[v]*ny[v] + nz[v]*nz[v]);
+    if (len > 1.0e-14) { nx[v] /= len; ny[v] /= len; nz[v] /= len; }
+    node_thick[v] = (node_thick_cnt[v] > 0) ? node_thick_sum[v] / (PetscReal)node_thick_cnt[v] : 0.0;
+  }
+  PetscFree(node_thick_sum); PetscFree(node_thick_cnt);
+
+  const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
+  mkdir(dir, 0777);
+  char filepath[96];
+  snprintf(filepath, sizeof(filepath), "%s/shell3d%2.2d_%5.5d.vtk", dir, (int)ibi, (int)ti);
+  FILE *f = fopen(filepath, "w");
+  if (!f) { SETERRQ1(PETSC_COMM_SELF, PETSC_ERR_FILE_OPEN, "Cannot open file: %s", filepath); }
+
+  fprintf(f, "# vtk DataFile Version 2.0\nLV 3D shell (visualization only)\nASCII\nDATASET UNSTRUCTURED_GRID\n");
+  fprintf(f, "POINTS %d float\n", 2 * n_v);
+  for (PetscInt v = 0; v < n_v; v++) {
+    PetscReal h2 = 0.5 * node_thick[v];
+    fprintf(f, "%f %f %f\n", ibm->x_bp[v] - h2*nx[v], ibm->y_bp[v] - h2*ny[v], ibm->z_bp[v] - h2*nz[v]);
+  }
+  for (PetscInt v = 0; v < n_v; v++) {
+    PetscReal h2 = 0.5 * node_thick[v];
+    fprintf(f, "%f %f %f\n", ibm->x_bp[v] + h2*nx[v], ibm->y_bp[v] + h2*ny[v], ibm->z_bp[v] + h2*nz[v]);
+  }
+
+  fprintf(f, "CELLS %d %d\n", n_elmt, 7 * n_elmt);
+  for (PetscInt ec = 0; ec < n_elmt; ec++) {
+    PetscInt n1 = ibm->nv1[ec], n2 = ibm->nv2[ec], n3 = ibm->nv3[ec];
+    fprintf(f, "6 %d %d %d %d %d %d\n", (int)n1, (int)n2, (int)n3,
+            (int)(n1 + n_v), (int)(n2 + n_v), (int)(n3 + n_v));
+  }
+  fprintf(f, "CELL_TYPES %d\n", n_elmt);
+  for (PetscInt ec = 0; ec < n_elmt; ec++) fprintf(f, "13\n");  /* VTK_WEDGE */
+
+  fprintf(f, "POINT_DATA %d\n", 2 * n_v);
+  fprintf(f, "SCALARS layer float 1\nLOOKUP_TABLE default\n");
+  for (PetscInt v = 0; v < n_v; v++) fprintf(f, "0.0\n");
+  for (PetscInt v = 0; v < n_v; v++) fprintf(f, "1.0\n");
+  fprintf(f, "SCALARS thickness float 1\nLOOKUP_TABLE default\n");
+  for (PetscInt v = 0; v < n_v; v++) fprintf(f, "%f\n", node_thick[v]);
+  for (PetscInt v = 0; v < n_v; v++) fprintf(f, "%f\n", node_thick[v]);
+
+  fclose(f);
+  PetscFree(nx); PetscFree(ny); PetscFree(nz); PetscFree(node_thick);
+  PetscPrintf(PETSC_COMM_SELF, "3D shell VTK written to: %s\n", filepath);
+  return 0;
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
