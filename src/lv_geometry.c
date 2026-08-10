@@ -82,6 +82,8 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   p->alpha_midwall = 0.0;
   p->fiber_latitude_sweep = 0;
   p->N_taper_rings = 2;
+  p->gamma_wave = 0;
+  p->gamma_wave_delay_max = 0.05;
 
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_a",             &p->a,            PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_b",             &p->b,            PETSC_NULL);
@@ -95,6 +97,8 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_midwall", &p->alpha_midwall, PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_fiber_latitude_sweep", &p->fiber_latitude_sweep, PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_taper_rings", &p->N_taper_rings, PETSC_NULL);
+  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_gamma_wave", &p->gamma_wave, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_gamma_wave_delay_max", &p->gamma_wave_delay_max, PETSC_NULL);
 
   return 0;
 }

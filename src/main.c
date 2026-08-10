@@ -31,6 +31,13 @@ PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DO
 PetscInt   lv_fix_apex_cap=0; /* fully pin all n_apex_pin nodes (all 3 DOFs each, not just c0) --
                                   a small physically-fixed apex cap, independent of lv_fix_apex/
                                   lv_rigid_min */
+PetscInt   lv_fix_base_axial=0; /* constrain only the AXIAL (z) displacement of base-rim nodes,
+                                  leaving radial/circumferential motion free -- the partial
+                                  constraint used by Bovendeerd et al. 1992 / Vendelin et al. 2002
+                                  (full clamp there also pins one ring's circumferential DOF; we
+                                  drop that since we have no separate endo/epi rings), adapted for
+                                  a single-midsurface shell. Independent of lv_fix_base (full
+                                  3-DOF clamp). */
 PetscInt   timeinteg=0, nbody=1, contact=0, explicit=0;
 PetscInt   ec, nc, ti, tiout, tistart=0, rstart_flg, tisteps=1, curvature=6, manufactured=0, inverse=1, dR_dE_flag=0;
 PetscInt   n_epochs=100, init_flag=1, epoch_start=0, epoch_output = 100;
@@ -182,6 +189,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_rigid_min", &lv_rigid_min, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex_cap", &lv_fix_apex_cap, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base_axial", &lv_fix_base_axial, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-curvature", &curvature, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-manufactured", &manufactured, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-inverse", &inverse, PETSC_NULL);
@@ -949,6 +957,14 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
     ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
   }
+  /* --- Base-rim axial-only constraint (Bovendeerd et al. 1992 / Vendelin
+   * et al. 2002: "axial displacement of the nodes in the basal
+   * plane/surface... suppressed", radial/circumferential left free) --
+   * a lighter alternative to the full clamp above. Opt-in via
+   * -lv_fix_base_axial 1, independent of -lv_fix_base. z is direction 2. */
+  if (lv_fix_base_axial && lv_geom_unstructured && ibm->n_bnodes[0] > 0) {
+    ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
+  }
   ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
   // GlobalGhost(ibm);
@@ -1483,7 +1499,7 @@ PetscErrorCode Free(FE *fem) {
   PetscFree(ibm->x_bp0);  PetscFree(ibm->y_bp0);  PetscFree(ibm->z_bp0);
   PetscFree(ibm->nv1);  PetscFree(ibm->nv2);  PetscFree(ibm->nv3);
   PetscFree(ibm->nv4);  PetscFree(ibm->nv5);  PetscFree(ibm->nv6);
-  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->gamma_scale);  PetscFree(ibm->thickness);  PetscFree(ibm->kve0);
+  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->gamma_scale);  PetscFree(ibm->activation_delay);  PetscFree(ibm->thickness);  PetscFree(ibm->kve0);
   PetscFree(ibm->kve);  PetscFree(fem->StressM);  PetscFree(fem->StrainM);   PetscFree(fem->IE);  PetscFree(fem->CE);  PetscFree(fem->KE);  PetscFree(ibm->m); 
   PetscFree(fem->FC); 
   PetscFree(fem->StressB);  PetscFree(fem->StrainB);

@@ -43,6 +43,19 @@ typedef struct {
   PetscInt   N_taper_rings; /* rings beyond ring 0 over which active fiber
                                magnitude ramps 0 -> 1 (see stage 7 comment
                                in CreateLVMesh); 0 = hard on/off at ring 0   */
+  PetscInt   gamma_wave;         /* 0 (default) = every element's gamma ramp starts at t=0
+                                    simultaneously. 1 = propagating-wavefront activation: each
+                                    element's local ramp is delayed proportionally to its angular
+                                    (theta) distance from the apex, modeling a depolarization front
+                                    that reaches the apex first and spreads toward the base --
+                                    see Barta et al. 1987 / Bovendeerd et al. 1992 Sec. "Activation
+                                    sequence". Simplified to a single surface-propagation delay
+                                    (no separate transmural leg, since this is a single-midsurface
+                                    shell with no endo/epi split). */
+  PetscReal  gamma_wave_delay_max; /* delay [same units as -dt] experienced by the latest-activated
+                                    element (theta_c = theta_cut, i.e. the base rim) when
+                                    gamma_wave=1; delay grows linearly with theta_c/theta_cut from
+                                    0 at the apex. */
 } LVParams;
 
 /*

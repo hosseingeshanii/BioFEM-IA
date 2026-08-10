@@ -106,6 +106,8 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
 
   PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->gamma_scale));
   for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->gamma_scale[i] = 1.0;
+  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->activation_delay));
+  for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->activation_delay[i] = 0.0;
 
   PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->thickness));
   for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->thickness[i] = h0;
@@ -867,16 +869,17 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
     PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", ibm->dA0[i]);
   }
 
-  /* gamma = GammaOfTime(t) * gamma_scale[ec] -- the actual scalar activation
-   * driving contraction in this element this timestep, distinct from
-   * gamma_scale alone (the static apex/base taper multiplier). Lets taper
-   * on/off, ramp shape, etc. be verified directly from the VTK output. */
+  /* gamma = GammaOfTimeDelayed(t - activation_delay[ec]) * gamma_scale[ec] --
+   * the actual scalar activation driving contraction in this element this
+   * timestep, including both the propagating-wavefront delay (see
+   * -lv_gamma_wave) and the static apex/base taper multiplier. Lets taper
+   * on/off, wave delay, ramp shape, etc. be verified directly from the VTK
+   * output. */
   if (muscle_activation) {
-    PetscReal gamma_now = GammaOfTimeCurrent(fem);
     PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS gamma float\n");
     PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
     for (i=0; i<ibm->n_elmt; i++) {
-      PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", gamma_now * ibm->gamma_scale[i]);
+      PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", GammaOfTimeCurrent(fem, i) * ibm->gamma_scale[i]);
     }
   }
 

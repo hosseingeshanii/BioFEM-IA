@@ -54,6 +54,9 @@ typedef struct {
   PetscInt       *nv1, *nv2, *nv3, *nv4, *nv5, *nv6;
   struct Cmpnts  *n_fib;
   PetscReal      *gamma_scale;  /* per-element multiplier on gamma (1.0 = full activation) */
+  PetscReal      *activation_delay; /* per-element activation-wavefront delay [same time units as
+                                       -dt], 0.0 = instantaneous everywhere (default). See
+                                       -lv_gamma_wave in lv_geometry_unstructured.c. */
   PetscReal      *thickness;    /* per-element current wall thickness, persists across timesteps.
                                   * Initialized to h0, updated once per CONVERGED timestep (not per
                                   * Newton iteration) via thickness *= C33 -- see
