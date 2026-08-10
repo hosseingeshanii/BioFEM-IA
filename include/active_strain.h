@@ -71,6 +71,10 @@ PetscErrorCode FInternalAct(FE *fem);
  *  per Newton iteration) -- see definition for the exact update rule. */
 PetscErrorCode UpdateElementThickness(FE *fem);
 
+/** @brief Current scalar gamma(t) (before per-element gamma_scale taper),
+ *  exposed for output/diagnostic use. */
+PetscReal GammaOfTimeCurrent(FE *fem);
+
 /** @brief Apply an element callback to all mesh elements. */
 PetscErrorCode UpdateElements(FE *fem, ElemFunc func);
 

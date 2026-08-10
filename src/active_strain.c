@@ -1175,6 +1175,14 @@ static PetscReal GammaOfTime(const MuscleActParams *p)
     return p->gamma * s * s;
 }
 
+/* Public wrapper around GammaOfTime for output/diagnostic use (e.g. io.c's
+ * Output(), so VTK files can report the actual scalar gamma driving
+ * activation this timestep, not just the static gamma_scale spatial taper). */
+PetscReal GammaOfTimeCurrent(FE *fem)
+{
+    return GammaOfTime(&fem->act_data.muscle_act_params);
+}
+
 /* Deformation gradient */
 PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
 {

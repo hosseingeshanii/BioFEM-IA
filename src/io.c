@@ -1,4 +1,5 @@
 #include  "variables.h"
+#include  "active_strain.h"
 #include  <petscvec.h>
 
 #include <stdio.h>
@@ -718,6 +719,33 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 
 #undef OUTPUT_VEC
 
+  /* Residual R = Fint - Fext + Fdyn, matching the assembly in
+   * FormFunctionFEM (main.c) -- written so per-node convergence/loading can
+   * be inspected directly in ParaView instead of only the scalar SNES norm. */
+  if (muscle_activation) {
+    PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Res float\n");
+    if (is_parallel) {
+      for (i = 0; i < ibm->n_v; i++)
+        PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+                     g_Fint[i*dof]   - g_Fext[i*dof]   + g_Fdyn[i*dof],
+                     g_Fint[i*dof+1] - g_Fext[i*dof+1] + g_Fdyn[i*dof+1],
+                     g_Fint[i*dof+2] - g_Fext[i*dof+2] + g_Fdyn[i*dof+2]);
+    } else {
+      PetscReal *_fi, *_fe, *_fd;
+      VecGetArray(fem->Fint, &_fi);
+      VecGetArray(fem->Fext, &_fe);
+      VecGetArray(fem->Fdyn, &_fd);
+      for (i = 0; i < ibm->n_v; i++)
+        PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n",
+                     _fi[i*dof]   - _fe[i*dof]   + _fd[i*dof],
+                     _fi[i*dof+1] - _fe[i*dof+1] + _fd[i*dof+1],
+                     _fi[i*dof+2] - _fe[i*dof+2] + _fd[i*dof+2]);
+      VecRestoreArray(fem->Fint, &_fi);
+      VecRestoreArray(fem->Fext, &_fe);
+      VecRestoreArray(fem->Fdyn, &_fd);
+    }
+  }
+
   PetscFree(g_Fint); PetscFree(g_Fdyn);
   PetscFree(g_xd);   PetscFree(g_Fcnt);
   PetscFree(g_Fext);
@@ -838,7 +866,20 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   for (i=0; i<ibm->n_elmt; i++) {
     PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", ibm->dA0[i]);
   }
-  
+
+  /* gamma = GammaOfTime(t) * gamma_scale[ec] -- the actual scalar activation
+   * driving contraction in this element this timestep, distinct from
+   * gamma_scale alone (the static apex/base taper multiplier). Lets taper
+   * on/off, ramp shape, etc. be verified directly from the VTK output. */
+  if (muscle_activation) {
+    PetscReal gamma_now = GammaOfTimeCurrent(fem);
+    PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS gamma float\n");
+    PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
+    for (i=0; i<ibm->n_elmt; i++) {
+      PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", gamma_now * ibm->gamma_scale[i]);
+    }
+  }
+
   // PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS El float\n");
   // PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
   // for (i=0; i<ibm->n_elmt; i++) {
