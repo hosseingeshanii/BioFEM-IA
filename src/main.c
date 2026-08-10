@@ -28,6 +28,9 @@ PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DO
                                   apex_pin_nodes) instead of/in addition to lv_fix_apex/lv_fix_base --
                                   removes all 6 zero-energy rigid-body modes without imposing a real
                                   physical constraint, for isolating pure material/fiber response */
+PetscInt   lv_fix_apex_cap=0; /* fully pin all n_apex_pin nodes (all 3 DOFs each, not just c0) --
+                                  a small physically-fixed apex cap, independent of lv_fix_apex/
+                                  lv_rigid_min */
 PetscInt   timeinteg=0, nbody=1, contact=0, explicit=0;
 PetscInt   ec, nc, ti, tiout, tistart=0, rstart_flg, tisteps=1, curvature=6, manufactured=0, inverse=1, dR_dE_flag=0;
 PetscInt   n_epochs=100, init_flag=1, epoch_start=0, epoch_output = 100;
@@ -178,6 +181,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_rigid_min", &lv_rigid_min, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex_cap", &lv_fix_apex_cap, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-curvature", &curvature, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-manufactured", &manufactured, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-inverse", &inverse, PETSC_NULL);
@@ -893,6 +897,19 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     ierr = NodeDirectionalFix(c1, 1, fem, R); CHKERRQ(ierr);
     ierr = NodeDirectionalFix(c1, 2, fem, R); CHKERRQ(ierr);
     ierr = NodeDirectionalFix(c2, 2, fem, R); CHKERRQ(ierr);
+  }
+  /* --- Apex-region full pin: fully fix all n_apex_pin nodes (all 3 DOFs
+   * each, not just c0's 3 or the minimal 3-2-1 subset) -- a small,
+   * physically-fixed apex cap covering the apex node + its first couple of
+   * Delaunay neighbors. Opt-in via -lv_fix_apex_cap 1, independent of
+   * lv_fix_apex/lv_rigid_min. */
+  if (lv_fix_apex_cap) {
+    for (PetscInt ap = 0; ap < ibm->n_apex_pin; ap++) {
+      PetscInt cap_node = ibm->apex_pin_nodes[ap];
+      ierr = NodeDirectionalFix(cap_node, 0, fem, R); CHKERRQ(ierr);
+      ierr = NodeDirectionalFix(cap_node, 1, fem, R); CHKERRQ(ierr);
+      ierr = NodeDirectionalFix(cap_node, 2, fem, R); CHKERRQ(ierr);
+    }
   }
   /* --- Single-node pin: only the apex node's translation (3 DOFs) is
    * fixed. Leaves all 3 rotational rigid-body modes unconstrained (nothing
