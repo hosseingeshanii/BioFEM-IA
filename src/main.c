@@ -22,6 +22,8 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
 PetscInt   write_3d_shell=0;  /* visualization-only wedge-mesh reconstruction, see Write3DShellVTK() in io.c */
+PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
+PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
 PetscInt   timeinteg=0, nbody=1, contact=0, explicit=0;
 PetscInt   ec, nc, ti, tiout, tistart=0, rstart_flg, tisteps=1, curvature=6, manufactured=0, inverse=1, dR_dE_flag=0;
 PetscInt   n_epochs=100, init_flag=1, epoch_start=0, epoch_output = 100;
@@ -169,6 +171,8 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-ConstitutiveLawNonLinear", &ConstitutiveLawNonLinear, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-outghost", &outghost, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-write_3d_shell", &write_3d_shell, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-curvature", &curvature, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-manufactured", &manufactured, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-inverse", &inverse, PETSC_NULL);
@@ -851,7 +855,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
    * tradeoff being tested here. Goal: let the entire cap, including c0,
    * shrink freely with the surrounding wall instead of being anchored at
    * its small reference size. */
-  if (ibm->n_bnodes[2] >= 1) {
+  if (lv_fix_apex && ibm->n_bnodes[2] >= 1) {
     PetscInt cap_start = ibm->n_bnodes[0] + ibm->n_bnodes[1];
     PetscInt c0 = ibm->bnodes[cap_start];
 
@@ -907,6 +911,17 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
    * direction for this material with no gravity/external reference), so
    * GMRES may stagnate, drift, or fail to converge rather than cleanly
    * erroring out. */
+  /* --- Base-rim full clamp (Goktepe, Menzel & Kuhl 2014, Sec. 6: "Displacement
+   * degrees of freedom on the top base surface are restrained"). For the
+   * unstructured mesh loader, ibm->n_bnodes[0]/bnodes[0..n_hull-1] is the true
+   * open mesh boundary (base rim) -- see lv_geometry_unstructured.c. Opt-in via
+   * -lv_fix_base 1; independent of -lv_fix_apex above so apex-pin, base-fix, or
+   * both can be tested. */
+  if (lv_fix_base && lv_geom_unstructured && ibm->n_bnodes[0] > 0) {
+    ierr = EdgeDirectionalFix(0, 0, fem, R); CHKERRQ(ierr);
+    ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
+    ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
+  }
   ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
   
   // GlobalGhost(ibm);
