@@ -20,8 +20,26 @@ typedef struct {
                                reduction jump (see CreateLVMesh cap coarsening);
                                must evenly divide N_phi, nearest valid divisor
                                used otherwise                                    */
-  PetscReal  alpha_apex;    /* helix angle at the apex (latitude endpoint) [degrees] */
-  PetscReal  alpha_base;    /* helix angle at the base (latitude endpoint) [degrees] */
+  PetscReal  alpha_apex;    /* helix angle at the apex (latitude endpoint) [degrees] --
+                               only used when fiber_latitude_sweep=1, see below */
+  PetscReal  alpha_base;    /* helix angle at the base (latitude endpoint) [degrees] --
+                               only used when fiber_latitude_sweep=1, see below */
+  PetscReal  alpha_midwall; /* DEFAULT fiber model: single constant helix angle [degrees],
+                               representing the mid-wall crossing of the real transmural
+                               (endo +alpha -> epi -alpha) rotation -- see Bayer et al. 2012
+                               (Ann. Biomed. Eng. 40, LDRB algorithm) rule R2 and Goktepe,
+                               Menzel & Kuhl 2014 (JMPS 72) Fig. 10. This shell has one
+                               midsurface (no endo/epi split), so it cannot resolve the
+                               transmural sweep directly; 0 deg (circumferential) is the
+                               theoretically consistent single value for that midsurface. */
+  PetscInt   fiber_latitude_sweep; /* 0 (default) = constant alpha_midwall everywhere.
+                               1 = LEGACY: linearly interpolate alpha_apex -> alpha_base by
+                               latitude instead. This was a mislabeling bug: alpha_apex/base
+                               were renamed from alpha_endo/alpha_epi (a transmural pair) to
+                               match control.dat's flag names, but the interpolation variable
+                               stayed latitude (apex-to-base) instead of becoming depth
+                               (endo-to-epi) -- so it swept the correct +-60deg range along
+                               the wrong anatomical axis. Kept opt-in for comparison. */
   PetscInt   N_taper_rings; /* rings beyond ring 0 over which active fiber
                                magnitude ramps 0 -> 1 (see stage 7 comment
                                in CreateLVMesh); 0 = hard on/off at ring 0   */
@@ -44,14 +62,28 @@ typedef struct {
  *                            means fewer total cap elements but a bigger
  *                            single jump (worse element shape right at the
  *                            ring-0 attachment, which is not pinned)
- *   -lv_alpha_apex [60.0]   helix angle at the apex latitude [deg]
- *   -lv_alpha_base [-60.0]  helix angle at the base latitude [deg]
- *   (previously named -lv_alpha_endo/-lv_alpha_epi and read as a constant
- *   transmural mid-wall average; control.dat had already been setting
- *   -lv_alpha_apex/-lv_alpha_base, which those old option names never
- *   matched, so control.dat's values were silently ignored -- see the
- *   "unused options" warning every run printed. Renamed to match both
- *   control.dat and the actual latitude-interpolated usage below.)
+ *   -lv_alpha_midwall [0.0]  DEFAULT fiber model: single constant helix angle
+ *                            [deg] used everywhere (see LVParams doc above).
+ *   -lv_fiber_latitude_sweep [0]  1 = LEGACY: linearly blend -lv_alpha_apex
+ *                            [60.0] -> -lv_alpha_base [-60.0] by latitude
+ *                            instead. This was a mislabeling bug: these two
+ *                            options were originally named -lv_alpha_endo/
+ *                            -lv_alpha_epi and read as a constant transmural
+ *                            mid-wall average (correct); they were renamed to
+ *                            -lv_alpha_apex/-lv_alpha_base to match
+ *                            control.dat's option names (which the old names
+ *                            never matched, so control.dat's values were
+ *                            silently ignored), but the interpolation
+ *                            variable stayed latitude instead of becoming
+ *                            transmural depth -- so the correct +-60deg
+ *                            range from Bayer et al. 2012 (Ann. Biomed. Eng.
+ *                            40, LDRB rule R2) / Goktepe, Menzel & Kuhl 2014
+ *                            (JMPS 72, Fig. 10) ended up swept along the
+ *                            wrong anatomical axis (apex-to-base instead of
+ *                            endo-to-epi). Kept opt-in for A/B comparison,
+ *                            and as a placeholder for a future true
+ *                            per-thickness-quadrature-point transmural
+ *                            implementation.
  *   -lv_N_taper_rings [2]   rings beyond ring 0 (which is pinned, along with
  *                           the cap) over which active fiber magnitude
  *                           ramps linearly from 0 up to 1, instead of

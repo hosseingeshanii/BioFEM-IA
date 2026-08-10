@@ -79,6 +79,8 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   p->N_cap_final  = 4;
   p->alpha_apex   = 60.0;
   p->alpha_base   = -60.0;
+  p->alpha_midwall = 0.0;
+  p->fiber_latitude_sweep = 0;
   p->N_taper_rings = 2;
 
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_a",             &p->a,            PETSC_NULL);
@@ -90,6 +92,8 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_cap_final",   &p->N_cap_final,  PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_apex",    &p->alpha_apex,   PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_base",    &p->alpha_base,   PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_midwall", &p->alpha_midwall, PETSC_NULL);
+  PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_fiber_latitude_sweep", &p->fiber_latitude_sweep, PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_taper_rings", &p->N_taper_rings, PETSC_NULL);
 
   return 0;
@@ -610,6 +614,8 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
 
   PetscReal alpha_apex_rad = alpha_apex_deg * PETSC_PI / 180.0;
   PetscReal alpha_base_rad = alpha_base_deg * PETSC_PI / 180.0;
+  PetscReal alpha_midwall_rad = p->alpha_midwall * PETSC_PI / 180.0;
+  PetscInt  fiber_latitude_sweep = p->fiber_latitude_sweep;
 
   /* Direction vector pointing from apex toward base along the z axis */
   struct Cmpnts e_down = {0.0, 0.0, -1.0};
@@ -677,10 +683,13 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
       struct Cmpnts e_l = UNIT(e_l_raw);
       struct Cmpnts e_c = CROSS(e_n, e_l);
 
-      PetscReal zstar_cap = (a - c.z) / (a - z_base);
-      if (zstar_cap < 0.0) zstar_cap = 0.0;
-      if (zstar_cap > 1.0) zstar_cap = 1.0;
-      PetscReal alpha_cap = (1.0 - zstar_cap) * alpha_apex_rad + zstar_cap * alpha_base_rad;
+      PetscReal alpha_cap = alpha_midwall_rad;
+      if (fiber_latitude_sweep) {
+        PetscReal zstar_cap = (a - c.z) / (a - z_base);
+        if (zstar_cap < 0.0) zstar_cap = 0.0;
+        if (zstar_cap > 1.0) zstar_cap = 1.0;
+        alpha_cap = (1.0 - zstar_cap) * alpha_apex_rad + zstar_cap * alpha_base_rad;
+      }
 
       ibm->n_fib[ec].x = cos(alpha_cap) * e_c.x + sin(alpha_cap) * e_l.x;
       ibm->n_fib[ec].y = cos(alpha_cap) * e_c.y + sin(alpha_cap) * e_l.y;
@@ -757,14 +766,21 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
     }
     taper *= base_taper;
 
-    /* Latitude-interpolated helix angle (docs/lv_geometry_theory.tex §3.6
-     * Eq.4-5): z* = (a-cz)/(a-z_base) in [0,1], apex(0) -> base(1),
-     * alpha(z*) = (1-z*)*alpha_apex + z*alpha_base. Clamp for centroids
-     * that land fractionally outside [0,1] due to vertex averaging. */
-    PetscReal zstar = (a - c.z) / (a - z_base);
-    if (zstar < 0.0) zstar = 0.0;
-    if (zstar > 1.0) zstar = 1.0;
-    PetscReal alpha = (1.0 - zstar) * alpha_apex_rad + zstar * alpha_base_rad;
+    /* Default: single constant mid-wall helix angle everywhere (see
+     * alpha_midwall doc in lv_geometry.h) -- this shell has one midsurface,
+     * no endo/epi split, so it cannot resolve the real transmural
+     * (endo +alpha -> epi -alpha) rotation directly; alpha_midwall is the
+     * theoretically consistent single value for that midsurface.
+     * Opt-in legacy path (-lv_fiber_latitude_sweep 1): linearly interpolate
+     * alpha_apex -> alpha_base by latitude instead -- this was a mislabeling
+     * bug (see lv_geometry.h), kept only for A/B comparison. */
+    PetscReal alpha = alpha_midwall_rad;
+    if (fiber_latitude_sweep) {
+      PetscReal zstar = (a - c.z) / (a - z_base);
+      if (zstar < 0.0) zstar = 0.0;
+      if (zstar > 1.0) zstar = 1.0;
+      alpha = (1.0 - zstar) * alpha_apex_rad + zstar * alpha_base_rad;
+    }
 
     /* Fiber vector in the tangent plane — Bayer 2012 Eq.(7) direction,
      * always unit magnitude; activation strength lives in gamma_scale. */

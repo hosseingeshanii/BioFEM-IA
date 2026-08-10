@@ -203,6 +203,8 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
    * ---------------------------------------------------------------- */
   PetscReal alpha_apex_rad = p->alpha_apex * PETSC_PI / 180.0;
   PetscReal alpha_base_rad = p->alpha_base * PETSC_PI / 180.0;
+  PetscReal alpha_midwall_rad = p->alpha_midwall * PETSC_PI / 180.0;
+  PetscInt  fiber_latitude_sweep = p->fiber_latitude_sweep;
   PetscReal theta_cut_for_alpha = acos(1.0 - 2.0 * p->f_cut);
   PetscReal z_base = p->a * cos(theta_cut_for_alpha);
   struct Cmpnts e_down = {0.0, 0.0, -1.0};
@@ -301,12 +303,17 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
     }
     taper *= base_taper;
 
-    /* Latitude-interpolated helix angle, same formula as CreateLVMesh
-     * (docs/lv_geometry_theory.tex §3.6 Eq.4-5). */
-    PetscReal zstar = (p->a - c.z) / (p->a - z_base);
-    if (zstar < 0.0) zstar = 0.0;
-    if (zstar > 1.0) zstar = 1.0;
-    PetscReal alpha = (1.0 - zstar) * alpha_apex_rad + zstar * alpha_base_rad;
+    /* Default: single constant mid-wall helix angle everywhere -- see
+     * alpha_midwall doc in lv_geometry.h. Opt-in legacy latitude sweep
+     * (-lv_fiber_latitude_sweep 1) kept for A/B comparison; same formula as
+     * CreateLVMesh (docs/lv_geometry_theory.tex §3.6 Eq.4-5). */
+    PetscReal alpha = alpha_midwall_rad;
+    if (fiber_latitude_sweep) {
+      PetscReal zstar = (p->a - c.z) / (p->a - z_base);
+      if (zstar < 0.0) zstar = 0.0;
+      if (zstar > 1.0) zstar = 1.0;
+      alpha = (1.0 - zstar) * alpha_apex_rad + zstar * alpha_base_rad;
+    }
 
     ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
     ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
@@ -314,14 +321,25 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
     ibm->gamma_scale[ec] = taper;
   }
 
-  PetscPrintf(PETSC_COMM_WORLD,
-    "[lv-unstruct] fibers assigned: alpha_apex=%.1f alpha_base=%.1f  "
-    "(linear latitude blend)  apex_pin=%d nodes  theta_pin=%.2f deg  "
-    "apex_taper=%s(%.2f deg)  base_taper=%s(%.2f deg)\n",
-    p->alpha_apex, p->alpha_base, (int)ibm->n_apex_pin,
-    theta_pin * 180.0 / PETSC_PI,
-    apex_taper_on ? "on" : "off", theta_taper_width * 180.0 / PETSC_PI,
-    base_taper_on ? "on" : "off", base_taper_width * 180.0 / PETSC_PI);
+  if (fiber_latitude_sweep) {
+    PetscPrintf(PETSC_COMM_WORLD,
+      "[lv-unstruct] fibers assigned: alpha_apex=%.1f alpha_base=%.1f  "
+      "(LEGACY linear latitude blend)  apex_pin=%d nodes  theta_pin=%.2f deg  "
+      "apex_taper=%s(%.2f deg)  base_taper=%s(%.2f deg)\n",
+      p->alpha_apex, p->alpha_base, (int)ibm->n_apex_pin,
+      theta_pin * 180.0 / PETSC_PI,
+      apex_taper_on ? "on" : "off", theta_taper_width * 180.0 / PETSC_PI,
+      base_taper_on ? "on" : "off", base_taper_width * 180.0 / PETSC_PI);
+  } else {
+    PetscPrintf(PETSC_COMM_WORLD,
+      "[lv-unstruct] fibers assigned: alpha_midwall=%.1f (constant)  "
+      "apex_pin=%d nodes  theta_pin=%.2f deg  "
+      "apex_taper=%s(%.2f deg)  base_taper=%s(%.2f deg)\n",
+      p->alpha_midwall, (int)ibm->n_apex_pin,
+      theta_pin * 180.0 / PETSC_PI,
+      apex_taper_on ? "on" : "off", theta_taper_width * 180.0 / PETSC_PI,
+      base_taper_on ? "on" : "off", base_taper_width * 180.0 / PETSC_PI);
+  }
 
   PetscPrintf(PETSC_COMM_WORLD, "[lv-unstruct] subdivision surface topology (IrrVer + Patch)\n");
   ierr = IrrVer(ibm); CHKERRQ(ierr);
