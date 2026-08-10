@@ -24,6 +24,10 @@ PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, Constitu
 PetscInt   write_3d_shell=0;  /* visualization-only wedge-mesh reconstruction, see Write3DShellVTK() in io.c */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
 PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
+PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DOFs across the 3
+                                  apex_pin_nodes) instead of/in addition to lv_fix_apex/lv_fix_base --
+                                  removes all 6 zero-energy rigid-body modes without imposing a real
+                                  physical constraint, for isolating pure material/fiber response */
 PetscInt   timeinteg=0, nbody=1, contact=0, explicit=0;
 PetscInt   ec, nc, ti, tiout, tistart=0, rstart_flg, tisteps=1, curvature=6, manufactured=0, inverse=1, dR_dE_flag=0;
 PetscInt   n_epochs=100, init_flag=1, epoch_start=0, epoch_output = 100;
@@ -173,6 +177,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-write_3d_shell", &write_3d_shell, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_rigid_min", &lv_rigid_min, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-curvature", &curvature, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-manufactured", &manufactured, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-inverse", &inverse, PETSC_NULL);
@@ -869,9 +874,15 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
    * --- 3-2-1 minimal rigid-body scheme (6 DOFs across 3 nodes) using
    * ibm->apex_pin_nodes (apex node + its first 2 Delaunay neighbors), set
    * by the mesh loader. Correctly removes all 6 rigid-body modes without
-   * over-constraining local shape. Kept here, commented, for reference /
-   * easy revert.
-  if (ibm->n_apex_pin >= 3) {
+   * over-constraining local shape. Opt-in via -lv_rigid_min 1 -- confirmed
+   * necessary after a fully-free (lv_fix_apex=0, lv_fix_base=0) run with the
+   * new constant mid-wall fiber produced a badly non-axisymmetric shape
+   * (principal-axis eigenvalues split from ~[1.53,1.53,1.44] at t=0 to
+   * [1.43,1.15,1.14] by t=50) despite a purely circumferential fiber
+   * direction, which should stay close to axisymmetric: with all 6
+   * zero-energy modes free, JFNK on the singular system lets tiny
+   * unstructured-mesh asymmetries snowball unchecked. */
+  if (lv_rigid_min && ibm->n_apex_pin >= 3) {
     PetscInt c0 = ibm->apex_pin_nodes[0];
     PetscInt c1 = ibm->apex_pin_nodes[1];
     PetscInt c2 = ibm->apex_pin_nodes[2];
@@ -883,7 +894,6 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
     ierr = NodeDirectionalFix(c1, 2, fem, R); CHKERRQ(ierr);
     ierr = NodeDirectionalFix(c2, 2, fem, R); CHKERRQ(ierr);
   }
-  */
   /* --- Single-node pin: only the apex node's translation (3 DOFs) is
    * fixed. Leaves all 3 rotational rigid-body modes unconstrained (nothing
    * else in the model pins rotation) -- the earlier structured-mesh
