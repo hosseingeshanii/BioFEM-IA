@@ -319,6 +319,19 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
     ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
     ibm->n_fib[ec].z = cos(alpha) * e_c.z + sin(alpha) * e_l.z;
     ibm->gamma_scale[ec] = taper;
+
+    /* Propagating activation wavefront (opt-in, -lv_gamma_wave 1): delay
+     * grows linearly with angular distance from the apex, 0 at the apex to
+     * gamma_wave_delay_max at the base rim (theta_c = theta_cut). See
+     * gamma_wave doc in lv_geometry.h. */
+    if (p->gamma_wave) {
+      PetscReal frac = (theta_cut > 0.0) ? theta_c / theta_cut : 0.0;
+      if (frac < 0.0) frac = 0.0;
+      if (frac > 1.0) frac = 1.0;
+      ibm->activation_delay[ec] = frac * p->gamma_wave_delay_max;
+    } else {
+      ibm->activation_delay[ec] = 0.0;
+    }
   }
 
   if (fiber_latitude_sweep) {

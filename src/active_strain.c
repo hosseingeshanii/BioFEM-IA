@@ -1161,11 +1161,17 @@ static PetscErrorCode PrintElemCC(FE *fem, PetscInt ec)
  *   T = gamma_T if > 0, otherwise tisteps * dt.
  *   Reaches gamma_peak at t=T; no return path, no unloading bifurcation.
  */
-static PetscReal GammaOfTime(const MuscleActParams *p)
+/* delay > 0 shifts the ramp's local clock backward -- element activates
+ * "late" by that much simulated time, modeling a propagating depolarization
+ * wavefront (see -lv_gamma_wave in lv_geometry_unstructured.c) instead of
+ * every element ramping up from t=0 simultaneously. delay=0 recovers the
+ * original instantaneous-everywhere behavior exactly. */
+static PetscReal GammaOfTimeDelayed(const MuscleActParams *p, PetscReal delay)
 {
     if (p->gamma_ramp_type == 0) return p->gamma;
     PetscReal T = (p->gamma_T > 0.0) ? p->gamma_T : (PetscReal)tisteps * dt;
-    PetscReal t = (PetscReal)ti * dt;
+    PetscReal t = (PetscReal)ti * dt - delay;
+    if (t <= 0.0) return 0.0;
     if (p->gamma_ramp_type == 1) {
         PetscReal s = PetscSinReal(PETSC_PI * t / T);
         return p->gamma * s * s;
@@ -1175,12 +1181,18 @@ static PetscReal GammaOfTime(const MuscleActParams *p)
     return p->gamma * s * s;
 }
 
-/* Public wrapper around GammaOfTime for output/diagnostic use (e.g. io.c's
- * Output(), so VTK files can report the actual scalar gamma driving
- * activation this timestep, not just the static gamma_scale spatial taper). */
-PetscReal GammaOfTimeCurrent(FE *fem)
+static PetscReal GammaOfTime(const MuscleActParams *p)
 {
-    return GammaOfTime(&fem->act_data.muscle_act_params);
+    return GammaOfTimeDelayed(p, 0.0);
+}
+
+/* Public wrapper around GammaOfTimeDelayed for output/diagnostic use (e.g.
+ * io.c's Output(), so VTK files can report the actual per-element scalar
+ * gamma driving activation this timestep, including the wavefront delay). */
+PetscReal GammaOfTimeCurrent(FE *fem, PetscInt ec)
+{
+    PetscReal delay = fem->ibm->activation_delay ? fem->ibm->activation_delay[ec] : 0.0;
+    return GammaOfTimeDelayed(&fem->act_data.muscle_act_params, delay);
 }
 
 /* Deformation gradient */
@@ -1196,7 +1208,8 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
     PetscReal S[3][3], ST[3][3];
     PetscReal tmp[3][3];
 
-    PetscReal gamma = GammaOfTime(&fem->act_data.muscle_act_params);
+    PetscReal delay = ibm->activation_delay ? ibm->activation_delay[ec] : 0.0;
+    PetscReal gamma = GammaOfTimeDelayed(&fem->act_data.muscle_act_params, delay);
     /* Per-element activation scale (e.g. LV apex-cap taper, see
      * lv_geometry.c); defaults to 1.0 for mesh types that don't set it. */
     gamma *= ibm->gamma_scale[ec];
