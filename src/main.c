@@ -474,7 +474,7 @@ int main(int argc, char **argv)
 	           * per Newton iteration, unlike the C33 solve itself which runs
 	           * every residual evaluation inside FInternalPreCalc) -- see
 	           * UpdateElementThickness() for the exact update rule. */
-	          ierr = UpdateElementThickness(&fem[ibi]); CHKERRQ(ierr);
+	          // ierr = UpdateElementThickness(&fem[ibi]); CHKERRQ(ierr);  /* TEMP disabled for hang isolation test */
 	        } else {
 	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "Skipping solution update because SNES diverged (reason=%d) for body %d at step %d\n",
