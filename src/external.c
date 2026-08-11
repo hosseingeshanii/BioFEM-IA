@@ -20,15 +20,17 @@ extern PetscErrorCode  TRANS(PetscReal A[3][3], PetscReal _AT[3][3]);
  
 PetscErrorCode NodeForce(PetscInt nv, PetscReal F, PetscInt dir, FE *fem) {
 
+  DMPlexGeomCtx *gctx = &fem->geom_ctx;
   PetscReal *FF;
-  
-  VecGetArray(fem->Fext, &FF);
+  PetscInt   li = gctx->initialized ? gctx->ibm_to_local_idx[nv] : nv;
 
-  FF[nv*dof+dir]=F;
+  if (li >= 0) {
+    VecGetArray(fem->Fext, &FF);
+    FF[li*dof+dir]=F;
+    VecRestoreArray(fem->Fext, &FF);
+  }
 
-  VecRestoreArray(fem->Fext, &FF);
-
-  return(0); 
+  return(0);
 }
 
 //------------------------------------------------------------------------------------------------------------
