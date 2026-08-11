@@ -474,7 +474,7 @@ int main(int argc, char **argv)
 	           * per Newton iteration, unlike the C33 solve itself which runs
 	           * every residual evaluation inside FInternalPreCalc) -- see
 	           * UpdateElementThickness() for the exact update rule. */
-	          // ierr = UpdateElementThickness(&fem[ibi]); CHKERRQ(ierr);  /* TEMP disabled for hang isolation test */
+	          ierr = UpdateElementThickness(&fem[ibi]); CHKERRQ(ierr);
 	        } else {
 	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "Skipping solution update because SNES diverged (reason=%d) for body %d at step %d\n",
@@ -728,14 +728,6 @@ PetscErrorCode FormRK(Vec R, Vec x, Vec xn, Vec y, Vec yn, PetscReal alpha, FE *
 }
 
 //-----------------------------------------------------------------------------------------------
-/* Debug: per-rank call counter + collective-call counter for FormFunctionFEM,
- * inspectable via gdb (print formfunc_call_count / formfunc_collective_count)
- * on a live/hung process without needing it to reach any print statement --
- * lets us compare exactly how many times/how many collectives each rank has
- * executed even while some ranks are stuck mid-collective. TEMPORARY. */
-PetscInt formfunc_call_count = 0;
-PetscInt formfunc_collective_count = 0;
-
 PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
 
   FE         *fem=(FE *)ctx;
@@ -745,7 +737,6 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   const PetscReal *xx;
   PetscReal  *RR, *RRes,*FF;
   PetscInt   nv, ec;
-  formfunc_call_count++;
   //---------Update the location
   {
     DMPlexGeomCtx *gctx = &fem->geom_ctx;

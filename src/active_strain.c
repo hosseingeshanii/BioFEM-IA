@@ -2208,9 +2208,6 @@ PetscErrorCode UpdateElementThickness(FE *fem)
   PetscReal *local_thickness;
   PetscCall(PetscCalloc1(ibm->n_elmt, &local_thickness));
 
-  PetscSynchronizedPrintf(PETSC_COMM_WORLD, "[thickness-debug] rank enter, nLocalCells=%d\n", (int)ctx->layout.nLocalCells);
-  PetscSynchronizedFlush(PETSC_COMM_WORLD, PETSC_STDOUT);
-
   for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
     const PetscInt ec = ctx->layout.orig_cell[lc];
     if (ec < 0 || ec >= ibm->n_elmt) continue;
@@ -2222,13 +2219,7 @@ PetscErrorCode UpdateElementThickness(FE *fem)
     local_thickness[ec] = h0 * lambda3;
   }
 
-  PetscSynchronizedPrintf(PETSC_COMM_WORLD, "[thickness-debug] rank finished local loop, entering Allreduce\n");
-  PetscSynchronizedFlush(PETSC_COMM_WORLD, PETSC_STDOUT);
-
   PetscCallMPI(MPIU_Allreduce(local_thickness, ibm->thickness, ibm->n_elmt, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD));
-
-  PetscSynchronizedPrintf(PETSC_COMM_WORLD, "[thickness-debug] rank past Allreduce\n");
-  PetscSynchronizedFlush(PETSC_COMM_WORLD, PETSC_STDOUT);
 
   PetscCall(PetscFree(local_thickness));
 
