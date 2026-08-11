@@ -18,15 +18,32 @@ extern PetscErrorCode  INV(PetscReal T[3][3], PetscReal _Tinv[3][3]);
 extern PetscErrorCode  TRANS(PetscReal A[3][3], PetscReal _AT[3][3]);
 
  
+/* Sets Fext[nv*dof+dir] = F. In parallel (gctx->initialized), routes the
+ * value via VecSetValues + ibm_to_global_dof0 (same pattern FInternalAct
+ * uses for Fint) so PETSc's assembly machinery delivers it to whichever
+ * rank actually owns node nv -- every rank can safely call this for any
+ * node, not just the owner. Caller MUST follow with a single collective
+ * VecAssemblyBegin(fem->Fext)/VecAssemblyEnd(fem->Fext) after all
+ * NodeForce calls for this residual evaluation (not once per call). The
+ * previous raw VecGetArray/local-index approach was not collective-safe:
+ * only the owning rank ever touched the vector, silently skipping the
+ * assembly bookkeeping every other parallel Vec write in this codebase
+ * goes through, which corrupted Fext's cross-rank state and caused a
+ * later, unrelated VecNorm call to deadlock. */
 PetscErrorCode NodeForce(PetscInt nv, PetscReal F, PetscInt dir, FE *fem) {
 
   DMPlexGeomCtx *gctx = &fem->geom_ctx;
-  PetscReal *FF;
-  PetscInt   li = gctx->initialized ? gctx->ibm_to_local_idx[nv] : nv;
 
-  if (li >= 0) {
+  if (gctx->initialized) {
+    PetscInt gdof0 = gctx->ibm_to_global_dof0[nv];
+    if (gdof0 >= 0) {
+      PetscInt  vdof = gdof0 + dir;
+      VecSetValues(fem->Fext, 1, &vdof, &F, INSERT_VALUES);
+    }
+  } else {
+    PetscReal *FF;
     VecGetArray(fem->Fext, &FF);
-    FF[li*dof+dir]=F;
+    FF[nv*dof+dir]=F;
     VecRestoreArray(fem->Fext, &FF);
   }
 

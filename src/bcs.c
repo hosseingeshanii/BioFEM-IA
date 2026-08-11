@@ -106,9 +106,10 @@ PetscErrorCode FExternal(FE *fem) {
    * 2023 Fig. A6): two pairs of equal-and-opposite point forces 2P at four
    * equatorial nodes, ramped linearly 0 -> hemi_pmax over the run so the
    * saved timestep sequence directly gives the load-displacement sweep.
-   * Self-equilibrating (net force/moment = 0), so no kinematic BC needed --
-   * serial run only, NodeForce indexes the local array directly without the
-   * DMPlex ibm->local translation other BC functions use. */
+   * Self-equilibrating (net force/moment = 0), so no kinematic BC needed.
+   * Parallel-safe: NodeForce routes via VecSetValues + ibm_to_global_dof0,
+   * followed by ONE collective VecAssemblyBegin/End covering all four
+   * calls below (not one per call). */
   {
     PetscBool hemi_on = PETSC_FALSE;
     PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-hemi_pinch_test", &hemi_on, PETSC_NULL);
@@ -121,15 +122,12 @@ PetscErrorCode FExternal(FE *fem) {
       PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-hemi_pinch_node_in2",  &n_in2,  PETSC_NULL);
       PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-hemi_pinch_pmax", &pmax, PETSC_NULL);
       PetscReal twoP = 2.0 * pmax * (PetscReal)ti / (PetscReal)tisteps;
-      /* TEMP: NodeForce calls disabled to isolate whether the hang comes
-       * from NodeForce itself or just from taking this branch/reading
-       * options. twoP is still computed (unused) so the branch is otherwise
-       * identical. */
-      (void)twoP;
-      // if (n_out1 >= 0) { NodeForce(n_out1,  twoP, 0, fem); }
-      // if (n_in1  >= 0) { NodeForce(n_in1,  -twoP, 1, fem); }
-      // if (n_out2 >= 0) { NodeForce(n_out2, -twoP, 0, fem); }
-      // if (n_in2  >= 0) { NodeForce(n_in2,   twoP, 1, fem); }
+      if (n_out1 >= 0) { NodeForce(n_out1,  twoP, 0, fem); }
+      if (n_in1  >= 0) { NodeForce(n_in1,  -twoP, 1, fem); }
+      if (n_out2 >= 0) { NodeForce(n_out2, -twoP, 0, fem); }
+      if (n_in2  >= 0) { NodeForce(n_in2,   twoP, 1, fem); }
+      VecAssemblyBegin(fem->Fext);
+      VecAssemblyEnd(fem->Fext);
     }
   }
 
