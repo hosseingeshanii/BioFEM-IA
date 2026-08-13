@@ -119,6 +119,8 @@ extern PetscErrorCode FungJacobian(PetscInt ibi, FE* fem, PetscReal epsilon);
 extern PetscErrorCode FungUniJacobian(PetscInt ibi, FE* fem, PetscReal epsilon);
 extern PetscErrorCode IrrVer(IBMNodes *ibm);
 extern PetscErrorCode Patch(IBMNodes *ibm);
+extern PetscErrorCode GlobalGhostInit(IBMNodes *ibm);
+extern PetscErrorCode GlobalGhost(IBMNodes *ibm);
 
 
 // FE         *fem; 
@@ -601,12 +603,13 @@ int main(int argc, char **argv)
 
   if (res_log_fp) { fclose(res_log_fp); res_log_fp = NULL; }
 
-  /* Finish UP: output final state and cleanup on rank 0 only */
-  if (rank == 0) {
-    for (ibi=0; ibi<nbody; ibi++) {
-      LocationOut(&fem[ibi], ti+1, ibi, out_dir);
-      if(outghost){OutputGhost(&fem[ibi], ti, ibi, out_dir);}
-    }
+  /* Finish UP: output final state. OutputGhost is collective (gathers
+   * Fint/Fext/Fdyn via MPI_Allreduce before rank 0 writes the file), so it
+   * must be called by every rank, unlike LocationOut which is genuinely
+   * rank-0-only. */
+  for (ibi=0; ibi<nbody; ibi++) {
+    if (rank == 0) { LocationOut(&fem[ibi], ti+1, ibi, out_dir); }
+    if (outghost) { OutputGhost(&fem[ibi], ti, ibi, out_dir); }
   }
   CleanupAndFinalize(fem, ibm, nbody);
   return(0);
@@ -665,6 +668,7 @@ PetscErrorCode FormRK(Vec R, Vec x, Vec xn, Vec y, Vec yn, PetscReal alpha, FE *
   //---------------------------Patchtest---------------------------------------------------------------------
 
   AreaNormal(ibm);
+  if (ibm->n_ghosts > 0) { GlobalGhost(ibm); }
   if (bending){
     if (curvature==1) {     
       PatchLoc(ibm); 
@@ -791,6 +795,7 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   //
 
   AreaNormal(ibm);
+  if (ibm->n_ghosts > 0) { GlobalGhost(ibm); }
   if (bending){
     if (curvature==1) {
       PatchLoc(ibm);
@@ -972,8 +977,16 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   if (lv_fix_base_axial && lv_geom_unstructured && ibm->n_bnodes[0] > 0) {
     ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
   }
-  ierr = EdgeFreeR(fem, R); CHKERRQ(ierr);  /* no-op for LV (n_ghosts=0) */
-  
+  /* Ghost/auxiliary node DOFs (indices [n_v, n_v+n_ghosts)): write their
+   * mirror-reflected position (already computed into ibm->x_bp by
+   * GlobalGhost(), called after every AreaNormal() above) into x,
+   * and zero R there so SNES never treats them as real unknowns. Replaces
+   * the old EdgeFreeR(), which zeroed the same slots but assumed R was
+   * sized dof*(n_v+n_ghosts) -- true in serial, no longer true here now
+   * that ghost DOFs get real, individually-owned Vec slots (see
+   * FEM_DMPlexGeomSetup/BuildNodeMap in dmplex_geom.c). */
+  ierr = FEM_DMPlexGeomSyncGhostDOFs(fem, x, R); CHKERRQ(ierr);
+
   // GlobalGhost(ibm);
 
   PetscReal fext_inf = 0.0, scale = 1.0;
@@ -1390,6 +1403,7 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   if (curvature==6) {GlobalGhostInit(ibm);}
 
   AreaNormal(ibm);
+  if (ibm->n_ghosts > 0) { GlobalGhost(ibm); }
   for (ec=0; ec<ibm->n_elmt + 2*ibm->n_ghosts; ec++) {
     ibm->dA0[ec] = ibm->dA[ec]; 
     ibm->Nf_x[ec] = ibm->nf_x[ec];  ibm->Nf_y[ec] = ibm->nf_y[ec];  ibm->Nf_z[ec] = ibm->nf_z[ec]; 
@@ -1439,6 +1453,21 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
         xx[oi*dof+1] = ibm->y_bp0[v];
         xx[oi*dof+2] = ibm->z_bp0[v];
         oi++;
+      }
+      /* Ghost/auxiliary DOFs (rank 0 owns all of them -- see
+       * FEM_DMPlexGeomSetup's ibm_to_local_idx pass): seed with their
+       * reference mirror position so xn/xnm1 (copied from fem->x right
+       * below) start consistent with what FEM_DMPlexGeomSyncGhostDOFs will
+       * write on the first residual evaluation, instead of leaving these
+       * slots at whatever VecCreateMPI happened to allocate. */
+      if (imyrank == 0) {
+        for (PetscInt gc = 0; gc < ibm->n_ghosts; ++gc) {
+          PetscInt gnode = ibm->n_v + gc;
+          xx[oi*dof  ] = ibm->x_bp0[gnode];
+          xx[oi*dof+1] = ibm->y_bp0[gnode];
+          xx[oi*dof+2] = ibm->z_bp0[gnode];
+          oi++;
+        }
       }
     } else {
       for (nv=0; nv<ibm->n_v+ibm->n_ghosts; nv++) {

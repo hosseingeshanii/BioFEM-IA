@@ -487,36 +487,14 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
       }
     }
 
-    /* Boundary element: incomplete stencil (missing ghost-side nodes).  The
-       centroid-fill approximation produces wrong curvature (Aaa) when the apex
-       ring is REGULAR, which pushes C33 to ~2.  Fall back to CST geometry
-       (flat triangle from nv1/nv2/nv3, zero curvature) — the same approach
-       used for cap elements above. */
-    if (!nob) {
-      const PetscInt n1 = ibm->nv1[ec], n2 = ibm->nv2[ec], n3 = ibm->nv3[ec];
-      G->ndx21.x = xb[n2]-xb[n1];  G->ndx21.y = yb[n2]-yb[n1];  G->ndx21.z = zb[n2]-zb[n1];
-      G->ndx31.x = xb[n3]-xb[n1];  G->ndx31.y = yb[n3]-yb[n1];  G->ndx31.z = zb[n3]-zb[n1];
-      G->nn  = UNIT(CROSS(G->ndx21, G->ndx31));
-      G->gc1 = CROSS(G->ndx31, G->nn);
-      G->gc1 = AMULT(1.0 / DOT(G->ndx21, G->gc1), G->gc1);
-      G->gc2 = CROSS(G->nn, G->ndx21);
-      G->gc2 = AMULT(1.0 / DOT(G->ndx31, G->gc2), G->gc2);
-      G->Aaa.x = G->Aaa.y = G->Aaa.z = 0.0;
-      G->Abb.x = G->Abb.y = G->Abb.z = 0.0;
-      G->Aab.x = G->Aab.y = G->Aab.z = 0.0;
-      G->is_irregular = 0;
-      G->v   = 0;
-      G->nen = 12;
-      if (G->INa0) {
-        ierr = PetscFree(G->INa0);  CHKERRQ(ierr);
-        ierr = PetscFree(G->INa1);  CHKERRQ(ierr);
-        ierr = PetscFree(G->INab0); CHKERRQ(ierr);
-        ierr = PetscFree(G->INab1); CHKERRQ(ierr);
-        ierr = PetscFree(G->INab2); CHKERRQ(ierr);
-        G->INa0 = G->INa1 = G->INab0 = G->INab1 = G->INab2 = NULL;
-      }
-      PetscFunctionReturn(0);
-    }
+    /* CST flat/zero-curvature fallback removed -- boundary elements now get
+       real ghost-node stencil neighbors (lv_geometry_unstructured.c +
+       Patch()'s outer-ring fixup in bending.c), so nob should always be 1.
+       Loud error instead of silently substituting wrong geometry if a gap
+       remains (e.g. an element touching 2 boundary edges). */
+    PetscCheck(nob, PETSC_COMM_SELF, PETSC_ERR_PLIB,
+               "ElemGeom ec=%d: regular-patch stencil still incomplete after "
+               "ghost-node resolution", (int)ec);
 
     /* Aaa, Abb, Aab from Nab_center */
     G->Aaa.x = G->Aaa.y = G->Aaa.z = 0.0;
@@ -590,27 +568,12 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
     }
 
     if (!nob) {
-      /* Incomplete subdivision stencil (cap boundary element).
-         Zero all IN arrays so ElemUpdFint contributes no force —
-         consistent with Fbending's nob=0 skip for these elements. */
-      ierr = SubdivGeomEnsureIrregularArrays_(G, nen); CHKERRQ(ierr);
-      for (PetscInt i = 0; i < nen; i++) {
-        G->INa0[i] = G->INa1[i] = G->INab0[i] = G->INab1[i] = G->INab2[i] = 0.0;
-      }
-      const PetscInt n1 = ibm->nv1[ec], n2 = ibm->nv2[ec], n3 = ibm->nv3[ec];
-      G->ndx21.x = xb[n2]-xb[n1]; G->ndx21.y = yb[n2]-yb[n1]; G->ndx21.z = zb[n2]-zb[n1];
-      G->ndx31.x = xb[n3]-xb[n1]; G->ndx31.y = yb[n3]-yb[n1]; G->ndx31.z = zb[n3]-zb[n1];
-      G->nn  = UNIT(CROSS(G->ndx21, G->ndx31));
-      G->gc1 = CROSS(G->ndx31, G->nn);
-      G->gc1 = AMULT(1.0 / DOT(G->ndx21, G->gc1), G->gc1);
-      G->gc2 = CROSS(G->nn, G->ndx21);
-      G->gc2 = AMULT(1.0 / DOT(G->ndx31, G->gc2), G->gc2);
-      G->Aaa.x = G->Aaa.y = G->Aaa.z = 0.0;
-      G->Abb.x = G->Abb.y = G->Abb.z = 0.0;
-      G->Aab.x = G->Aab.y = G->Aab.z = 0.0;
-      G->is_irregular = 1;
-      G->v = v;
-      G->nen = nen;
+      /* CST/zero-force fallback removed -- see the regular-patch branch
+         above for why (ghost nodes should now resolve every slot). Loud
+         error instead of silently dropping this element's force. */
+      SETERRQ1(PETSC_COMM_SELF, PETSC_ERR_PLIB,
+               "ElemGeom ec=%d: irregular-patch stencil still incomplete "
+               "after ghost-node resolution", (int)ec);
       PetscFunctionReturn(0);
     }
 

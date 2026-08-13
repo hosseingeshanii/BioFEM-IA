@@ -828,17 +828,31 @@ PetscErrorCode FEM_DMPlexGeomSetup(FE *fem, MPI_Comm comm)
   ctx->ownerRank   = ownerRank;
 
   /* Build ibm_to_local_idx[v]: sequential local Vec index for owned vertex v, else -1.
-     Also sets nOwnedVerts (Vec local size) in the same pass. */
+     Also sets nOwnedVerts (Vec local size) in the same pass.
+
+     Ghost/auxiliary nodes (indices [n_v, n_v+n_ghosts)) are not part of the
+     DMPlex mesh -- they're synthetic mirror-reflected points computed
+     locally from real node data (lv_geometry_unstructured.c). They still
+     need real DOF slots in the solved Vecs (Res/x/Fint/...), each owned by
+     exactly one rank; rank 0 owns all of them (small, fixed count, avoids
+     any distributed-ownership bookkeeping for a purely derived quantity).
+     Appended contiguously right after rank 0's real owned vertices so
+     FEM_DMPlexGeomBuildNodeMap's oi counter (built the same way) lines up. */
   {
     PetscMPIInt myrank;
     PetscCallMPI(MPI_Comm_rank(comm, &myrank));
-    PetscCall(PetscMalloc1(fem->ibm->n_v, &ctx->ibm_to_local_idx));
-    for (PetscInt v = 0; v < fem->ibm->n_v; ++v) ctx->ibm_to_local_idx[v] = -1;
+    PetscInt nTotal = fem->ibm->n_v + fem->ibm->n_ghosts;
+    PetscCall(PetscMalloc1(nTotal, &ctx->ibm_to_local_idx));
+    for (PetscInt v = 0; v < nTotal; ++v) ctx->ibm_to_local_idx[v] = -1;
     ctx->nOwnedVerts = 0;
     for (PetscInt lv = 0; lv < ctx->nLocalVerts; ++lv) {
       const PetscInt v = origVert[lv];
       if (v >= 0 && v < fem->ibm->n_v && ownerRank[v] == myrank)
         ctx->ibm_to_local_idx[v] = ctx->nOwnedVerts++;
+    }
+    if (myrank == 0) {
+      for (PetscInt gc = 0; gc < fem->ibm->n_ghosts; ++gc)
+        ctx->ibm_to_local_idx[fem->ibm->n_v + gc] = ctx->nOwnedVerts++;
     }
   }
 
@@ -908,11 +922,15 @@ PetscErrorCode FEM_DMPlexGeomBuildNodeMap(FE *fem)
   PetscCheck(ctx->initialized, ctx->comm, PETSC_ERR_ORDER,
              "FEM_DMPlexGeomSetup must be called before FEM_DMPlexGeomBuildNodeMap");
 
-  PetscCall(PetscMalloc1(ibm->n_v, &ctx->ibm_to_global_dof0));
-  for (PetscInt v = 0; v < ibm->n_v; ++v) ctx->ibm_to_global_dof0[v] = -1;
+  PetscInt nTotal = ibm->n_v + ibm->n_ghosts;
+  PetscCall(PetscMalloc1(nTotal, &ctx->ibm_to_global_dof0));
+  for (PetscInt v = 0; v < nTotal; ++v) ctx->ibm_to_global_dof0[v] = -1;
 
   /* Each rank fills the global Vec DOF0 for its owned vertices only.
-     oi is the sequential owned-vertex index matching the Vec local layout. */
+     oi is the sequential owned-vertex index matching the Vec local layout
+     (must walk vertices in the SAME order as FEM_DMPlexGeomSetup's
+     ibm_to_local_idx pass -- real owned vertices first, then (rank 0 only)
+     ghost/auxiliary nodes [n_v, n_v+n_ghosts) appended contiguously). */
   {
     PetscMPIInt myrank;
     PetscCallMPI(MPI_Comm_rank(ctx->comm, &myrank));
@@ -924,11 +942,72 @@ PetscErrorCode FEM_DMPlexGeomBuildNodeMap(FE *fem)
       ctx->ibm_to_global_dof0[v] = lo + oi * dof;
       oi++;
     }
+    if (myrank == 0) {
+      for (PetscInt gc = 0; gc < ibm->n_ghosts; ++gc) {
+        ctx->ibm_to_global_dof0[ibm->n_v + gc] = lo + oi * dof;
+        oi++;
+      }
+    }
   }
 
   /* Allreduce(MAX): owned entries (>= 0) win over unowned entries (-1). */
-  PetscCallMPI(MPI_Allreduce(MPI_IN_PLACE, ctx->ibm_to_global_dof0, ibm->n_v,
+  PetscCallMPI(MPI_Allreduce(MPI_IN_PLACE, ctx->ibm_to_global_dof0, nTotal,
                               MPIU_INT, MPI_MAX, ctx->comm));
+
+  PetscFunctionReturn(0);
+}
+
+/**
+ * @brief Sync ghost/auxiliary node DOFs into the solved Vecs.
+ *
+ * Ghost nodes (indices [n_v, n_v+n_ghosts)) are not independent unknowns --
+ * their position is always the mirror-reflection of a real node, already
+ * computed into ibm->x_bp/y_bp/z_bp by GlobalGhost() (called after
+ * every AreaNormal()). This writes that position into the ghost DOF's slot
+ * in @p x (so the solved Vec is a complete, consistent record of the whole
+ * mesh, matching the original ChimeraFEM ghost-node design) and forces the
+ * residual @p R to zero there, so SNES/KSP never try to treat a ghost DOF
+ * as a real unknown to solve for.
+ *
+ * Only rank 0 does anything here (it owns every ghost DOF -- see the
+ * ibm_to_local_idx pass in FEM_DMPlexGeomSetup); other ranks return
+ * immediately. Must be called by every rank (VecGetArray/VecRestoreArray
+ * on a distributed Vec are not collective, but this keeps the call site
+ * uniform and safe if that ever changes).
+ *
+ * @param fem  FE structure with initialised geom_ctx and ibm->x_bp already
+ *             holding up-to-date ghost positions.
+ * @param x    Current solution Vec (ghost position written here).
+ * @param R    Residual Vec (zeroed at ghost DOF rows here).
+ */
+PetscErrorCode FEM_DMPlexGeomSyncGhostDOFs(FE *fem, Vec x, Vec R)
+{
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  IBMNodes      *ibm = fem->ibm;
+  PetscMPIInt    myrank;
+
+  PetscFunctionBeginUser;
+  if (ibm->n_ghosts == 0) PetscFunctionReturn(0);
+  PetscCallMPI(MPI_Comm_rank(ctx->comm, &myrank));
+  if (myrank != 0) PetscFunctionReturn(0);
+
+  PetscReal *xx, *RR;
+  PetscCall(VecGetArray(x, &xx));
+  PetscCall(VecGetArray(R, &RR));
+  for (PetscInt gc = 0; gc < ibm->n_ghosts; ++gc) {
+    PetscInt gnode = ibm->n_v + gc;
+    PetscInt li    = ctx->ibm_to_local_idx[gnode];
+    PetscCheck(li >= 0, ctx->comm, PETSC_ERR_PLIB,
+               "ghost node %" PetscInt_FMT " has no local Vec slot on rank 0", gnode);
+    xx[li*dof  ] = ibm->x_bp[gnode];
+    xx[li*dof+1] = ibm->y_bp[gnode];
+    xx[li*dof+2] = ibm->z_bp[gnode];
+    RR[li*dof  ] = 0.0;
+    RR[li*dof+1] = 0.0;
+    RR[li*dof+2] = 0.0;
+  }
+  PetscCall(VecRestoreArray(R, &RR));
+  PetscCall(VecRestoreArray(x, &xx));
 
   PetscFunctionReturn(0);
 }

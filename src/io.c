@@ -331,7 +331,7 @@ PetscErrorCode InitVecs(FE *fem)
   DMPlexGeomCtx *ctx = &fem->geom_ctx;
 
   if (ctx->initialized) {
-    VecCreateMPI(PETSC_COMM_WORLD, dof * ctx->nOwnedVerts, dof * ibm->n_v, &fem->Res);
+    VecCreateMPI(PETSC_COMM_WORLD, dof * ctx->nOwnedVerts, dof * (ibm->n_v + ibm->n_ghosts), &fem->Res);
   } else {
     VecCreateSeq(PETSC_COMM_SELF, dof * (ibm->n_v + ibm->n_ghosts), &fem->Res);
   }
@@ -1070,14 +1070,64 @@ PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *out_d
 
   PetscMPIInt rank;
   MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
-  if (rank != 0) return 0;
 
   PetscInt   n_cells=3, i;
-  IBMNodes   *ibm=fem->ibm;
+  IBMNodes      *ibm  = fem->ibm;
+  DMPlexGeomCtx *gctx = &fem->geom_ctx;
   PetscReal  x, y, z;
   PetscInt   ec, be, n1e, n2e, n3e, n_ghosts=0;
+  PetscErrorCode ierr;
 
   n_ghosts = ibm->n_ghosts;
+
+  /* Parallel Vec gather (same pattern as Output(), io.c:539): fem->Fint/
+   * Fext/Fdyn are distributed Vecs -- VecGetArray only returns the calling
+   * rank's OWNED slice, not the full n_v array. Reading it as if it were
+   * the global array (the previous version of this function did) reads
+   * whatever happens to sit at that offset in the local buffer once i
+   * exceeds the local slice -- garbage, occasionally bit patterns that
+   * print as NaN. Gather to every rank via Allreduce(SUM) over owned
+   * entries only, same as Output() does, BEFORE the rank-0-only file I/O
+   * below (all ranks must reach the collective). Ghost-node slots
+   * (>= ibm->n_v) are never part of these Vecs at all -- written as an
+   * explicit 0.0 further down, same as before. */
+  PetscReal *g_Fint = NULL, *g_Fext = NULL, *g_Fdyn = NULL;
+  if (gctx->initialized) {
+    PetscInt nbuf = ibm->n_v * dof;
+    ierr = PetscMalloc1(nbuf, &g_Fint); CHKERRQ(ierr);
+    ierr = PetscMalloc1(nbuf, &g_Fext); CHKERRQ(ierr);
+    ierr = PetscMalloc1(nbuf, &g_Fdyn); CHKERRQ(ierr);
+    ierr = PetscMemzero(g_Fint, nbuf*sizeof(PetscReal)); CHKERRQ(ierr);
+    ierr = PetscMemzero(g_Fext, nbuf*sizeof(PetscReal)); CHKERRQ(ierr);
+    ierr = PetscMemzero(g_Fdyn, nbuf*sizeof(PetscReal)); CHKERRQ(ierr);
+
+#define OUTGHOST_GATHER(vec, buf) do { \
+      const PetscReal *_a; \
+      PetscInt _nv; \
+      ierr = VecGetArrayRead((vec), &_a); CHKERRQ(ierr); \
+      for (_nv = 0; _nv < ibm->n_v; _nv++) { \
+        PetscInt _li = gctx->ibm_to_local_idx[_nv]; \
+        if (_li < 0) continue; \
+        (buf)[_nv*dof  ] = _a[_li*dof  ]; \
+        (buf)[_nv*dof+1] = _a[_li*dof+1]; \
+        (buf)[_nv*dof+2] = _a[_li*dof+2]; \
+      } \
+      ierr = VecRestoreArrayRead((vec), &_a); CHKERRQ(ierr); \
+      MPI_Allreduce(MPI_IN_PLACE, (buf), nbuf, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD); \
+    } while (0)
+
+    OUTGHOST_GATHER(fem->Fint, g_Fint);
+    OUTGHOST_GATHER(fem->Fext, g_Fext);
+    OUTGHOST_GATHER(fem->Fdyn, g_Fdyn);
+#undef OUTGHOST_GATHER
+  }
+
+  if (rank != 0) {
+    ierr = PetscFree(g_Fint); CHKERRQ(ierr);
+    ierr = PetscFree(g_Fext); CHKERRQ(ierr);
+    ierr = PetscFree(g_Fdyn); CHKERRQ(ierr);
+    return 0;
+  }
 
   FILE  *f;
   char  filen[80];
@@ -1143,44 +1193,74 @@ PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *out_d
     PetscFPrintf(PETSC_COMM_WORLD, f, "%d\n", 5);
   }
 
-  PetscReal  *dd,*FF;
-  PetscInt   nv; 
+  PetscReal  *FF;
+  PetscInt   nv;
 
-  VecGetArray(fem->disp, &dd);
+  /* fem->disp/Fint/Fext/Fdyn are PETSc Vecs sized dof*ibm->n_v (real DOFs
+   * only -- see Create()'s VecCreateMPI/VecCreateSeq calls, both of which
+   * omit n_ghosts in the parallel path). Ghost nodes are not part of the
+   * solved DOF space, so: disp is computed directly from ibm->x_bp/x_bp0
+   * (never touching the Vec), and force fields are written as an explicit
+   * 0 for the ghost range instead of reading/writing past the Vec's true
+   * allocated size (which previously produced NaN/heap corruption). */
+  PetscReal *dd;
+  ierr = PetscMalloc1(3*(ibm->n_v+n_ghosts), &dd); CHKERRQ(ierr);
   for (nv=0; nv<ibm->n_v+n_ghosts; nv++) {
     dd[nv*dof] = ibm->x_bp[nv]-ibm->x_bp0[nv];
     dd[nv*dof+1] = ibm->y_bp[nv]-ibm->y_bp0[nv];
     dd[nv*dof+2] = ibm->z_bp[nv]-ibm->z_bp0[nv];
   }
-  
+
   PetscFPrintf(PETSC_COMM_WORLD, f, "POINT_DATA %d\n", ibm->n_v+n_ghosts);
-  
+
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS disp float\n");
   for (i=0; i<ibm->n_v+n_ghosts; i++){
     PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", dd[i*dof], dd[i*dof+1], dd[i*dof+2]);
   }
-  VecRestoreArray(fem->disp, &dd);
-  
-  VecGetArray(fem->Fint, &FF);
+  ierr = PetscFree(dd); CHKERRQ(ierr);
+
+  if (!gctx->initialized) { ierr = VecGetArray(fem->Fint, &FF); CHKERRQ(ierr); }
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fint float\n");
-  for (i=0; i<ibm->n_v+n_ghosts; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+  for (i=0; i<ibm->n_v; i++){
+    PetscReal fx = gctx->initialized ? g_Fint[i*dof]   : FF[i*dof];
+    PetscReal fy = gctx->initialized ? g_Fint[i*dof+1] : FF[i*dof+1];
+    PetscReal fz = gctx->initialized ? g_Fint[i*dof+2] : FF[i*dof+2];
+    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", fx, fy, fz);
   }
-  VecRestoreArray(fem->Fint, &FF);
+  for (i=ibm->n_v; i<ibm->n_v+n_ghosts; i++){
+    PetscFPrintf(PETSC_COMM_WORLD, f, "0.0 0.0 0.0\n");
+  }
+  if (!gctx->initialized) { ierr = VecRestoreArray(fem->Fint, &FF); CHKERRQ(ierr); }
 
-  VecGetArray(fem->Fext, &FF);
+  if (!gctx->initialized) { ierr = VecGetArray(fem->Fext, &FF); CHKERRQ(ierr); }
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fext float\n");
-  for (i=0; i<ibm->n_v+n_ghosts; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+  for (i=0; i<ibm->n_v; i++){
+    PetscReal fx = gctx->initialized ? g_Fext[i*dof]   : FF[i*dof];
+    PetscReal fy = gctx->initialized ? g_Fext[i*dof+1] : FF[i*dof+1];
+    PetscReal fz = gctx->initialized ? g_Fext[i*dof+2] : FF[i*dof+2];
+    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", fx, fy, fz);
   }
-  VecRestoreArray(fem->Fext, &FF);
+  for (i=ibm->n_v; i<ibm->n_v+n_ghosts; i++){
+    PetscFPrintf(PETSC_COMM_WORLD, f, "0.0 0.0 0.0\n");
+  }
+  if (!gctx->initialized) { ierr = VecRestoreArray(fem->Fext, &FF); CHKERRQ(ierr); }
 
-  VecGetArray(fem->Fdyn, &FF);
+  if (!gctx->initialized) { ierr = VecGetArray(fem->Fdyn, &FF); CHKERRQ(ierr); }
   PetscFPrintf(PETSC_COMM_WORLD, f, "VECTORS Fdyn float\n");
-  for (i=0; i<ibm->n_v+n_ghosts; i++){
-    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", FF[i*dof], FF[i*dof+1], FF[i*dof+2]);
+  for (i=0; i<ibm->n_v; i++){
+    PetscReal fx = gctx->initialized ? g_Fdyn[i*dof]   : FF[i*dof];
+    PetscReal fy = gctx->initialized ? g_Fdyn[i*dof+1] : FF[i*dof+1];
+    PetscReal fz = gctx->initialized ? g_Fdyn[i*dof+2] : FF[i*dof+2];
+    PetscFPrintf(PETSC_COMM_WORLD, f, "%f %f %f\n", fx, fy, fz);
   }
-  VecRestoreArray(fem->Fdyn, &FF);
+  for (i=ibm->n_v; i<ibm->n_v+n_ghosts; i++){
+    PetscFPrintf(PETSC_COMM_WORLD, f, "0.0 0.0 0.0\n");
+  }
+  if (!gctx->initialized) { ierr = VecRestoreArray(fem->Fdyn, &FF); CHKERRQ(ierr); }
+
+  ierr = PetscFree(g_Fint); CHKERRQ(ierr);
+  ierr = PetscFree(g_Fext); CHKERRQ(ierr);
+  ierr = PetscFree(g_Fdyn); CHKERRQ(ierr);
 
   fclose(f);
 

@@ -1621,6 +1621,34 @@ PetscErrorCode Patch(IBMNodes *ibm) {
 
     }
     
+    /* Free-boundary elements: ghost triangles (built by GlobalGhostInit,
+     * lv_geometry_unstructured.c) resolve most boundary-element stencil
+     * slots via Patch()'s ordinary shared-edge search above, but elements
+     * with an unusual valence AND sitting right at a boundary ring's own
+     * seam (e.g. the closing element connecting a ring's last node back to
+     * its first) can still have a slot no ghost data reaches. Rather than
+     * let active_strain.c fall back to a flat/zero-curvature CST patch (or,
+     * for irregular elements, silently drop force), fill any remaining
+     * 1000000 sentinel with whichever resolved slot is itself a ghost node
+     * (preferred: real node indices are always < ibm->n_v, so this stays a
+     * genuine boundary-reflected value), or, failing that, with the
+     * element's own first resolved slot (always at least one real corner
+     * node -- p[3]/p[0]/p[1]/p[v] are populated unconditionally above) --
+     * a bounded, rare-case approximation, better than dropping
+     * curvature/force entirely. */
+    PetscInt fixup_val = -1, ghost_fixup_val = -1;
+    for (i = 0; i < (v + 6) && i < maxPatchWidth; i++) {
+      if (p[i] == 1000000) continue;
+      if (fixup_val < 0) fixup_val = p[i];
+      if (p[i] >= ibm->n_v) { ghost_fixup_val = p[i]; break; }
+    }
+    if (ghost_fixup_val >= 0) fixup_val = ghost_fixup_val;
+    if (fixup_val >= 0) {
+      for (i = 0; i < (v + 6) && i < maxPatchWidth; i++) {
+        if (p[i] == 1000000) p[i] = fixup_val;
+      }
+    }
+
     for (i = 0; i < maxPatchWidth; i++) {
       ibm->patch[16*ec + i] = 1000000;
     }
@@ -1641,7 +1669,7 @@ PetscErrorCode Patch(IBMNodes *ibm) {
 //------------------------------------------------------------------------------------------------------------ 
 PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
 
-  PetscInt  i, ec, nv1, nv2, nv3, catch, edge_n, edge, start, end, count=0;
+  PetscInt  ec, nv1, nv2, nv3, catch, edge_n, edge, start, end, count=0;
 
   for (edge_n=0; edge_n<ibm->n_edge; edge_n++){
     //compute start&end
@@ -1650,6 +1678,7 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
       end += ibm->n_bnodes[edge];
     }
     start = end - ibm->n_bnodes[edge_n];
+    PetscInt n_local = end - start;
 
     /* For the apex ring (edge_n==0), cap strips share outer-outer edges with K=0 base
        strips.  Searching all elements would find the cap strip (higher index) and
@@ -1657,9 +1686,30 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
        reflect through the correct ring-1 node. */
     PetscInt ec_limit = (edge_n == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
 
-    for (i=start; i<end-1; i++) {
+    /* Boundary rings are CLOSED loops (n_local nodes, n_local edges,
+     * including the wrap-around edge from the last node back to the
+     * first) -- not open "plate" curves with n_local-1 edges and 2 free
+     * endpoints. The previous version's loop only ever processed
+     * n_local-1 segments (bnodes[i]->bnodes[i+1] for i=start..end-2), so
+     * the closing edge (last node -> first node) never got its own ghost
+     * node or main triangle at all -- a real gap in the mesh (visible as
+     * a hole in ParaView right at each ring's seam). Modular indexing
+     * here processes all n_local edges, and every ghost gets exactly 2
+     * triangles: the main one (real edge + this ghost) and a bridging one
+     * connecting this ghost to the PREVIOUS ghost in ring order (i, i-1
+     * -- local_i==0 wraps to this ring's own last ghost, never reaching
+     * into another ring or off the front). Packs the n_elmt..
+     * n_elmt+2*n_ghosts budget exactly (slots 2*count, 2*count+1), so no
+     * leftover padding is needed for the ghosts themselves.
+     * ibm->n_ghosts must equal sum(n_bnodes), one ghost per boundary node
+     * per ring (see lv_geometry_unstructured.c). */
+    PetscInt ring_first_ghost = count;
 
-      nv1 = ibm->bnodes[i+1];
+    for (PetscInt local_i=0; local_i<n_local; local_i++) {
+      PetscInt i      = start + local_i;
+      PetscInt i_next = start + (local_i+1) % n_local;
+
+      nv1 = ibm->bnodes[i_next];
       nv2 = ibm->bnodes[i];
 
       for (ec=0; ec<ec_limit; ec++) {
@@ -1674,7 +1724,7 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
       	  } else{
       	    nv3 = ibm->nv3[ec];
       	  }
-      	}	
+      	}
       }
 
       ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
@@ -1684,26 +1734,24 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
       ibm->x_bp0[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
       ibm->y_bp0[ibm->n_v+count] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
       ibm->z_bp0[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];
-      
-      if (i!=0) { //plate (1 continuous edge)
-	//if (i!=start) { //cylinder (two edges)
-	ibm->nv2[ibm->n_elmt+2*count-1] = nv2;
-      	ibm->nv1[ibm->n_elmt+2*count-1] = ibm->n_v + count;
-      	ibm->nv3[ibm->n_elmt+2*count-1] = ibm->n_v + count - 1;
-      }
 
+      /* Main triangle: the real boundary edge plus this ghost. */
       ibm->nv2[ibm->n_elmt+2*count] = nv2;
       ibm->nv1[ibm->n_elmt+2*count] = nv1;
       ibm->nv3[ibm->n_elmt+2*count] = ibm->n_v + count;
-      if (i==ibm->sum_n_bnodes-2) { //plate
-	//if (i==end-2) { //cylinder
-	//ibm->nv1[ibm->n_elmt+2*count+1] = ibm->n_v + start - edge_n; //cylinder
-	ibm->nv2[ibm->n_elmt+2*count+1] = nv1;
-	ibm->nv1[ibm->n_elmt+2*count+1] = ibm->n_v; //plate
-	ibm->nv3[ibm->n_elmt+2*count+1] = ibm->n_v + count;
-      }
-      
-      count++;     
+
+      /* Bridging triangle: this ghost (i) to the PREVIOUS ghost in ring
+       * order (i-1), through their shared real boundary node nv2.
+       * local_i==0 wraps ghost_prev to ring_first_ghost+n_local-1 -- this
+       * ring's own last ghost, computed fresh each ring so it never
+       * reaches back into a different ring or before index 0. */
+      PetscInt ghost_prev = (local_i==0) ? (ibm->n_v + ring_first_ghost + n_local - 1)
+                                          : (ibm->n_v + count - 1);
+      ibm->nv1[ibm->n_elmt+2*count+1] = ibm->n_v + count;
+      ibm->nv2[ibm->n_elmt+2*count+1] = nv2;
+      ibm->nv3[ibm->n_elmt+2*count+1] = ghost_prev;
+
+      count++;
     }
   }
 
@@ -1714,7 +1762,7 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
 //------------------------------------------------------------------------------------------------------------ 
 PetscErrorCode GlobalGhost(IBMNodes *ibm) {
 
-  PetscInt i, ec, nv1, nv2, nv3, catch, edge_n, edge, start, end, count=0;
+  PetscInt ec, nv1, nv2, nv3, catch, edge_n, edge, start, end, count=0;
 
   for (edge_n=0; edge_n<ibm->n_edge; edge_n++){
     //compute start&end
@@ -1723,13 +1771,20 @@ PetscErrorCode GlobalGhost(IBMNodes *ibm) {
       end += ibm->n_bnodes[edge];
     }
     start = end - ibm->n_bnodes[edge_n];
+    PetscInt n_local = end - start;
 
     /* Same base-element limit as GlobalGhostInit — see comment there. */
     PetscInt ec_limit = (edge_n == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
 
-    for (i=start; i<end-1; i++) {
+    /* Closed-loop modular indexing -- see GlobalGhostInit for why (must
+     * process all n_local boundary edges, including the wrap-around one,
+     * not just n_local-1). Topology doesn't change here (only positions),
+     * but the ghost COUNT and ORDER must match GlobalGhostInit exactly. */
+    for (PetscInt local_i=0; local_i<n_local; local_i++) {
+      PetscInt i      = start + local_i;
+      PetscInt i_next = start + (local_i+1) % n_local;
 
-      nv1 = ibm->bnodes[i+1];
+      nv1 = ibm->bnodes[i_next];
       nv2 = ibm->bnodes[i];
 
       for (ec=0; ec<ec_limit; ec++) {
