@@ -28,13 +28,41 @@ extern PetscReal  E, mu;
 extern PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi);
 extern PetscErrorCode IrrVer(IBMNodes *ibm);
 extern PetscErrorCode Patch (IBMNodes *ibm);
+extern PetscErrorCode GlobalGhostInit(IBMNodes *ibm);
 
-extern struct Cmpnts PLUS (struct Cmpnts v1, struct Cmpnts v2);
-extern struct Cmpnts MINUS(struct Cmpnts v1, struct Cmpnts v2);
-extern struct Cmpnts CROSS(struct Cmpnts v1, struct Cmpnts v2);
-extern struct Cmpnts UNIT (struct Cmpnts v1);
-extern PetscReal     DOT  (struct Cmpnts v1, struct Cmpnts v2);
-extern PetscReal     SIZE (struct Cmpnts v1);
+/* Find, for each element i, the opposite-vertex node across each of its 3
+ * edges (nb4: across edge n2-n3 opposite n1; nb5: across edge n3-n1
+ * opposite n2; nb6: across edge n1-n2 opposite n3), or 1000000 if that edge
+ * is a mesh boundary (no neighboring element).  Identical algorithm to the
+ * nv4/nv5/nv6 pass in CreateLVMesh/CreateLVMeshUnstructured, factored out
+ * so it can be run twice: once (on temp buffers) to count boundary edges
+ * before Create() sizes the ghost-node arrays, and once (on the permanent
+ * ibm->nv1/2/3) to actually fill nv4/nv5/nv6. */
+static void FindEdgeNeighbors(PetscInt n_elmt, const PetscInt *v1, const PetscInt *v2,
+                               const PetscInt *v3, PetscInt *nb4, PetscInt *nb5, PetscInt *nb6)
+{
+  for (PetscInt i = 0; i < n_elmt; i++) { nb4[i] = 1000000; nb5[i] = 1000000; nb6[i] = 1000000; }
+  for (PetscInt i = 0; i < n_elmt; i++) {
+    PetscInt n1e = v1[i], n2e = v2[i], n3e = v3[i];
+    for (PetscInt j = 0; j < n_elmt; j++) {
+      if (i == j) continue;
+      PetscInt n1pe = v1[j], n2pe = v2[j], n3pe = v3[j];
+      PetscInt mn = 0; PetscReal cn = 0.0;
+      if (n1e == n1pe || n1e == n2pe || n1e == n3pe) { mn++; cn += 3.5; }
+      if (n2e == n1pe || n2e == n2pe || n2e == n3pe) { mn++; cn += 2.5; }
+      if (n3e == n1pe || n3e == n2pe || n3e == n3pe) { mn++; cn += 1.5; }
+      if (mn == 2) {
+        PetscInt npe;
+        if      (n1pe != n1e && n1pe != n2e && n1pe != n3e) npe = n1pe;
+        else if (n2pe != n1e && n2pe != n2e && n2pe != n3e) npe = n2pe;
+        else                                                  npe = n3pe;
+        if      (cn == 4.0) nb4[i] = npe;
+        else if (cn == 5.0) nb5[i] = npe;
+        else                nb6[i] = npe;
+      }
+    }
+  }
+}
 
 /*
  * CreateLVMeshUnstructured — read the mesh file at -lv_unstructured_mesh_file,
@@ -73,7 +101,7 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
              "Cannot open -lv_unstructured_mesh_file '%s'", filepath);
   }
 
-  PetscInt n_v, n_elmt, n_hull, n_apex_pin;
+  PetscInt n_v, n_elmt, n_apex_pin;
   if (fscanf(fd, "%d", &n_v) != 1) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: n_v");
 
   /* Read into temporary buffers first -- Create() needs n_v AND n_elmt to
@@ -103,15 +131,44 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
     te1[i] = a; te2[i] = b; te3[i] = c;
   }
 
+  /* Boundary section: n_edge separate ring-ordered node lists (see
+   * hemisphere_mesh.py / lv_unstructured_mesh.py). Read into temp buffers
+   * before Create() sizes the ghost arrays -- ghost node count is now a
+   * closed-form sum (GlobalGhostInit/GlobalGhost in bending.c build one
+   * ghost node per boundary EDGE within each ring -- a ring is a closed
+   * loop, so n_bnodes[e] edges per ring, including the wrap-around one),
+   * no topological search needed here at all. */
+  PetscInt n_edge_file;
+  if (fscanf(fd, "%d", &n_edge_file) != 1) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: n_edge");
+  PetscInt *t_nbnodes;
+  ierr = PetscMalloc1(PetscMax(1, n_edge_file), &t_nbnodes); CHKERRQ(ierr);
+  PetscInt sum_bnodes = 0;
+  for (PetscInt e = 0; e < n_edge_file; e++) {
+    if (fscanf(fd, "%d", &t_nbnodes[e]) != 1) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: n_bnodes");
+    sum_bnodes += t_nbnodes[e];
+  }
+  PetscInt *t_bnodes;
+  ierr = PetscMalloc1(PetscMax(1, sum_bnodes), &t_bnodes); CHKERRQ(ierr);
+  for (PetscInt i = 0; i < sum_bnodes; i++) {
+    if (fscanf(fd, "%d", &t_bnodes[i]) != 1) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: bnodes");
+  }
+  /* One ghost per boundary EDGE; each ring is a closed loop, so
+   * #edges == #nodes per ring (GlobalGhostInit, bending.c) -- not
+   * sum_bnodes - n_edge_file (that undercounts by missing each ring's
+   * wrap-around edge, which was the actual root cause of the visible gap
+   * in the mesh at each ring's seam). */
+  PetscInt n_ghosts_count = sum_bnodes;
+
   ibm->n_v          = n_v;
   ibm->n_elmt       = n_elmt;
   ibm->n_elmt_base  = n_elmt;  /* every element goes through the regular subdivision path */
-  ibm->n_edge       = 0;
-  ibm->n_ghosts     = 0;
+  ibm->n_edge       = n_edge_file;
+  ibm->n_ghosts     = n_ghosts_count;
   ibm->ibi          = 0;
 
   PetscPrintf(PETSC_COMM_WORLD,
-    "[lv-unstruct] n_v=%d  n_elmt=%d  (from %s)\n", (int)n_v, (int)n_elmt, filepath);
+    "[lv-unstruct] n_v=%d  n_elmt=%d  n_ghosts=%d  (from %s)\n",
+    (int)n_v, (int)n_elmt, (int)n_ghosts_count, filepath);
 
   PetscPrintf(PETSC_COMM_WORLD, "[lv-unstruct] stage 2: calling Create()\n");
   ierr = Create(ibm, fem, 0); CHKERRQ(ierr);
@@ -134,11 +191,6 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
   ierr = PetscFree(tx); CHKERRQ(ierr); ierr = PetscFree(ty); CHKERRQ(ierr); ierr = PetscFree(tz); CHKERRQ(ierr);
   ierr = PetscFree(te1); CHKERRQ(ierr); ierr = PetscFree(te2); CHKERRQ(ierr); ierr = PetscFree(te3); CHKERRQ(ierr);
 
-  if (fscanf(fd, "%d", &n_hull) != 1) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: n_hull");
-  PetscInt *hull_nodes;
-  ierr = PetscMalloc1(PetscMax(1, n_hull), &hull_nodes); CHKERRQ(ierr);
-  for (PetscInt i = 0; i < n_hull; i++) fscanf(fd, "%d", &hull_nodes[i]);
-
   if (fscanf(fd, "%d", &n_apex_pin) != 1) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: n_apex_pin");
   if (n_apex_pin > 3) n_apex_pin = 3;
   ibm->n_apex_pin = n_apex_pin;
@@ -147,51 +199,46 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
   fclose(fd);
 
   /* ----------------------------------------------------------------
-   * bnodes[]: base rim only (the true open mesh boundary) -- used by
-   * IrrVer's boundary "ghost" adjustment (bcount = count+3), same purpose
-   * as ring 0 / base ring in the structured mesh. The apex-pin nodes are
-   * NOT put here: they're ordinary interior vertices we've chosen to
-   * constrain, not topological boundary, and IrrVer would misclassify
-   * their true valence if they were included (see ibm->n_apex_pin instead,
-   * consumed directly in main.c FormFunctionFEM). */
-  ibm->sum_n_bnodes = n_hull;
+   * bnodes[]/n_bnodes[]: n_edge separately-ordered boundary ring walks
+   * (base rim for LV, hole+equator for the hemisphere -- see
+   * hemisphere_mesh.py/lv_unstructured_mesh.py). Used by IrrVer's
+   * boundary valence adjustment AND by GlobalGhostInit below (which
+   * requires bnodes[i]->bnodes[i+1] to be true ring-adjacent neighbors,
+   * unlike the old single sorted-by-index hull blob). The apex-pin nodes
+   * are NOT put here: see the original comment history in git blame --
+   * they're ordinary interior vertices we've chosen to constrain, not
+   * topological boundary. */
+  ibm->sum_n_bnodes = sum_bnodes;
   ierr = PetscFree(ibm->bnodes); CHKERRQ(ierr);
-  ierr = PetscMalloc1(PetscMax(1, n_hull), &(ibm->bnodes)); CHKERRQ(ierr);
-  for (PetscInt i = 0; i < n_hull; i++) ibm->bnodes[i] = hull_nodes[i];
-  ierr = PetscFree(hull_nodes); CHKERRQ(ierr);
+  ierr = PetscMalloc1(PetscMax(1, sum_bnodes), &(ibm->bnodes)); CHKERRQ(ierr);
+  for (PetscInt i = 0; i < sum_bnodes; i++) ibm->bnodes[i] = t_bnodes[i];
+  ierr = PetscFree(t_bnodes); CHKERRQ(ierr);
 
   ierr = PetscFree(ibm->n_bnodes); CHKERRQ(ierr);
-  ierr = PetscCalloc1(8, &ibm->n_bnodes); CHKERRQ(ierr);
-  ibm->n_bnodes[0] = n_hull;   /* group 0: base rim (matches EdgeDirectionalFix(1,...) convention
-                                 * loosely -- not currently fixed by main.c either way) */
+  ierr = PetscCalloc1(PetscMax(8, n_edge_file), &ibm->n_bnodes); CHKERRQ(ierr);
+  for (PetscInt e = 0; e < n_edge_file; e++) ibm->n_bnodes[e] = t_nbnodes[e];
+  ierr = PetscFree(t_nbnodes); CHKERRQ(ierr);
 
   /* ----------------------------------------------------------------
-   * Patch nodes nv4/nv5/nv6 -- identical algorithm to CreateLVMesh stage 5.
-   * ---------------------------------------------------------------- */
-  for (PetscInt i = 0; i < n_elmt; i++) {
-    ibm->nv4[i] = 1000000; ibm->nv5[i] = 1000000; ibm->nv6[i] = 1000000;
-  }
-  for (PetscInt i = 0; i < n_elmt; i++) {
-    PetscInt n1e = ibm->nv1[i], n2e = ibm->nv2[i], n3e = ibm->nv3[i];
-    for (PetscInt j = 0; j < n_elmt; j++) {
-      if (i == j) continue;
-      PetscInt  n1pe = ibm->nv1[j], n2pe = ibm->nv2[j], n3pe = ibm->nv3[j];
-      PetscInt  mn = 0; PetscReal cn = 0.0;
-      if (n1e == n1pe || n1e == n2pe || n1e == n3pe) { mn++; cn += 3.5; }
-      if (n2e == n1pe || n2e == n2pe || n2e == n3pe) { mn++; cn += 2.5; }
-      if (n3e == n1pe || n3e == n2pe || n3e == n3pe) { mn++; cn += 1.5; }
-      if (mn == 2) {
-        PetscInt npe;
-        if      (n1pe != n1e && n1pe != n2e && n1pe != n3e) npe = n1pe;
-        else if (n2pe != n1e && n2pe != n2e && n2pe != n3e) npe = n2pe;
-        else                                                  npe = n3pe;
-        if      (cn == 4.0) ibm->nv4[i] = npe;
-        else if (cn == 5.0) ibm->nv5[i] = npe;
-        else                ibm->nv6[i] = npe;
-      }
-    }
-  }
-  PetscPrintf(PETSC_COMM_WORLD, "[lv-unstruct] patch nodes done\n");
+   * Patch nodes nv4/nv5/nv6 -- identical algorithm to CreateLVMesh stage 5,
+   * now using the factored-out helper (real ibm->nv1/2/3 this time). */
+  FindEdgeNeighbors(n_elmt, ibm->nv1, ibm->nv2, ibm->nv3, ibm->nv4, ibm->nv5, ibm->nv6);
+
+  /* ----------------------------------------------------------------
+   * Ghost nodes/triangles: GlobalGhostInit (bending.c) -- the established
+   * ChimeraFEM algorithm, now fixed for multi-ring boundaries (see the
+   * "cylinder variant activated" comment there). Walks each boundary ring
+   * and, per edge, mirrors the opposite (interior) vertex through the
+   * edge midpoint (ghost = e1+e2-e3) and builds TWO ghost triangles per
+   * interior segment -- one sharing the real edge, one connecting
+   * consecutive ghost nodes to each other -- so Patch()'s generic
+   * shared-edge search can resolve boundary-element stencils out to the
+   * full 12-point/valence+6 neighborhood, not just the innermost ring.
+   * Packs the entire n_elmt..n_elmt+2*n_ghosts budget exactly (no unused
+   * padding slots, unlike the single-ghost-per-edge scheme this replaced). */
+  ierr = GlobalGhostInit(ibm); CHKERRQ(ierr);
+
+  PetscPrintf(PETSC_COMM_WORLD, "[lv-unstruct] patch nodes + %d ghost nodes done\n", (int)ibm->n_ghosts);
 
   /* ----------------------------------------------------------------
    * Fiber directions -- identical Bayer 2012 Eq.(2)/(7) mid-wall formula to

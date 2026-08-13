@@ -121,7 +121,15 @@ PetscErrorCode FExternal(FE *fem) {
       PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-hemi_pinch_node_out2", &n_out2, PETSC_NULL);
       PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-hemi_pinch_node_in2",  &n_in2,  PETSC_NULL);
       PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-hemi_pinch_pmax", &pmax, PETSC_NULL);
-      PetscReal twoP = 2.0 * pmax * (PetscReal)ti / (PetscReal)tisteps;
+      PetscBool const_load = PETSC_FALSE;
+      PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-hemi_pinch_const", &const_load, PETSC_NULL);
+      /* -hemi_pinch_const 1: hold the load fixed at pmax from the first
+       * step, instead of ramping 0->pmax across the whole run (the
+       * load-displacement-sweep design -- see the block comment above).
+       * For a single-point constant-load check, not for reproducing
+       * Fig. A6A's sweep curve. */
+      PetscReal twoP = const_load ? 2.0 * pmax
+                                   : 2.0 * pmax * (PetscReal)ti / (PetscReal)tisteps;
       if (n_out1 >= 0) { NodeForce(n_out1,  twoP, 0, fem); }
       if (n_in1  >= 0) { NodeForce(n_in1,  -twoP, 1, fem); }
       if (n_out2 >= 0) { NodeForce(n_out2, -twoP, 0, fem); }
