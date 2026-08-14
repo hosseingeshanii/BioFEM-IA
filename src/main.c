@@ -28,6 +28,17 @@ PetscInt   disable_fdyn=0;    /* skip FDynamic() so the residual has no inertial
                                   swamping the physics we actually want to test. fem->Fdyn is still
                                   zeroed every residual evaluation (see FormFunctionFEM), so skipping
                                   the call leaves it exactly 0 -- VecAXPY(R,1.,Fdyn) becomes a no-op. */
+PetscReal  newmark_gamma=0.5; /* Newmark-beta gamma. 0.5 = average-acceleration, energy-conserving,
+                                  zero numerical damping -- fine for genuine transient dynamics, but
+                                  for a static problem solved via dynamic relaxation (Fdyn used only
+                                  as regularization, e.g. the hemisphere pinch test) an abruptly-
+                                  applied load just rings elastically forever (growing, not decaying,
+                                  amplitude seen in residual_monitor.png) instead of settling toward
+                                  the quasi-static solution. gamma > 0.5 (e.g. 0.6-0.7) introduces
+                                  algorithmic damping (amount grows with gamma-0.5) that dissipates
+                                  that spurious high-frequency ringing. Must stay in sync between
+                                  FDynamic() (residual) and xAccVel() (post-step state update) --
+                                  both read this global rather than hardcoding their own. */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
 PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
 PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DOFs across the 3
@@ -194,6 +205,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-outghost", &outghost, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-write_3d_shell", &write_3d_shell, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-disable_fdyn", &disable_fdyn, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-newmark_gamma", &newmark_gamma, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_rigid_min", &lv_rigid_min, PETSC_NULL);
@@ -1117,7 +1129,14 @@ PetscErrorCode FDynamic(FE *fem) {
   PetscInt       i;
   PetscReal      M[9], C[9], Fd[9], x[9], xn[9], xnm1[9], xd[9], xdd[9];
   PetscInt       n1e, n2e, n3e;
-  PetscReal      Gama=0.5, Beta=0.25;
+  /* Beta tied to Gama (not left at a bare 0.25) to preserve Newmark's
+   * unconditional-stability condition 2*Beta >= Gama as Gama increases
+   * above 0.5 for damping -- this formula reproduces the original
+   * Beta=0.25 exactly at Gama=0.5 and keeps 2*Beta>=Gama for any
+   * Gama>=0.5. Discovered the hard way: Gama=0.6 with Beta left at 0.25
+   * (0.5 < 0.6, violating the condition) blew up exponentially instead
+   * of damping. */
+  PetscReal      Gama=newmark_gamma, Beta=0.25*(newmark_gamma+0.5)*(newmark_gamma+0.5);
   PetscReal      M1, C1, M2, C2, M3, C3;
 
   for (i=0; i<9; i++) {M[i]=0.0; C[i]=0.0; Fd[i]=0.0;}
@@ -1319,7 +1338,14 @@ PetscErrorCode xAccVel(FE *fem) {
   PetscReal      *xx, *xxn, *xxd, *xxdd;
   PetscReal      xxddn1, xxddn2, xxddn3;
   PetscReal      xxdn1, xxdn2, xxdn3;
-  PetscReal      Gama=0.5, Beta=0.25;
+  /* Beta tied to Gama (not left at a bare 0.25) to preserve Newmark's
+   * unconditional-stability condition 2*Beta >= Gama as Gama increases
+   * above 0.5 for damping -- this formula reproduces the original
+   * Beta=0.25 exactly at Gama=0.5 and keeps 2*Beta>=Gama for any
+   * Gama>=0.5. Discovered the hard way: Gama=0.6 with Beta left at 0.25
+   * (0.5 < 0.6, violating the condition) blew up exponentially instead
+   * of damping. */
+  PetscReal      Gama=newmark_gamma, Beta=0.25*(newmark_gamma+0.5)*(newmark_gamma+0.5);
   PetscInt       nv;
   
   M1 = 1./(Beta*pow(dt,2));  M2 = 1./(Beta*dt);  M3 = (1./(2*Beta)) - 1.;
