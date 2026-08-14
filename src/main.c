@@ -468,15 +468,6 @@ int main(int argc, char **argv)
 	          return (int)ierr;
 	        }
 
-        {
-          IBMNodes *tibm = fem[ibi].ibm;
-          if (!rank) PetscPrintf(PETSC_COMM_SELF,
-            "[TRACE ti=%d] AFTER  SNES: x_bp[%d]=(%g,%g,%g)  disp_z=%g  reason=%d\n",
-            ti, TRACE_V,
-            tibm->x_bp[TRACE_V], tibm->y_bp[TRACE_V], tibm->z_bp[TRACE_V],
-            tibm->z_bp[TRACE_V]-tibm->z_bp0[TRACE_V], (int)reason);
-        }
-
 	        if (reason >= 0) {
 	          VecCopy(U, fem[ibi].x);
 	          /* Advance per-element thickness ONCE per converged timestep (not
@@ -517,15 +508,6 @@ int main(int argc, char **argv)
 	            }
 	          }
 	        }
-
-        {
-          IBMNodes *tibm = fem[ibi].ibm;
-          if (!rank) PetscPrintf(PETSC_COMM_SELF,
-            "[TRACE ti=%d] AFTER UPDATE: x_bp[%d]=(%g,%g,%g)  disp_z=%g\n",
-            ti, TRACE_V,
-            tibm->x_bp[TRACE_V], tibm->y_bp[TRACE_V], tibm->z_bp[TRACE_V],
-            tibm->z_bp[TRACE_V]-tibm->z_bp0[TRACE_V]);
-        }
 
         /* Only destroy if SNESSolve didn't corrupt the object */
         if (snes != NULL) {
