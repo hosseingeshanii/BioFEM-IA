@@ -958,16 +958,26 @@ PetscErrorCode FEM_DMPlexGeomBuildNodeMap(FE *fem)
 }
 
 /**
- * @brief Sync ghost/auxiliary node DOFs into the solved Vecs.
+ * @brief Zero the residual at ghost/auxiliary node DOF rows.
  *
  * Ghost nodes (indices [n_v, n_v+n_ghosts)) are not independent unknowns --
  * their position is always the mirror-reflection of a real node, already
- * computed into ibm->x_bp/y_bp/z_bp by GlobalGhost() (called after
- * every AreaNormal()). This writes that position into the ghost DOF's slot
- * in @p x (so the solved Vec is a complete, consistent record of the whole
- * mesh, matching the original ChimeraFEM ghost-node design) and forces the
- * residual @p R to zero there, so SNES/KSP never try to treat a ghost DOF
- * as a real unknown to solve for.
+ * computed into ibm->x_bp/y_bp/z_bp by GlobalGhost() (called after every
+ * AreaNormal()) and used directly by all geometry evaluation. This forces
+ * the residual @p R to zero at their DOF rows, so SNES/KSP never try to
+ * treat a ghost DOF as a real unknown to solve for.
+ *
+ * Does NOT touch @p x. An earlier version also wrote the ghost position
+ * into x's DOF slot (to keep the solved Vec a complete record of the whole
+ * mesh, matching the original ChimeraFEM ghost-node design) via
+ * VecGetArray(x, ...) -- but x is the SNES solution iterate passed into
+ * FormFunction, which PETSc treats as read-only during that call (enforced
+ * by a read lock in some PETSc versions/builds, not in others -- this
+ * passed silently locally on PETSc 3.21 but errored on Grace's 3.22.5:
+ * "Vector ... was locked for read-only access"). Since every real geometry
+ * computation reads ibm->x_bp (not x) for ghost positions, x's ghost slot
+ * was purely cosmetic bookkeeping, not load-bearing -- dropped rather than
+ * worked around.
  *
  * Only rank 0 does anything here (it owns every ghost DOF -- see the
  * ibm_to_local_idx pass in FEM_DMPlexGeomSetup); other ranks return
@@ -975,12 +985,10 @@ PetscErrorCode FEM_DMPlexGeomBuildNodeMap(FE *fem)
  * on a distributed Vec are not collective, but this keeps the call site
  * uniform and safe if that ever changes).
  *
- * @param fem  FE structure with initialised geom_ctx and ibm->x_bp already
- *             holding up-to-date ghost positions.
- * @param x    Current solution Vec (ghost position written here).
+ * @param fem  FE structure with initialised geom_ctx.
  * @param R    Residual Vec (zeroed at ghost DOF rows here).
  */
-PetscErrorCode FEM_DMPlexGeomSyncGhostDOFs(FE *fem, Vec x, Vec R)
+PetscErrorCode FEM_DMPlexGeomSyncGhostDOFs(FE *fem, Vec R)
 {
   DMPlexGeomCtx *ctx = &fem->geom_ctx;
   IBMNodes      *ibm = fem->ibm;
@@ -991,23 +999,18 @@ PetscErrorCode FEM_DMPlexGeomSyncGhostDOFs(FE *fem, Vec x, Vec R)
   PetscCallMPI(MPI_Comm_rank(ctx->comm, &myrank));
   if (myrank != 0) PetscFunctionReturn(0);
 
-  PetscReal *xx, *RR;
-  PetscCall(VecGetArray(x, &xx));
+  PetscReal *RR;
   PetscCall(VecGetArray(R, &RR));
   for (PetscInt gc = 0; gc < ibm->n_ghosts; ++gc) {
     PetscInt gnode = ibm->n_v + gc;
     PetscInt li    = ctx->ibm_to_local_idx[gnode];
     PetscCheck(li >= 0, ctx->comm, PETSC_ERR_PLIB,
                "ghost node %" PetscInt_FMT " has no local Vec slot on rank 0", gnode);
-    xx[li*dof  ] = ibm->x_bp[gnode];
-    xx[li*dof+1] = ibm->y_bp[gnode];
-    xx[li*dof+2] = ibm->z_bp[gnode];
     RR[li*dof  ] = 0.0;
     RR[li*dof+1] = 0.0;
     RR[li*dof+2] = 0.0;
   }
   PetscCall(VecRestoreArray(R, &RR));
-  PetscCall(VecRestoreArray(x, &xx));
 
   PetscFunctionReturn(0);
 }

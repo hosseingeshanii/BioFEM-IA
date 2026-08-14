@@ -977,15 +977,16 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   if (lv_fix_base_axial && lv_geom_unstructured && ibm->n_bnodes[0] > 0) {
     ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
   }
-  /* Ghost/auxiliary node DOFs (indices [n_v, n_v+n_ghosts)): write their
-   * mirror-reflected position (already computed into ibm->x_bp by
-   * GlobalGhost(), called after every AreaNormal() above) into x,
-   * and zero R there so SNES never treats them as real unknowns. Replaces
-   * the old EdgeFreeR(), which zeroed the same slots but assumed R was
-   * sized dof*(n_v+n_ghosts) -- true in serial, no longer true here now
-   * that ghost DOFs get real, individually-owned Vec slots (see
+  /* Ghost/auxiliary node DOFs (indices [n_v, n_v+n_ghosts)): zero R there
+   * so SNES never treats them as real unknowns (their position, already
+   * computed into ibm->x_bp by GlobalGhost() after every AreaNormal()
+   * above, is what all geometry evaluation actually reads -- x itself is
+   * never touched, see FEM_DMPlexGeomSyncGhostDOFs). Replaces the old
+   * EdgeFreeR(), which zeroed the same slots but assumed R was sized
+   * dof*(n_v+n_ghosts) -- true in serial, no longer true here now that
+   * ghost DOFs get real, individually-owned Vec slots (see
    * FEM_DMPlexGeomSetup/BuildNodeMap in dmplex_geom.c). */
-  ierr = FEM_DMPlexGeomSyncGhostDOFs(fem, x, R); CHKERRQ(ierr);
+  ierr = FEM_DMPlexGeomSyncGhostDOFs(fem, R); CHKERRQ(ierr);
 
   // GlobalGhost(ibm);
 
@@ -1457,9 +1458,14 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
       /* Ghost/auxiliary DOFs (rank 0 owns all of them -- see
        * FEM_DMPlexGeomSetup's ibm_to_local_idx pass): seed with their
        * reference mirror position so xn/xnm1 (copied from fem->x right
-       * below) start consistent with what FEM_DMPlexGeomSyncGhostDOFs will
-       * write on the first residual evaluation, instead of leaving these
-       * slots at whatever VecCreateMPI happened to allocate. */
+       * below) start consistent, instead of leaving these slots at
+       * whatever VecCreateMPI happened to allocate. This is the ONLY
+       * place x's ghost slots are ever written -- FormFunctionFEM's
+       * per-iteration FEM_DMPlexGeomSyncGhostDOFs only zeroes R now (x is
+       * the SNES iterate, read-only during FormFunction; real geometry
+       * evaluation reads ibm->x_bp instead, kept current by GlobalGhost()
+       * every iteration), so this seed value is frozen for the life of
+       * the run -- harmless since nothing reads x's ghost slots. */
       if (imyrank == 0) {
         for (PetscInt gc = 0; gc < ibm->n_ghosts; ++gc) {
           PetscInt gnode = ibm->n_v + gc;
