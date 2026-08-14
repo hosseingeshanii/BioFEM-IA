@@ -597,12 +597,15 @@ int main(int argc, char **argv)
 
   if (res_log_fp) { fclose(res_log_fp); res_log_fp = NULL; }
 
-  /* Finish UP: output final state. OutputGhost is collective (gathers
-   * Fint/Fext/Fdyn via MPI_Allreduce before rank 0 writes the file), so it
-   * must be called by every rank, unlike LocationOut which is genuinely
-   * rank-0-only. */
+  /* Finish UP: output final state. Both OutputGhost (gathers Fint/Fext/
+   * Fdyn via MPI_Allreduce before rank 0 writes the file) and LocationOut
+   * (now COMM_WORLD VecView, see io.c) are collective -- must be called by
+   * every rank, not just rank 0 (LocationOut used to be rank-0-only,
+   * matching its old COMM_SELF viewer -- that combination only ever
+   * checkpointed rank 0's local Vec slice, silently corrupting any
+   * parallel restart). */
   for (ibi=0; ibi<nbody; ibi++) {
-    if (rank == 0) { LocationOut(&fem[ibi], ti+1, ibi, out_dir); }
+    LocationOut(&fem[ibi], ti+1, ibi, out_dir);
     if (outghost) { OutputGhost(&fem[ibi], ti, ibi, out_dir); }
   }
   CleanupAndFinalize(fem, ibm, nbody);
