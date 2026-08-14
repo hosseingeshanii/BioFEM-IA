@@ -52,18 +52,18 @@ PetscErrorCode FEM_DMPlexGeomDestroy(FE *fem);
 PetscErrorCode FEM_DMPlexGeomBuildNodeMap(FE *fem);
 
 /**
- * @brief Sync ghost/auxiliary node DOFs (mirror-reflected boundary points)
- * into the solved Vecs: writes their position (from ibm->x_bp, already
- * updated by GlobalGhost()) into @p x and zeroes @p R there, so
- * SNES never tries to solve for them as independent unknowns. No-op if
- * ibm->n_ghosts == 0. Must be called every residual evaluation, after
- * force/residual assembly and before VecNorm.
+ * @brief Zero the residual at ghost/auxiliary node DOF rows (mirror-
+ * reflected boundary points) so SNES never tries to solve for them as
+ * independent unknowns. No-op if ibm->n_ghosts == 0. Must be called every
+ * residual evaluation, after force/residual assembly and before VecNorm.
+ * Does not touch the solution Vec x -- it's the SNES iterate, which PETSc
+ * treats as read-only during FormFunction; real geometry evaluation reads
+ * ghost positions from ibm->x_bp (kept current by GlobalGhost()) instead.
  *
  * @param fem  FE struct with initialised geom_ctx.
- * @param x    Current solution Vec.
  * @param R    Residual Vec.
  */
-PetscErrorCode FEM_DMPlexGeomSyncGhostDOFs(FE *fem, Vec x, Vec R);
+PetscErrorCode FEM_DMPlexGeomSyncGhostDOFs(FE *fem, Vec R);
 
 /* ---- Legacy / benchmark entry points ---- */
 
