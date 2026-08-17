@@ -22,6 +22,11 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
 PetscInt   write_3d_shell=0;  /* visualization-only wedge-mesh reconstruction, see Write3DShellVTK() in io.c */
+PetscInt   legacy_restart_in=0;  /* TEMPORARY: read a checkpoint written before the ibm-index-ordered
+                                   * LocationOut/In rewrite (plain COMM_WORLD VecLoad, partition-order,
+                                   * only valid at the exact --np it was written with). Used once to load
+                                   * an old-format checkpoint and re-save it via the new LocationOut so it
+                                   * becomes --np-invariant; remove once no old-format checkpoints remain. */
 PetscInt   disable_fdyn=0;    /* skip FDynamic() so the residual has no inertial/dynamic term at all,
                                   R = Fint - Fext only -- for quasi-static problems (e.g. the hemisphere
                                   pinch benchmark) where Fdyn was orders of magnitude larger than Fint,
@@ -191,6 +196,7 @@ int main(int argc, char **argv)
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-char_length_z", &char_length_z, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-tisteps", &tisteps, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-tistart", &tistart, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-legacy_restart_in", &legacy_restart_in, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-dt", &dt, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-timeinteg", &timeinteg, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-explicit", &explicit, PETSC_NULL);
@@ -388,7 +394,13 @@ int main(int argc, char **argv)
     PetscBarrier(PETSC_NULL);  
   }
   
-  if (tistart) tistart++;
+  /* No increment here: x0_<tistart>.dat already encodes "state after
+   * tistart steps solved" (see LocationOut below), so the loop's first
+   * new iteration must reuse ti=tistart to produce the next file,
+   * tistart+1 -- consistent with the in-loop Output(ti+1,...) convention.
+   * (Previously incremented tistart here, which combined with an extra
+   * +1 in the post-loop LocationOut call to silently skip 2 real dt
+   * steps at every restart.) */
   PetscPrintf(PETSC_COMM_WORLD, "Starting time-stepping loop from tistart = %d for %d steps \n", tistart, tisteps);
 
   if (monitor_residual && rank == 0) {
@@ -603,9 +615,14 @@ int main(int argc, char **argv)
    * every rank, not just rank 0 (LocationOut used to be rank-0-only,
    * matching its old COMM_SELF viewer -- that combination only ever
    * checkpointed rank 0's local Vec slice, silently corrupting any
-   * parallel restart). */
+   * parallel restart).
+   *
+   * ti here is already the post-loop value left by the for-loop's trailing
+   * increment, i.e. (last solved ti) + 1 -- the correct next-file label
+   * per the ti+1 convention used by the in-loop Output() writer. No extra
+   * +1: that would double-count the loop's own trailing increment. */
   for (ibi=0; ibi<nbody; ibi++) {
-    LocationOut(&fem[ibi], ti+1, ibi, out_dir);
+    LocationOut(&fem[ibi], ti, ibi, out_dir);
     if (outghost) { OutputGhost(&fem[ibi], ti, ibi, out_dir); }
   }
   CleanupAndFinalize(fem, ibm, nbody);

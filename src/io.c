@@ -8,6 +8,7 @@
 #include <sys/types.h>
 
 extern PetscInt   dof, outghost, ConstitutiveLawNonLinear, contact, n_Fung_Coeffs, n_lin_model_coeffs;
+extern PetscInt   legacy_restart_in;
 extern PetscInt   lv_geom_process;
 
 extern PetscReal  dt, char_length_x, char_length_y, char_length_z;
@@ -1269,46 +1270,94 @@ PetscErrorCode OutputGhost(FE *fem, PetscInt ti, PetscInt ibi, const char *out_d
 
 //-----------------------------------------------------------------------------------------------------------------------------------
 PetscErrorCode LocationOut(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
-  
-  IBMNodes     *ibm=fem->ibm;
-  PetscViewer  viewer;
-  char         filen[256];
-  PetscInt     fd;
+
+  IBMNodes      *ibm=fem->ibm;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscViewer   viewer = NULL;
+  char          filen[256];
+  PetscInt      fd;
 
   // Use current directory if out_dir is NULL or empty
   const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   // Create directory if it doesn't exist
   mkdir(dir, 0777);
 
-  /* fem->x/xn/xd/xdd are parallel Vecs in the DMPlex-parallel pipeline (see
-   * InitVecs, io.c) -- COMM_SELF was only ever correct for the old serial-
-   * only path, and combined with this function being called rank-0-only,
-   * silently checkpointed just rank 0's local slice instead of the full
-   * distributed vector (caught via a restart producing SNES Function norm
-   * ~1e6 instead of the expected O(1) -- x_bp read back was garbage on
-   * every rank but 0). COMM_WORLD + calling this collectively on every
-   * rank (see the call site in main.c) is the standard, correct PETSc
-   * idiom for parallel Vec checkpointing -- PETSc handles the gather
-   * internally, no manual VecScatter needed. */
-  snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
-  VecView(fem->x, viewer);
-  PetscViewerDestroy(&viewer);
+  if (ctx->initialized) {
+    /* Parallel DMPlex path. fem->x/xn/xd/xdd are laid out by the CURRENT
+     * run's partition (ctx->ibm_to_local_idx), which DMPlexDistribute
+     * reassigns from scratch every time --np changes. A plain VecView dumps
+     * data in that partition-dependent global-DOF order, so a checkpoint
+     * written at one --np silently loads back with values attached to the
+     * wrong mesh vertices when read at a different --np (VecLoad has no
+     * notion of "vertex identity", only flat global-index position) --
+     * SNES then sees a physically nonsensical state and diverges from step
+     * one (observed: SNES Function norm ~1e6 instead of the expected O(1)
+     * when restarting a 64-rank checkpoint with 128 ranks).
+     *
+     * Fix: gather into a rank-0 buffer ordered by the ORIGINAL ibm vertex
+     * index (ctx->ibm_to_local_idx is keyed by that index already). That
+     * ordering comes from the mesh file and never changes with --np, so the
+     * checkpoint becomes restartable at any process count. */
+    PetscMPIInt  rank;
+    PetscInt     nTotal = ibm->n_v + ibm->n_ghosts;
+    PetscInt     nDof   = dof * nTotal;
+    PetscReal   *local_buf, *global_buf = NULL;
+    Vec          vecs[4] = { fem->x, fem->xn, fem->xd, fem->xdd };
+    const char  *tag[4]  = { "x", "xn", "xd", "xdd" };
 
-  snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
-  VecView(fem->xn, viewer);
-  PetscViewerDestroy(&viewer);
+    MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
+    PetscCalloc1(nDof, &local_buf);
+    if (rank == 0) PetscMalloc1(nDof, &global_buf);
 
-  snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
-  VecView(fem->xd, viewer);
-  PetscViewerDestroy(&viewer);
+    for (int k = 0; k < 4; ++k) {
+      PetscReal *xx;
+      PetscMemzero(local_buf, nDof*sizeof(PetscReal));
+      VecGetArray(vecs[k], &xx);
+      for (PetscInt v = 0; v < nTotal; ++v) {
+        PetscInt li = ctx->ibm_to_local_idx[v];
+        if (li >= 0)
+          for (PetscInt d = 0; d < dof; ++d)
+            local_buf[v*dof + d] = xx[li*dof + d];
+      }
+      VecRestoreArray(vecs[k], &xx);
 
-  snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
-  VecView(fem->xdd, viewer);
-  PetscViewerDestroy(&viewer);
+      MPI_Reduce(local_buf, global_buf, nDof, MPIU_REAL, MPI_SUM, 0, PETSC_COMM_WORLD);
+
+      if (rank == 0) {
+        snprintf(filen, sizeof(filen), "%s/%s%1.1d_%5.5d.dat", dir, tag[k], ibi, ti);
+        PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_WRITE, &viewer);
+        PetscViewerBinaryGetDescriptor(viewer, &fd);
+        PetscBinaryWrite(fd, global_buf, nDof, PETSC_REAL);
+        PetscViewerDestroy(&viewer);
+      }
+    }
+
+    PetscFree(local_buf);
+    if (rank == 0) PetscFree(global_buf);
+  } else {
+    /* Serial / non-DMPlex path: fem->x etc. are COMM_SELF Vecs, already
+     * np-invariant by construction -- the original direct VecView is fine
+     * here. */
+    snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
+    VecView(fem->x, viewer);
+    PetscViewerDestroy(&viewer);
+
+    snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
+    VecView(fem->xn, viewer);
+    PetscViewerDestroy(&viewer);
+
+    snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
+    VecView(fem->xd, viewer);
+    PetscViewerDestroy(&viewer);
+
+    snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_WRITE, &viewer);
+    VecView(fem->xdd, viewer);
+    PetscViewerDestroy(&viewer);
+  }
 
   if (contact) {
     snprintf(filen, sizeof(filen), "%s/fcnt%1.1d_%5.5d.dat", dir, ibi, ti);
@@ -1463,10 +1512,11 @@ PetscErrorCode InverseIn(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir
 //-----------------------------------------------------------------------------------------------------------------------------------
 PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 
-  IBMNodes     *ibm=fem->ibm;
-  PetscViewer  viewer;
-  char         filen[256];
-  PetscInt     fd;
+  IBMNodes      *ibm=fem->ibm;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscViewer   viewer = NULL;
+  char          filen[256];
+  PetscInt      fd;
 
   PetscMPIInt rank;
   MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
@@ -1474,26 +1524,89 @@ PetscErrorCode LocationIn(FE *fem, PetscInt ti, PetscInt ibi, const char *out_di
   // Use current directory if out_dir is NULL or empty
   const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
 
-  /* COMM_WORLD, not COMM_SELF -- see the matching note in LocationOut. This
-   * function was already called unconditionally by every rank, but with a
-   * COMM_SELF viewer each rank independently tried to load the FULL Vec
-   * from a file that (via the LocationOut bug) only ever held rank 0's
-   * local slice -- garbage on every other rank's owned DOFs. */
-  snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
-  VecLoad(fem->x, viewer);
+  if (ctx->initialized && legacy_restart_in) {
+    /* TEMPORARY one-shot path: this checkpoint predates the ibm-order gather
+     * below (written by plain COMM_WORLD VecView, partition-order for the
+     * --np it was written with -- only valid to load back at that exact
+     * --np). Use this once, at that same --np, to pull it into fem->x/xn/
+     * xd/xdd; the caller then re-saves via the (already-fixed) LocationOut
+     * below to convert it to the --np-invariant ibm-order format. */
+    snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->x, viewer);
+    PetscViewerDestroy(&viewer);
 
-  snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
-  VecLoad(fem->xn,viewer);
+    snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->xn, viewer);
+    PetscViewerDestroy(&viewer);
 
-  snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
-  VecLoad(fem->xd,viewer);
+    snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->xd, viewer);
+    PetscViewerDestroy(&viewer);
 
-  snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
-  PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
-  VecLoad(fem->xdd,viewer);
+    snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->xdd, viewer);
+    PetscViewerDestroy(&viewer);
+  } else if (ctx->initialized) {
+    /* Mirror of the ibm-order gather in LocationOut: read the flat,
+     * partition-invariant buffer on rank 0, broadcast it to everyone, then
+     * each rank pulls out only the ibm vertices it owns under the CURRENT
+     * --np's partition (ctx->ibm_to_local_idx / ctx->ownerRank are rebuilt
+     * for this run's --np by FEM_DMPlexGeomSetup before LocationIn is ever
+     * called -- see the call order in main.c). This makes restart correct
+     * across any change in process count between the run that wrote the
+     * checkpoint and this one. */
+    PetscInt    nTotal = ibm->n_v + ibm->n_ghosts;
+    PetscInt    nDof   = dof * nTotal;
+    PetscReal  *global_buf;
+    Vec         vecs[4] = { fem->x, fem->xn, fem->xd, fem->xdd };
+    const char *tag[4]  = { "x", "xn", "xd", "xdd" };
+
+    PetscMalloc1(nDof, &global_buf);
+
+    for (int k = 0; k < 4; ++k) {
+      if (rank == 0) {
+        snprintf(filen, sizeof(filen), "%s/%s%1.1d_%5.5d.dat", dir, tag[k], ibi, ti);
+        PetscViewerBinaryOpen(PETSC_COMM_SELF, filen, FILE_MODE_READ, &viewer);
+        PetscViewerBinaryGetDescriptor(viewer, &fd);
+        PetscBinaryRead(fd, global_buf, nDof, PETSC_NULL, PETSC_REAL);
+        PetscViewerDestroy(&viewer);
+      }
+      MPI_Bcast(global_buf, nDof, MPIU_REAL, 0, PETSC_COMM_WORLD);
+
+      PetscReal *xx;
+      VecGetArray(vecs[k], &xx);
+      for (PetscInt v = 0; v < nTotal; ++v) {
+        PetscInt li = ctx->ibm_to_local_idx[v];
+        if (li >= 0)
+          for (PetscInt d = 0; d < dof; ++d)
+            xx[li*dof + d] = global_buf[v*dof + d];
+      }
+      VecRestoreArray(vecs[k], &xx);
+    }
+
+    PetscFree(global_buf);
+  } else {
+    /* Serial / non-DMPlex path: unchanged, already np-invariant. */
+    snprintf(filen, sizeof(filen), "%s/x%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->x, viewer);
+
+    snprintf(filen, sizeof(filen), "%s/xn%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->xn,viewer);
+
+    snprintf(filen, sizeof(filen), "%s/xd%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->xd,viewer);
+
+    snprintf(filen, sizeof(filen), "%s/xdd%1.1d_%5.5d.dat", dir, ibi, ti);
+    PetscViewerBinaryOpen(PETSC_COMM_WORLD, filen, FILE_MODE_READ, &viewer);
+    VecLoad(fem->xdd,viewer);
+  }
 
   if (contact) {
     snprintf(filen, sizeof(filen), "%s/fcnt%1.1d_%5.5d.dat", dir, ibi, ti);
