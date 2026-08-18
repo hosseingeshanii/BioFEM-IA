@@ -147,15 +147,25 @@ PetscErrorCode EdgeConstPressure(PetscInt edge_n, PetscReal P, PetscInt dir, FE 
 //------------------------------------------------------------------------------------------------------------ 
 PetscErrorCode EdgeFix(PetscInt edge_n, FE *fem) {
 
-  IBMNodes   *ibm=fem->ibm;
-  PetscReal  *FFint, *FFext, *FFdyn, *xx, *xdd;
-  PetscInt   start=0, end=0, edge, nbc, nb;
+  IBMNodes      *ibm=fem->ibm;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscReal     *FFint, *FFext, *FFdyn, *xx, *xdd;
+  PetscInt      start=0, end=0, edge, nbc, nb, li;
 
   for (edge=0; edge<edge_n+1; edge++) {
     end += ibm->n_bnodes[edge];
   }
   start = end - ibm->n_bnodes[edge_n];
-  
+
+  /* fem->x/xn/xd/xdd/Fint/Fext/Fdyn are parallel Vecs in the DMPlex path
+   * (VecCreateMPI) -- VecGetArray only returns THIS rank's local slice, so
+   * indexing it by the raw ibm node number nb (as this function always did)
+   * reads/writes out of bounds on any rank whose local slice doesn't start
+   * at global dof 0, causing a SEGV. ibm->x_bp/y_bp/z_bp/x_bp0/contact are
+   * plain C arrays replicated on every rank (see GlobalGhost, FInternalAct
+   * etc., which already index them the same way in the parallel path), so
+   * those stay indexed by nb directly -- only the VecGetArray'd arrays need
+   * translating through ctx->ibm_to_local_idx, same as LocationIn/Out. */
   VecGetArray(fem->Fint, &FFint);
   VecGetArray(fem->Fext, &FFext);
   VecGetArray(fem->Fdyn, &FFdyn);
@@ -168,56 +178,59 @@ PetscErrorCode EdgeFix(PetscInt edge_n, FE *fem) {
     ibm->x_bp[nb] = ibm->x_bp0[nb]; //for kinematic contact
     ibm->y_bp[nb] = ibm->y_bp0[nb];
     ibm->z_bp[nb] = ibm->z_bp0[nb];
-    xx[nb*dof] = ibm->x_bp0[nb];
-    xx[nb*dof+1] = ibm->y_bp0[nb];
-    xx[nb*dof+2] = ibm->z_bp0[nb];
     ibm->contact[nb] = 0;
-    xdd[nb*dof] = 0.;
-    xdd[nb*dof+1] = 0.;
-    xdd[nb*dof+2] = 0.;
 
-    FFint[nb*dof] =0.0;
-    FFint[nb*dof+1] =0.0;
-    FFint[nb*dof+2] =0.0;
-    
-    FFext[nb*dof] =0.0;
-    FFext[nb*dof+1] =0.0;
-    FFext[nb*dof+2] =0.0;
-    
-    FFdyn[nb*dof] =0.0;
-    FFdyn[nb*dof+1] =0.0;
-    FFdyn[nb*dof+2] =0.0;
+    li = ctx->initialized ? ctx->ibm_to_local_idx[nb] : nb;
+    if (li < 0) continue;   /* not owned by this rank */
+
+    xx[li*dof] = ibm->x_bp0[nb];
+    xx[li*dof+1] = ibm->y_bp0[nb];
+    xx[li*dof+2] = ibm->z_bp0[nb];
+    xdd[li*dof] = 0.;
+    xdd[li*dof+1] = 0.;
+    xdd[li*dof+2] = 0.;
+
+    FFint[li*dof] =0.0;
+    FFint[li*dof+1] =0.0;
+    FFint[li*dof+2] =0.0;
+
+    FFext[li*dof] =0.0;
+    FFext[li*dof+1] =0.0;
+    FFext[li*dof+2] =0.0;
+
+    FFdyn[li*dof] =0.0;
+    FFdyn[li*dof+1] =0.0;
+    FFdyn[li*dof+2] =0.0;
 
   }
 
-  /* for (nb=ibm->n_v; nb<ibm->n_v+ibm->n_ghosts; nb++) { //fix all ghost nodes */
-  /*   FFint[nb*dof] =0.0; */
-  /*   FFint[nb*dof+1] =0.0; */
-  /*   FFint[nb*dof+2] =0.0; */
-    
-  /*   FFext[nb*dof] =0.0; */
-  /*   FFext[nb*dof+1] =0.0; */
-  /*   FFext[nb*dof+2] =0.0; */
-    
-  /*   FFdyn[nb*dof] =0.0; */
-  /*   FFdyn[nb*dof+1] =0.0; */
-  /*   FFdyn[nb*dof+2] =0.0; */
-    
-  /* } */
+  /* This edge's own ghost nodes. GlobalGhostInit packs ghosts in the SAME
+   * per-edge contiguous blocks as bnodes -- one ghost per boundary node,
+   * ring order, no -1 (closed loop: n_local nodes -> n_local ghosts, see
+   * GlobalGhostInit's comment in bending.c). So the ghost block for this
+   * edge is exactly [n_v+start, n_v+end), the same start/end already
+   * computed above for the boundary-node loop.
+   *
+   * Previously read ibm->n_bnodes[edge_n-1], which both underflowed
+   * (out-of-bounds read) for edge_n==0 and, for edge_n>=1, zeroed a range
+   * that didn't correspond to any single edge's actual ghost block under
+   * the current closed-loop ghost layout. */
+  for (nb=ibm->n_v+start; nb<ibm->n_v+end; nb++) {
+    li = ctx->initialized ? ctx->ibm_to_local_idx[nb] : nb;
+    if (li < 0) continue;
 
-  for (nb=ibm->n_v+ibm->n_bnodes[edge_n-1]-1; nb<ibm->n_v+ibm->n_ghosts; nb++) { //fix ghost nodes of BHV Note:number of ghost nodes are one shorter than boundary nodes on edges
-    FFint[nb*dof] = 0.0;
-    FFint[nb*dof+1] = 0.0;
-    FFint[nb*dof+2] = 0.0;
-    
-    FFext[nb*dof] = 0.0;
-    FFext[nb*dof+1] = 0.0;
-    FFext[nb*dof+2] = 0.0;
-    
-    FFdyn[nb*dof] = 0.0;
-    FFdyn[nb*dof+1] = 0.0;
-    FFdyn[nb*dof+2] = 0.0;
-    
+    FFint[li*dof] = 0.0;
+    FFint[li*dof+1] = 0.0;
+    FFint[li*dof+2] = 0.0;
+
+    FFext[li*dof] = 0.0;
+    FFext[li*dof+1] = 0.0;
+    FFext[li*dof+2] = 0.0;
+
+    FFdyn[li*dof] = 0.0;
+    FFdyn[li*dof+1] = 0.0;
+    FFdyn[li*dof+2] = 0.0;
+
   }
 
   VecRestoreArray(fem->Fdyn, &FFdyn);
@@ -228,36 +241,42 @@ PetscErrorCode EdgeFix(PetscInt edge_n, FE *fem) {
   PetscFunctionReturn(0);
 }
 
-//------------------------------------------------------------------------------------------------------------ 
+//------------------------------------------------------------------------------------------------------------
 PetscErrorCode EdgeFree(PetscInt edge_n, FE *fem) {
 
-  IBMNodes *ibm=fem->ibm;
-  PetscReal *FFint, *FFext, *FFdyn;
-  PetscInt  nb;
-  
+  IBMNodes      *ibm=fem->ibm;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscReal     *FFint, *FFext, *FFdyn;
+  PetscInt      nb, li;
+
+  /* See EdgeFix for why this needs ibm_to_local_idx translation in the
+   * DMPlex-parallel path -- same VecGetArray-on-a-distributed-Vec issue. */
   VecGetArray(fem->Fint, &FFint);
   VecGetArray(fem->Fext, &FFext);
   VecGetArray(fem->Fdyn, &FFdyn);
 
-  for (nb=ibm->n_v; nb<ibm->n_v+ibm->n_ghosts; nb++) { //excludes ghost nodes from solver 
-    FFint[nb*dof] =0.0;
-    FFint[nb*dof+1] =0.0;
-    FFint[nb*dof+2] =0.0;
-    
-    FFext[nb*dof] =0.0;
-    FFext[nb*dof+1] =0.0;
-    FFext[nb*dof+2] =0.0;
-    
-    FFdyn[nb*dof] =0.0;
-    FFdyn[nb*dof+1] =0.0;
-    FFdyn[nb*dof+2] =0.0;
-    
+  for (nb=ibm->n_v; nb<ibm->n_v+ibm->n_ghosts; nb++) { //excludes ghost nodes from solver
+    li = ctx->initialized ? ctx->ibm_to_local_idx[nb] : nb;
+    if (li < 0) continue;
+
+    FFint[li*dof] =0.0;
+    FFint[li*dof+1] =0.0;
+    FFint[li*dof+2] =0.0;
+
+    FFext[li*dof] =0.0;
+    FFext[li*dof+1] =0.0;
+    FFext[li*dof+2] =0.0;
+
+    FFdyn[li*dof] =0.0;
+    FFdyn[li*dof+1] =0.0;
+    FFdyn[li*dof+2] =0.0;
+
   }
 
   VecRestoreArray(fem->Fdyn, &FFdyn);
   VecRestoreArray(fem->Fint, &FFint);
   VecRestoreArray(fem->Fext, &FFext);
- 
+
   return(0);
 }
 
