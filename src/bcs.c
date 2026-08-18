@@ -8,6 +8,7 @@ extern PetscInt         prescribed_force_field;
 extern PetscReal        dt;
 
 extern PetscErrorCode  EdgeFix(PetscInt edge_n, FE *fem);
+extern PetscErrorCode  EdgeFree(PetscInt edge_n, FE *fem);
 extern PetscErrorCode  NodeFix(PetscInt nb, FE *fem);
 extern PetscErrorCode  EdgeSym(PetscInt edge_n, PetscInt dir, FE *fem);
 extern PetscErrorCode  SurfaceConstNormalPressure(PetscReal P, FE *fem);
@@ -136,6 +137,36 @@ PetscErrorCode FExternal(FE *fem) {
       if (n_in2  >= 0) { NodeForce(n_in2,   twoP, 1, fem); }
       VecAssemblyBegin(fem->Fext);
       VecAssemblyEnd(fem->Fext);
+
+      /* Edge 0 = polar hole (smaller, open), edge 1 = equator (larger,
+       * open, carries the pinch loads) -- see hemisphere_mesh.py.
+       *
+       * Neither edge previously got any EdgeFree/EdgeFix call here, so
+       * ghost DOFs on both boundaries had no Fint/Fext/Fdyn zeroing at
+       * all: FDynamic's mass/damping assembly loops over n_elmt+2*n_ghosts
+       * (bending.c GlobalGhostInit's ghost/bridging triangles included),
+       * so ghost vertices *do* pick up a real nonzero Fdyn every step with
+       * nothing here to clear it -- they were behaving as free, unpinned
+       * extra unknowns instead of the passive geometry-only reflections
+       * GlobalGhost() intends, which is a plausible source of drift on
+       * top of any imperfect load self-equilibration.
+       *
+       * -hemi_pinch_fix_hole 1 additionally pins the hole edge outright
+       * (removes the 6 rigid-body modes the nominally self-equilibrating
+       * point loads leave free), on top of the ghost-force zeroing.
+       * Equator always stays free -- that's where the loads act and the
+       * benchmark's deformation is measured.
+       *
+       * EdgeFree(edge_n,...) ignores edge_n and zeroes every ghost's
+       * Fint/Fext/Fdyn unconditionally (see external.c), so one call
+       * handles both edges' ghosts regardless of fix_hole. EdgeFix(0,...)
+       * additionally pins edge 0's boundary-node positions/xdd and
+       * re-zeroes its own (now correctly edge-scoped) ghost block --
+       * redundant with EdgeFree there, but that's harmless. */
+      PetscBool fix_hole = PETSC_FALSE;
+      PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-hemi_pinch_fix_hole", &fix_hole, PETSC_NULL);
+      EdgeFree(1, fem);
+      if (fix_hole) { EdgeFix(0, fem); }
     }
   }
 
