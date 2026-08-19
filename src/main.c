@@ -136,6 +136,7 @@ extern PetscErrorCode FungUniJacobian(PetscInt ibi, FE* fem, PetscReal epsilon);
 extern PetscErrorCode IrrVer(IBMNodes *ibm);
 extern PetscErrorCode Patch(IBMNodes *ibm);
 extern PetscErrorCode GlobalGhostInit(IBMNodes *ibm);
+extern PetscErrorCode EdgeFree(PetscInt edge_n, FE *fem);
 extern PetscErrorCode GlobalGhost(IBMNodes *ibm);
 
 
@@ -990,6 +991,18 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
    * -lv_fix_base_axial 1, independent of -lv_fix_base. z is direction 2. */
   if (lv_fix_base_axial && lv_geom_unstructured && ibm->n_bnodes[0] > 0) {
     ierr = EdgeDirectionalFix(0, 2, fem, R); CHKERRQ(ierr);
+  }
+  /* --- Base-rim explicitly free (neither clamp above opted in): zero the
+   * base ring's ghost Fint/Fext/Fdyn via EdgeFree, mirroring the pattern
+   * used for the hemisphere pinch test's free edges. FEM_DMPlexGeomSyncGhostDOFs
+   * below already forces R to exactly zero at every ghost row
+   * unconditionally regardless of this call, so this is belt-and-suspenders
+   * rather than load-bearing -- kept for explicitness/symmetry with the two
+   * fixed-BC branches above (so "free" is an explicit choice in the code,
+   * not just the absence of a clamp), and in case Fint/Fext/Fdyn's
+   * individual ghost values are ever read before R's final ghost-zeroing. */
+  if (!lv_fix_base && !lv_fix_base_axial && lv_geom_unstructured && ibm->n_bnodes[0] > 0) {
+    ierr = EdgeFree(0, fem); CHKERRQ(ierr);
   }
   /* Ghost/auxiliary node DOFs (indices [n_v, n_v+n_ghosts)): zero R there
    * so SNES never treats them as real unknowns (their position, already
