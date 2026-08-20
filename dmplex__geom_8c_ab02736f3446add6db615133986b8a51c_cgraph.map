@@ -1,0 +1,5 @@
+<map id="CreateDistributedDMPlex_" name="CreateDistributedDMPlex_">
+<area shape="rect" id="Node000001" title="Distribute the serial DMPlex and return per&#45;rank original&#45;index arrays." alt="" coords="5,5,200,31"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#a7888018139fb6d8231505d5c8d4abbf9" title="Construct a serial DMPlex from the IBMNodes connectivity on rank 0." alt="" coords="248,5,397,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="201,15,234,15,234,21,201,21"/>
+</map>

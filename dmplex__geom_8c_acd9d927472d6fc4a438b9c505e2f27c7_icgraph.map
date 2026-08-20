@@ -1,0 +1,9 @@
+<map id="FEM_DMPlexGeomDestroy" name="FEM_DMPlexGeomDestroy">
+<area shape="rect" id="Node000001" title="Free all memory owned by the DMPlex geometry context." alt="" coords="336,31,533,56"/>
+<area shape="rect" id="Node000002" href="$main_8c.html#a5708a379fc3617fea5407b19a4832fab" title=" " alt="" coords="123,5,273,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="322,34,273,29,274,23,323,29"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="108,55,288,80"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="323,57,288,61,288,56,322,52"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,5,60,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="109,21,60,21,60,15,109,15"/>
+</map>

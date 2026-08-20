@@ -1,0 +1,9 @@
+<map id="Free" name="Free">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,5,56,31"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#ade1ca2d21184dfd18064f53cc91192fa" title="Free all active&#45;strain data allocated in ActDataAllocate()." alt="" coords="104,5,229,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="56,15,90,15,90,21,56,21"/>
+<area shape="rect" id="Node000003" href="$active__strain_8c.html#aab13749d1d679119e5bef64c4d6855e1" title=" " alt="" coords="277,5,481,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="230,15,264,15,264,21,230,21"/>
+<area shape="rect" id="Node000004" href="$active__strain_8c.html#aec9298d5baa8b311cfc29be8cac191fa" title=" " alt="" coords="529,5,692,31"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="482,15,516,15,516,21,482,21"/>
+</map>
