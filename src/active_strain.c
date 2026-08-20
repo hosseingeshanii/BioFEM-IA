@@ -97,6 +97,9 @@ PetscErrorCode GetUserActParams(FE *fem){
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);
     PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-gamma_ramp_type",  &(fem->act_data.muscle_act_params.gamma_ramp_type), PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-gamma_T",          &(fem->act_data.muscle_act_params.gamma_T), PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-gamma_tau_up",     &(fem->act_data.muscle_act_params.gamma_tau_up), PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-gamma_tau_down",   &(fem->act_data.muscle_act_params.gamma_tau_down), PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-gamma_apd",        &(fem->act_data.muscle_act_params.gamma_apd), PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_gamma0", &manufactured_gamma0, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_T", &manufactured_T, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-bulk_modulus", &(fem->act_data.K), PETSC_NULL);
@@ -1123,6 +1126,27 @@ static PetscErrorCode PrintElemCC(FE *fem, PetscInt ec)
  *   gamma(t) = gamma_peak * sin^2(pi/2 * t / T)
  *   T = gamma_T if > 0, otherwise tisteps * dt.
  *   Reaches gamma_peak at t=T; no return path, no unloading bifurcation.
+ * gamma_ramp_type = 3: action-potential-like double-logistic pulse. Modeled
+ *   after the shape of a prescribed transmembrane potential v(t) (fast
+ *   depolarization upstroke, plateau, slower repolarization decay) run
+ *   through a saturating strain-activation map, in the spirit of Nobile,
+ *   Quarteroni & Ruiz-Baier (2012), Int. J. Numer. Meth. Biomed. Engng
+ *   28:52-71, eq. (2.8)-(2.10) -- gamma there is an active-STRAIN quantity
+ *   driven by v (and, in their richer variant, by an ODE in calcium), not
+ *   an active-stress tension, matching this solver's Fa = I - gamma(f⊗f)
+ *   formulation. Here v(t) itself is a simple prescribed pulse (no PDE),
+ *   giving a real contraction-then-relaxation cycle instead of the type 1/2
+ *   sin^2 ramps: sin^2 is symmetric about its peak by construction, whereas
+ *   a real cardiac twitch rises much faster than it relaxes.
+ *     phi_up(t)   = 1 / (1 + exp(-(t - 4*tau_up)   / tau_up))
+ *     phi_down(t) = 1 / (1 + exp( (t - (4*tau_up+APD)) / tau_down))
+ *     gamma(t) = gamma_peak * phi_up(t) * phi_down(t)
+ *   The 4*tau_up offset just keeps phi_up ~0 at t=0 (so activation doesn't
+ *   start already-partway-up); APD is measured from the upstroke's
+ *   inflection point. gamma_tau_up/gamma_tau_down/gamma_apd control shape;
+ *   gamma_T is reused as the cycle length only insofar as callers may want
+ *   to repeat this pulse periodically (not done automatically here -- one
+ *   pulse per run, matching how types 1/2 are one ramp per run too).
  */
 /* delay > 0 shifts the ramp's local clock backward -- element activates
  * "late" by that much simulated time, modeling a propagating depolarization
@@ -1132,8 +1156,18 @@ static PetscErrorCode PrintElemCC(FE *fem, PetscInt ec)
 static PetscReal GammaOfTimeDelayed(const MuscleActParams *p, PetscReal delay)
 {
     if (p->gamma_ramp_type == 0) return p->gamma;
-    PetscReal T = (p->gamma_T > 0.0) ? p->gamma_T : (PetscReal)tisteps * dt;
     PetscReal t = (PetscReal)ti * dt - delay;
+    if (p->gamma_ramp_type == 3) {
+        PetscReal tau_up   = (p->gamma_tau_up   > 0.0) ? p->gamma_tau_up   : 0.02;
+        PetscReal tau_down = (p->gamma_tau_down > 0.0) ? p->gamma_tau_down : 0.08;
+        PetscReal apd      = (p->gamma_apd      > 0.0) ? p->gamma_apd      : 0.30;
+        PetscReal t_up     = 4.0 * tau_up;
+        PetscReal t_down   = t_up + apd;
+        PetscReal phi_up   = 1.0 / (1.0 + PetscExpReal(-(t - t_up)   / tau_up));
+        PetscReal phi_down = 1.0 / (1.0 + PetscExpReal( (t - t_down) / tau_down));
+        return p->gamma * phi_up * phi_down;
+    }
+    PetscReal T = (p->gamma_T > 0.0) ? p->gamma_T : (PetscReal)tisteps * dt;
     if (t <= 0.0) return 0.0;
     if (p->gamma_ramp_type == 1) {
         PetscReal s = PetscSinReal(PETSC_PI * t / T);
