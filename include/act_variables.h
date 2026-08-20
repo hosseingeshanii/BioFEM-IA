@@ -79,8 +79,15 @@ typedef struct {
   PetscReal  gamma;           /**< Peak activation magnitude (used as constant when gamma_ramp_type=0). */
   PetscReal  a_1;             /**< Fiber-direction anisotropy parameter 1. */
   PetscReal  a_2;             /**< Fiber-direction anisotropy parameter 2. */
-  PetscInt   gamma_ramp_type; /**< 0=constant (default), 1=sin^2 full cycle, 2=half-sin^2 systole ramp. */
-  PetscReal  gamma_T;         /**< Ramp period [s]; 0 → use tisteps*dt automatically. */
+  PetscInt   gamma_ramp_type; /**< 0=constant, 1=sin^2 full cycle, 2=half-sin^2 systole ramp,
+                                   3=action-potential-like double-logistic pulse (contraction +
+                                   relaxation), see GammaOfTimeDelayed in active_strain.c. */
+  PetscReal  gamma_T;         /**< Ramp period [s]; 0 → use tisteps*dt automatically. Used by
+                                   types 1,2; for type 3 this is the cycle length (diastole start). */
+  PetscReal  gamma_tau_up;    /**< Type 3: rise (depolarization) time constant [s]. */
+  PetscReal  gamma_tau_down;  /**< Type 3: fall (repolarization) time constant [s]. */
+  PetscReal  gamma_apd;       /**< Type 3: action-potential duration -- time from the start of the
+                                   upstroke to the start of repolarization [s]. */
 } MuscleActParams;
 
 /** @brief Global active-strain data stored in FE context. */
