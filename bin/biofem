@@ -847,6 +847,218 @@ def _run_with_monitor(shell_cmd, run_dir, port, out_dir="output"):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+def _vtk_read_field(path, field_name):
+    """Parse a legacy-ASCII VTK file for a SCALARS or VECTORS block named
+    `field_name`, in either the POINT_DATA or CELL_DATA section.
+
+    Returns a list of floats (scalar field) or a list of (x, y, z) tuples
+    (vector field), or None if the field isn't present in this file.
+    Robust to whatever line-wrapping the writer used, since it just reads
+    `count` whitespace-separated tokens after the header line rather than
+    assuming one value/line.
+    """
+    with open(path) as f:
+        tokens_iter = _WhitespaceTokenizer(f)
+        count = None
+        while True:
+            line = tokens_iter.next_line()
+            if line is None:
+                return None
+            stripped = line.strip()
+            if stripped.startswith("POINT_DATA") or stripped.startswith("CELL_DATA"):
+                count = int(stripped.split()[1])
+                continue
+            if stripped.startswith("SCALARS "):
+                parts = stripped.split()
+                name = parts[1]
+                if name != field_name:
+                    continue
+                if count is None:
+                    return None
+                nxt = tokens_iter.next_line()
+                if nxt is None or not nxt.strip().startswith("LOOKUP_TABLE"):
+                    tokens_iter.pushback_line(nxt)
+                vals = tokens_iter.next_tokens(count)
+                return [float(v) for v in vals]
+            if stripped.startswith("VECTORS "):
+                parts = stripped.split()
+                name = parts[1]
+                if name != field_name:
+                    continue
+                if count is None:
+                    return None
+                vals = tokens_iter.next_tokens(count * 3)
+                fvals = [float(v) for v in vals]
+                return list(zip(fvals[0::3], fvals[1::3], fvals[2::3]))
+
+
+class _WhitespaceTokenizer:
+    """Line-oriented reader that can also pull a fixed number of
+    whitespace-separated tokens spanning multiple lines."""
+
+    def __init__(self, fh):
+        self._fh = fh
+        self._pending_line = None
+
+    def next_line(self):
+        if self._pending_line is not None:
+            l, self._pending_line = self._pending_line, None
+            return l
+        return self._fh.readline() or None
+
+    def pushback_line(self, line):
+        self._pending_line = line
+
+    def next_tokens(self, n):
+        out = []
+        while len(out) < n:
+            line = self.next_line()
+            if line is None:
+                break
+            out.extend(line.split())
+        return out[:n]
+
+
+def _field_reduce(values, component="mag"):
+    """Reduce a parsed field (list of floats, or list of (x,y,z) tuples) to
+    a single average value for one timestep."""
+    if not values:
+        return None
+    if isinstance(values[0], tuple):
+        if component == "mag":
+            reduced = [ (x*x + y*y + z*z) ** 0.5 for (x, y, z) in values ]
+        else:
+            idx = {"x": 0, "y": 1, "z": 2}[component]
+            reduced = [v[idx] for v in values]
+    else:
+        reduced = values
+    return sum(reduced) / len(reduced)
+
+
+def _get_dt(case_dir):
+    control = Path(case_dir) / "control.dat"
+    if not control.exists():
+        return None
+    for line in control.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line.startswith("-dt "):
+            try:
+                return float(line.split()[1])
+            except (IndexError, ValueError):
+                return None
+    return None
+
+
+def _vtk_series_for_prefix(case_dir, out_dir, prefix):
+    pattern = f"{prefix}00_*.vtk"
+    files = sorted(Path(case_dir, out_dir).glob(pattern))
+    series = []
+    for fp in files:
+        m = re.search(r"_(\d+)\.vtk$", fp.name)
+        if not m:
+            continue
+        series.append((int(m.group(1)), fp))
+    return series
+
+
+def cmd_postprocess(args):
+    import matplotlib
+    if args.show:
+        # Try an interactive backend so plt.show() actually opens a window;
+        # falls back to headless Agg (plot still saved, --show becomes a
+        # no-op with a warning) if none is usable, e.g. no DISPLAY on a
+        # compute node.
+        for backend in ("TkAgg", "Qt5Agg"):
+            try:
+                matplotlib.use(backend)
+                break
+            except Exception:
+                continue
+        else:
+            matplotlib.use("Agg")
+    else:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    field = args.field
+    component = args.component
+    dirs = args.dir
+    labels = args.label.split(",") if args.label else [Path(d).resolve().name for d in dirs]
+    if len(labels) != len(dirs):
+        print("error: --label count must match --dir count", file=sys.stderr)
+        sys.exit(1)
+
+    prefixes = ["surfaceghost", "surface"] if args.prefix == "auto" else [args.prefix]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    any_data = False
+
+    for case_dir, label in zip(dirs, labels):
+        dt = args.dt if args.dt is not None else _get_dt(case_dir)
+        if dt is None:
+            print(f"warning: could not determine dt for {case_dir} "
+                  f"(no -dt in control.dat, and --dt not given); skipping", file=sys.stderr)
+            continue
+
+        series = []
+        used_prefix = None
+        for prefix in prefixes:
+            candidate = _vtk_series_for_prefix(case_dir, args.out_dir, prefix)
+            if not candidate:
+                continue
+            # probe the first file for the field before committing to this prefix
+            probe = _vtk_read_field(candidate[0][1], field)
+            if probe is not None:
+                series = candidate
+                used_prefix = prefix
+                break
+        if not series:
+            print(f"warning: field '{field}' not found in any "
+                  f"{'/'.join(prefixes)}00_*.vtk under {case_dir}/{args.out_dir}; skipping",
+                  file=sys.stderr)
+            continue
+
+        ts, vals = [], []
+        for ti, fp in series:
+            parsed = _vtk_read_field(fp, field)
+            if parsed is None:
+                continue
+            reduced = _field_reduce(parsed, component)
+            if reduced is None:
+                continue
+            ts.append(ti * dt)
+            vals.append(reduced)
+
+        if not ts:
+            print(f"warning: no readable '{field}' values under {case_dir}", file=sys.stderr)
+            continue
+
+        ax.plot(ts, vals, marker=".", markersize=2, linewidth=1.2, label=f"{label} ({used_prefix})")
+        any_data = True
+
+    if not any_data:
+        print("error: no data plotted for any --dir", file=sys.stderr)
+        sys.exit(1)
+
+    comp_suffix = "" if component == "mag" else f" ({component})"
+    ax.set_xlabel("time [s]")
+    ax.set_ylabel(f"avg {field}{comp_suffix}")
+    ax.set_title(args.title or f"avg {field}{comp_suffix} vs time")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+
+    out_path = Path(args.out) if args.out else Path(f"postprocess_{field}.png")
+    fig.savefig(out_path, dpi=120)
+    print(f"[biofem] postprocess plot saved -> {out_path}")
+
+    if args.show:
+        try:
+            plt.show()
+        except Exception as e:
+            print(f"[biofem] --show requested but could not open a display ({e})", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="biofem",
@@ -934,12 +1146,45 @@ Run:
     p_sw.add_argument("--dry-run", action="store_true",
                       help="generate jobfiles but do not submit")
 
+    # postprocess
+    p_pp = sub.add_parser(
+        "postprocess", help="plot avg node/element field vs time from VTK output",
+        description=(
+            "Read a node field (e.g. Fint, disp, Fext, Fdyn from surfaceghost*.vtk)\n"
+            "or element field (e.g. gamma, thickness from surface*.vtk) across all\n"
+            "timesteps, average it over all nodes/elements per timestep, and plot\n"
+            "against time. Pass --dir multiple times to overlay several cases on\n"
+            "the same plot for comparison."
+        ),
+    )
+    p_pp.add_argument("--dir", action="append", required=True,
+                       help="case directory containing control.dat and output_dir "
+                            "(repeat for multiple cases to compare)")
+    p_pp.add_argument("--field", required=True,
+                       help="VTK field name, e.g. gamma, disp, Fint, Fext, Fdyn")
+    p_pp.add_argument("--component", default="mag", choices=["mag", "x", "y", "z"],
+                       help="for vector fields, which component to average (default: mag)")
+    p_pp.add_argument("--out-dir", default="output_mu",
+                       help="output subdirectory within each --dir (default: output_mu)")
+    p_pp.add_argument("--prefix", default="auto", choices=["auto", "surface", "surfaceghost"],
+                       help="which VTK file family to read (default: auto-detect)")
+    p_pp.add_argument("--dt", type=float, default=None,
+                       help="override timestep (default: read -dt from each case's control.dat)")
+    p_pp.add_argument("--label", default="",
+                       help="comma-separated legend labels, one per --dir (default: directory names)")
+    p_pp.add_argument("--title", default="",
+                       help="plot title (default: auto-generated from field name)")
+    p_pp.add_argument("--out", default="",
+                       help="output PNG path (default: postprocess_<field>.png)")
+    p_pp.add_argument("--show", action="store_true",
+                       help="also open an interactive window (in addition to saving)")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
         sys.exit(0)
 
-    {"run": cmd_run, "sweep": cmd_sweep}[args.command](args)
+    {"run": cmd_run, "sweep": cmd_sweep, "postprocess": cmd_postprocess}[args.command](args)
 
 
 if __name__ == "__main__":
