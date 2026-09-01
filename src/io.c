@@ -1,5 +1,6 @@
 #include  "variables.h"
 #include  "active_strain.h"
+#include  "lv_geometry.h"
 #include  <petscvec.h>
 
 #include <stdio.h>
@@ -600,6 +601,23 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
   const char *dir = (out_dir && strlen(out_dir) > 0) ? out_dir : ".";
   // Create directory if it doesn't exist
   mkdir(dir, 0777);
+
+  /* LV cavity volume: only meaningful for LV meshes (both CreateLVMesh and
+   * CreateLVMeshUnstructured populate a single open base rim in bnodes[0]).
+   * No-op for other geometries (e.g. hemisphere pinch test), whose bnodes
+   * rings don't represent a closed-cavity boundary. Appended one line per
+   * Output() call, so it grows alongside the VTK series at no extra cost. */
+  if (lv_geom_process && ibm->n_bnodes[0] >= 3) {
+    PetscReal V;
+    LVCavityVolume(ibm, &V);
+    char volpath[128];
+    snprintf(volpath, sizeof(volpath), "%s/lv_volume%2.2d.dat", dir, (int)ibi);
+    FILE *vf = fopen(volpath, "a");
+    if (vf) {
+      fprintf(vf, "%d %.8f\n", (int)ti, V);
+      fclose(vf);
+    }
+  }
 
   // Construct the file path
   snprintf(filepath, sizeof(filepath), "%s/surface%2.2d_%5.5d.vtk", dir, ibi, ti);

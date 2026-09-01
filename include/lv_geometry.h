@@ -152,4 +152,15 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
  */
 PetscErrorCode WriteLVFiberVTK(IBMNodes *ibm, const char *filepath);
 
+/*
+ * LVCavityVolume — enclosed LV chamber volume of the current (deformed)
+ * surface mesh, computed by capping the open base rim (ibm->bnodes[0..
+ * n_bnodes[0]-1]) with a centroid fan and summing signed tet volumes over
+ * the closed wall+cap surface. Rank-0-only; requires ibm to hold the full
+ * gathered mesh (true in Output() after its parallel Vec gather). Works
+ * identically for CreateLVMesh and CreateLVMeshUnstructured output, since
+ * both populate bnodes[0]/n_bnodes[0] the same way.
+ */
+PetscErrorCode LVCavityVolume(IBMNodes *ibm, PetscReal *V);
+
 #endif /* LV_GEOMETRY_H */
