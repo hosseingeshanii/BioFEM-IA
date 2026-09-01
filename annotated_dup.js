@@ -1,0 +1,25 @@
+var annotated_dup =
+[
+    [ "ActData", "structActData.html", "structActData" ],
+    [ "Cmpnts", "structCmpnts.html", "structCmpnts" ],
+    [ "Cpt2D", "structCpt2D.html", "structCpt2D" ],
+    [ "CudaHostWorkspace_", "classCudaHostWorkspace__.html", "classCudaHostWorkspace__" ],
+    [ "DMPlexGeomCtx", "structDMPlexGeomCtx.html", "structDMPlexGeomCtx" ],
+    [ "DMPlexPatchExchange", "structDMPlexPatchExchange.html", "structDMPlexPatchExchange" ],
+    [ "DMPlexPatchLayout", "structDMPlexPatchLayout.html", "structDMPlexPatchLayout" ],
+    [ "Elem2DTens", "structElem2DTens.html", "structElem2DTens" ],
+    [ "Elem4DTens", "structElem4DTens.html", "structElem4DTens" ],
+    [ "ElemActData", "structElemActData.html", "structElemActData" ],
+    [ "ElemVec", "structElemVec.html", "structElemVec" ],
+    [ "FE", "structFE.html", "structFE" ],
+    [ "GeomSnapshotEntry", "structGeomSnapshotEntry.html", "structGeomSnapshotEntry" ],
+    [ "IBMNodes", "structIBMNodes.html", "structIBMNodes" ],
+    [ "KokkosCmpnts_", "structKokkosCmpnts__.html", "structKokkosCmpnts__" ],
+    [ "KokkosGeomWorkspace_", "structKokkosGeomWorkspace__.html", "structKokkosGeomWorkspace__" ],
+    [ "List", "structList.html", "structList" ],
+    [ "LVParams", "structLVParams.html", "structLVParams" ],
+    [ "MetricSnapshotEntry", "structMetricSnapshotEntry.html", "structMetricSnapshotEntry" ],
+    [ "MuscleActParams", "structMuscleActParams.html", "structMuscleActParams" ],
+    [ "node", "structnode.html", "structnode" ],
+    [ "SubdivGeomQP", "structSubdivGeomQP.html", "structSubdivGeomQP" ]
+];

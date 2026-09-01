@@ -1,0 +1,9 @@
+<map id="initialize_elasticity" name="initialize_elasticity">
+<area shape="rect" id="Node000001" title=" " alt="" coords="320,31,465,56"/>
+<area shape="rect" id="Node000002" href="$muscle__activation_8c.html#aad998374ae4f3ca2c8f14b4c4b2aaafd" title=" " alt="" coords="108,5,272,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="306,35,272,31,273,26,307,30"/>
+<area shape="rect" id="Node000003" href="$inverse_8c.html#a63c0a7ac76584f0dab82764698b5d878" title=" " alt="" coords="149,55,231,80"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="307,56,232,65,231,60,306,51"/>
+<area shape="rect" id="Node000004" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,55,60,80"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="135,70,60,70,60,65,135,65"/>
+</map>

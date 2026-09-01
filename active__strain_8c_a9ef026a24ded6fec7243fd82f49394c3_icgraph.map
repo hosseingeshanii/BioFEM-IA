@@ -1,0 +1,37 @@
+<map id="ElemUpdateGeomSubdivFromCoords_" name="ElemUpdateGeomSubdivFromCoords_">
+<area shape="rect" id="Node000001" title=" " alt="" coords="1255,98,1473,138"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#ac93e65e44aa9af3d11c2165016210d87" title="Update reference midsurface geometry cache for one element." alt="" coords="1013,80,1207,105"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="1241,108,1207,105,1207,100,1241,103"/>
+<area shape="rect" id="Node000010" href="$active__strain_8c.html#a04fa5da4f55d0663ad5ec7a3534de0af" title="Update current midsurface geometry cache for one element." alt="" coords="1017,129,1203,155"/>
+<area shape="poly" id="edge12_Node000001_Node000010" title=" " alt="" coords="1241,132,1203,136,1202,131,1241,127"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#aeca513213e67a07a712cc41e8c6412ea" title="One&#45;time DMPlex geometry setup." alt="" coords="777,5,960,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="1062,78,965,45,923,33,925,28,966,39,1064,73"/>
+<area shape="rect" id="Node000006" href="$cuda__processes_8c.html#a627a27228923fbc3e63f0f4e1c5aa765" title=" " alt="" coords="796,55,941,80"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="999,84,941,78,942,72,1000,78"/>
+<area shape="rect" id="Node000007" href="$kokkos__processes_8c.html#a3f18ca1bc94cfbc69753dccb70a43699" title=" " alt="" coords="789,104,948,129"/>
+<area shape="poly" id="edge7_Node000002_Node000007" title=" " alt="" coords="1000,106,949,111,948,106,999,101"/>
+<area shape="rect" id="Node000008" href="$dmplex__geom_8c.html#aa2b24de348fff4079de659ff63ba9b85" title="Synchronise remote coordinates and evaluate the geometry kernel for all local cells." alt="" coords="792,153,945,179"/>
+<area shape="poly" id="edge9_Node000002_Node000008" title=" " alt="" coords="1037,112,1014,119,966,143,926,156,925,151,964,138,1012,114,1036,107"/>
+<area shape="rect" id="Node000004" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,104,60,129"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="764,16,547,15,421,20,295,31,199,41,159,50,109,68,77,86,50,106,47,102,74,82,107,64,158,45,199,36,294,26,420,15,547,10,764,11"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="544,53,724,79"/>
+<area shape="poly" id="edge4_Node000003_Node000005" title=" " alt="" coords="793,36,697,56,696,51,792,31"/>
+<area shape="poly" id="edge6_Node000006_Node000004" title=" " alt="" coords="798,55,724,43,630,36,550,34,480,37,415,43,280,66,109,101,61,112,60,107,107,95,279,61,414,38,480,31,550,29,630,31,724,38,799,49"/>
+<area shape="poly" id="edge8_Node000007_Node000004" title=" " alt="" coords="776,119,60,119,60,114,776,114"/>
+<area shape="rect" id="Node000009" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="295,155,496,180"/>
+<area shape="poly" id="edge10_Node000008_Node000009" title=" " alt="" coords="778,169,496,170,496,164,778,164"/>
+<area shape="poly" id="edge11_Node000009_Node000004" title=" " alt="" coords="280,161,195,151,107,138,60,127,61,122,109,133,196,146,281,156"/>
+<area shape="poly" id="edge19_Node000010_Node000006" title=" " alt="" coords="1038,128,1012,119,988,106,964,94,929,83,930,77,966,89,991,102,1014,114,1040,123"/>
+<area shape="poly" id="edge20_Node000010_Node000007" title=" " alt="" coords="1003,134,948,128,948,122,1004,128"/>
+<area shape="poly" id="edge21_Node000010_Node000008" title=" " alt="" coords="1004,155,946,161,945,156,1003,150"/>
+<area shape="rect" id="Node000011" href="$dmplex__geom_8c.html#af7fb8fc68c27b224f0458d0c42911fe6" title="Per&#45;SNES&#45;iteration geometry update." alt="" coords="772,203,965,228"/>
+<area shape="poly" id="edge13_Node000010_Node000011" title=" " alt="" coords="1062,162,966,194,925,205,923,200,965,189,1061,157"/>
+<area shape="poly" id="edge18_Node000011_Node000005" title=" " alt="" coords="785,200,771,194,730,167,694,135,644,81,647,77,698,132,733,163,773,189,788,196"/>
+<area shape="rect" id="Node000012" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="569,205,699,231"/>
+<area shape="poly" id="edge14_Node000011_Node000012" title=" " alt="" coords="759,219,699,220,699,215,759,214"/>
+<area shape="rect" id="Node000013" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="345,205,446,231"/>
+<area shape="poly" id="edge15_Node000012_Node000013" title=" " alt="" coords="555,221,446,221,446,215,555,215"/>
+<area shape="rect" id="Node000014" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="108,205,247,231"/>
+<area shape="poly" id="edge16_Node000013_Node000014" title=" " alt="" coords="331,221,247,221,247,215,331,215"/>
+<area shape="poly" id="edge17_Node000014_Node000004" title=" " alt="" coords="130,202,106,188,71,159,44,132,47,128,75,155,110,184,133,197"/>
+</map>

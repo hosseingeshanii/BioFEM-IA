@@ -1,0 +1,14 @@
+<map id="BuildSerialDMPlex_" name="BuildSerialDMPlex_">
+<area shape="rect" id="Node000001" title="Construct a serial DMPlex from the IBMNodes connectivity on rank 0." alt="" coords="725,31,875,56"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#ab02736f3446add6db615133986b8a51c" title="Distribute the serial DMPlex and return per&#45;rank original&#45;index arrays." alt="" coords="483,31,677,56"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="712,46,678,46,678,41,712,41"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#aeca513213e67a07a712cc41e8c6412ea" title="One&#45;time DMPlex geometry setup." alt="" coords="243,55,425,80"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="469,57,426,61,425,56,469,51"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="233,5,435,31"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="469,35,435,31,435,26,469,29"/>
+<area shape="rect" id="Node000004" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="68,5,123,31"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="258,54,123,26,124,21,259,49"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="5,55,185,80"/>
+<area shape="poly" id="edge4_Node000003_Node000005" title=" " alt="" coords="229,70,186,70,186,65,229,65"/>
+<area shape="poly" id="edge6_Node000006_Node000004" title=" " alt="" coords="219,21,123,21,123,15,219,15"/>
+</map>

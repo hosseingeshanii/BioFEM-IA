@@ -1,0 +1,29 @@
+<map id="FEM_DMPlexGeomSetup" name="FEM_DMPlexGeomSetup">
+<area shape="rect" id="Node000001" title="One&#45;time setup of the distributed DMPlex geometry context." alt="" coords="5,145,188,170"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#a25a289b6847656028b83d98388767fc5" title="Build a global table mapping each original vertex index to its owning MPI rank." alt="" coords="261,5,451,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="110,143,162,100,197,76,235,55,252,48,254,53,237,60,200,80,166,104,113,147"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#a661af262a984dd056c4489c06984eac8" title="Build the DMPlexPatchExchange SF for cross&#45;rank coordinate fetching." alt="" coords="241,70,471,95"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="128,142,235,104,269,96,270,101,237,109,130,147"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#ab02736f3446add6db615133986b8a51c" title="Distribute the serial DMPlex and return per&#45;rank original&#45;index arrays." alt="" coords="259,119,453,145"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="188,146,245,140,245,145,188,151"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#aa4423d1b5775f32ebd063753442784a2" title="Copy Loop subdivision patch stencil data from IBMNodes to a local layout." alt="" coords="255,169,457,194"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="188,163,242,168,241,173,188,168"/>
+<area shape="rect" id="Node000007" href="$active__strain_8c.html#ac93e65e44aa9af3d11c2165016210d87" title="Update reference midsurface geometry cache for one element." alt="" coords="259,218,453,243"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="132,168,237,203,275,212,274,218,235,208,130,173"/>
+<area shape="rect" id="Node000014" href="$dmplex__geom_8c.html#a0e285c5152466ed0d16f3ccb265e2c99" title="Broadcast updated vertex coordinates from owning ranks to all ranks that need them." alt="" coords="236,267,476,293"/>
+<area shape="poly" id="edge13_Node000001_Node000014" title=" " alt="" coords="114,168,166,210,200,233,237,252,261,261,259,266,235,257,198,238,163,214,110,172"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#a7888018139fb6d8231505d5c8d4abbf9" title="Construct a serial DMPlex from the IBMNodes connectivity on rank 0." alt="" coords="559,119,708,145"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="453,129,545,129,545,135,453,135"/>
+<area shape="rect" id="Node000008" href="$active__strain_8c.html#a9ef026a24ded6fec7243fd82f49394c3" title=" " alt="" coords="524,211,743,251"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="453,228,510,228,510,233,453,233"/>
+<area shape="rect" id="Node000009" href="$math_8c.html#a7ef9263b0a3a10c2cd00bb4dc0059d70" title=" " alt="" coords="859,119,926,145"/>
+<area shape="poly" id="edge8_Node000008_Node000009" title=" " alt="" coords="670,208,725,180,790,153,845,138,846,143,792,159,728,185,672,213"/>
+<area shape="rect" id="Node000010" href="$math_8c.html#a9d60990d26296194c921d537ea26f3c7" title=" " alt="" coords="859,169,926,194"/>
+<area shape="poly" id="edge9_Node000008_Node000010" title=" " alt="" coords="739,208,845,187,846,193,740,213"/>
+<area shape="rect" id="Node000011" href="$math_8c.html#a870a70f4845a041458d9bdb0dd7aabd3" title=" " alt="" coords="867,218,918,243"/>
+<area shape="poly" id="edge10_Node000008_Node000011" title=" " alt="" coords="743,228,853,228,853,233,743,233"/>
+<area shape="rect" id="Node000012" href="$active__strain_8c.html#af8eb71852e7e9e1290f27656e66736fe" title=" " alt="" coords="791,268,995,308"/>
+<area shape="poly" id="edge11_Node000008_Node000012" title=" " alt="" coords="725,248,789,262,788,268,724,253"/>
+<area shape="rect" id="Node000013" href="$math_8c.html#ac616709995f2ae60c4308ffa328337d7" title=" " alt="" coords="865,333,920,358"/>
+<area shape="poly" id="edge12_Node000008_Node000013" title=" " alt="" coords="665,248,723,283,792,318,852,335,851,340,790,322,720,288,663,253"/>
+</map>
