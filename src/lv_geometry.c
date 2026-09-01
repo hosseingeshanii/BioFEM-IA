@@ -860,3 +860,62 @@ PetscErrorCode WriteLVFiberVTK(IBMNodes *ibm, const char *filepath)
   PetscPrintf(PETSC_COMM_WORLD, "LV fiber VTK written to: %s\n", filepath);
   return 0;
 }
+
+/*
+ * LVCavityVolume — enclosed LV chamber volume from the current (deformed)
+ * surface mesh. Rank-0-only; caller must ensure ibm holds the full gathered
+ * mesh (as it does in Output() after the parallel Vec gather).
+ *
+ * The wall mesh is open at the base (ibm->bnodes[0..n_bnodes[0]-1], already
+ * in ring order from mesh generation — see lv_geometry.h). To get a
+ * well-defined enclosed volume, the rim is capped every call with a fan of
+ * triangles from the rim centroid (rim moves as the mesh deforms, so this
+ * is NOT precomputed once). Cap triangle winding is fixed with the same
+ * star-shaped-about-origin rule used for the apex cap above: outward
+ * normal . triangle centroid > 0.
+ *
+ * Volume of the resulting closed (wall + cap) surface is exact via the
+ * divergence-theorem signed-tetrahedron-sum identity:
+ *   V = (1/6) sum_over_triangles  v0 . (v1 x v2)
+ * valid for any closed, consistently outward-oriented triangulated surface.
+ */
+PetscErrorCode LVCavityVolume(IBMNodes *ibm, PetscReal *V) {
+  PetscInt n_rim = ibm->n_bnodes[0];
+  if (n_rim < 3) SETERRQ1(PETSC_COMM_WORLD, PETSC_ERR_ARG_OUTOFRANGE,
+                           "LVCavityVolume: base rim too small (n_bnodes[0]=%d)", (int)n_rim);
+
+  PetscReal vol6 = 0.0;
+
+  /* Wall triangles. */
+  for (PetscInt e = 0; e < ibm->n_elmt; e++) {
+    struct Cmpnts v0 = {ibm->x_bp[ibm->nv1[e]], ibm->y_bp[ibm->nv1[e]], ibm->z_bp[ibm->nv1[e]]};
+    struct Cmpnts v1 = {ibm->x_bp[ibm->nv2[e]], ibm->y_bp[ibm->nv2[e]], ibm->z_bp[ibm->nv2[e]]};
+    struct Cmpnts v2 = {ibm->x_bp[ibm->nv3[e]], ibm->y_bp[ibm->nv3[e]], ibm->z_bp[ibm->nv3[e]]};
+    vol6 += DOT(v0, CROSS(v1, v2));
+  }
+
+  /* Base-rim cap: fan from the rim centroid, recomputed every call. */
+  struct Cmpnts centroid = {0.0, 0.0, 0.0};
+  for (PetscInt j = 0; j < n_rim; j++) {
+    PetscInt n = ibm->bnodes[j];
+    centroid.x += ibm->x_bp[n]; centroid.y += ibm->y_bp[n]; centroid.z += ibm->z_bp[n];
+  }
+  centroid = AMULT(1.0 / n_rim, centroid);
+
+  for (PetscInt j = 0; j < n_rim; j++) {
+    PetscInt na = ibm->bnodes[j];
+    PetscInt nb = ibm->bnodes[(j + 1) % n_rim];
+    struct Cmpnts pa = {ibm->x_bp[na], ibm->y_bp[na], ibm->z_bp[na]};
+    struct Cmpnts pb = {ibm->x_bp[nb], ibm->y_bp[nb], ibm->z_bp[nb]};
+
+    struct Cmpnts tri_centroid = AMULT(1.0 / 3.0, PLUS(PLUS(centroid, pa), pb));
+    struct Cmpnts normal       = CROSS(MINUS(pa, centroid), MINUS(pb, centroid));
+    if (DOT(normal, tri_centroid) < 0.0) {
+      struct Cmpnts tmp = pa; pa = pb; pb = tmp;
+    }
+    vol6 += DOT(centroid, CROSS(pa, pb));
+  }
+
+  *V = vol6 / 6.0;
+  return 0;
+}
