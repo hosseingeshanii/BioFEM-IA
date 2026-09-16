@@ -1,0 +1,61 @@
+<map id="InitMuscleActProblem" name="InitMuscleActProblem">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,341,169,367"/>
+<area shape="rect" id="Node000002" href="$muscle__activation_8c.html#a93dfc79086ad3d8e7eb4a92d7c64565d" title=" " alt="" coords="731,29,902,55"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="90,340,104,300,129,245,166,187,189,161,216,138,275,103,340,76,407,56,475,42,542,34,606,30,717,31,717,36,607,35,543,39,476,47,408,61,341,81,278,108,219,143,193,165,170,191,134,248,109,302,95,342"/>
+<area shape="rect" id="Node000007" href="$muscle__activation_8c.html#a98fd1f2632f8a9dafbcd477adbf354a0" title=" " alt="" coords="244,153,385,179"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="96,339,144,280,178,245,216,212,267,182,270,187,219,216,181,248,148,284,100,343"/>
+<area shape="rect" id="Node000014" href="$material_8c.html#af082115528079a9bd1bf12f348ad6e36" title=" " alt="" coords="242,392,387,417"/>
+<area shape="poly" id="edge16_Node000001_Node000014" title=" " alt="" coords="146,364,244,386,243,392,145,369"/>
+<area shape="rect" id="Node000015" href="$muscle__activation_8c.html#ad2627bc8964201d5d67458f310898629" title="Set 1D Gauss&#45;Legendre points and weights for active&#45;strain integration." alt="" coords="227,441,403,467"/>
+<area shape="poly" id="edge17_Node000001_Node000015" title=" " alt="" coords="108,365,157,396,218,428,239,435,237,440,216,432,154,401,105,369"/>
+<area shape="rect" id="Node000016" href="$muscle__activation_8c.html#a0dda352c79a3d0150ff314d8c63e0054" title="Updates all active Fa values for each element." alt="" coords="510,292,625,317"/>
+<area shape="poly" id="edge18_Node000001_Node000016" title=" " alt="" coords="169,339,217,333,496,307,496,312,218,338,170,344"/>
+<area shape="rect" id="Node000019" href="$muscle__activation_8c.html#ae2bd9d71724eb75b13615a6961268fba" title=" " alt="" coords="217,491,412,516"/>
+<area shape="poly" id="edge24_Node000001_Node000019" title=" " alt="" coords="100,365,147,420,181,451,219,477,232,483,230,488,216,482,177,455,143,423,96,369"/>
+<area shape="rect" id="Node000020" href="$muscle__activation_8c.html#a5000e7a797094fd0e94879c0c765d853" title="Update intermediate deformed basis vectors for all elements." alt="" coords="239,226,391,266"/>
+<area shape="poly" id="edge25_Node000001_Node000020" title=" " alt="" coords="109,339,216,282,247,269,249,274,218,287,112,344"/>
+<area shape="rect" id="Node000022" href="$muscle__activation_8c.html#a498ba76f9cfd7d543c79104b83b894ab" title="Update muscle activation parameters from command&#45;line options." alt="" coords="222,540,407,565"/>
+<area shape="poly" id="edge30_Node000001_Node000022" title=" " alt="" coords="97,366,113,399,140,442,175,488,219,527,229,532,226,537,216,531,171,492,135,445,108,401,92,368"/>
+<area shape="rect" id="Node000023" href="$muscle__activation_8c.html#ac332e445f79d1bdc2c6cd1e00514021e" title=" " alt="" coords="518,341,617,367"/>
+<area shape="poly" id="edge31_Node000001_Node000023" title=" " alt="" coords="170,351,504,351,504,357,170,357"/>
+<area shape="rect" id="Node000003" href="$math_8c.html#a9d60990d26296194c921d537ea26f3c7" title=" " alt="" coords="959,159,1025,184"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="892,53,912,64,930,82,940,100,947,119,961,140,967,147,963,151,957,144,943,122,935,102,926,85,909,68,889,57"/>
+<area shape="rect" id="Node000004" href="$math_8c.html#ae18926821a703a2c5b281bd890b7e6a0" title=" " alt="" coords="965,55,1019,80"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="903,52,951,59,950,64,902,57"/>
+<area shape="rect" id="Node000005" href="$math_8c.html#aa52f6593cf3e5453c8c6c94343d3fb37" title=" " alt="" coords="967,5,1017,31"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="902,28,953,21,953,26,903,33"/>
+<area shape="rect" id="Node000006" href="$math_8c.html#ac616709995f2ae60c4308ffa328337d7" title=" " alt="" coords="965,105,1019,131"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="880,52,912,64,965,95,962,99,910,68,878,57"/>
+<area shape="rect" id="Node000008" href="$muscle__activation_8c.html#a8de86acbd2114bdd44a3b7125602d0fe" title=" " alt="" coords="741,79,893,104"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="346,151,398,132,459,115,529,104,600,96,727,89,727,95,600,102,530,109,461,121,400,137,348,156"/>
+<area shape="rect" id="Node000010" href="$muscle__activation_8c.html#a6775d705d7242ce0339ce632abbfa4b4" title=" " alt="" coords="460,131,675,156"/>
+<area shape="poly" id="edge11_Node000007_Node000010" title=" " alt="" coords="385,157,446,152,446,157,386,162"/>
+<area shape="rect" id="Node000013" href="$muscle__activation_8c.html#a3fb102b3c4e265791888d9f87d4201c7" title=" " alt="" coords="510,180,625,205"/>
+<area shape="poly" id="edge15_Node000007_Node000013" title=" " alt="" coords="386,171,497,183,496,188,385,176"/>
+<area shape="poly" id="edge8_Node000008_Node000003" title=" " alt="" coords="881,102,912,113,941,129,967,148,964,152,938,134,910,118,879,107"/>
+<area shape="poly" id="edge10_Node000008_Node000006" title=" " alt="" coords="893,100,951,109,950,114,892,106"/>
+<area shape="rect" id="Node000009" href="$math_8c.html#a870a70f4845a041458d9bdb0dd7aabd3" title=" " alt="" coords="967,235,1017,260"/>
+<area shape="poly" id="edge9_Node000008_Node000009" title=" " alt="" coords="892,102,912,113,931,132,941,151,949,171,961,195,977,222,973,225,956,198,944,173,937,153,927,135,909,117,889,106"/>
+<area shape="poly" id="edge13_Node000010_Node000008" title=" " alt="" coords="628,128,741,104,742,109,630,133"/>
+<area shape="rect" id="Node000011" href="$muscle__activation_8c.html#a36f02749f1f9ff32ed836a7bab6c719d" title=" " alt="" coords="759,128,874,153"/>
+<area shape="poly" id="edge12_Node000010_Node000011" title=" " alt="" coords="675,140,746,139,746,144,675,145"/>
+<area shape="rect" id="Node000012" href="$bending_8c.html#a4a1f5973a55922b27065f712220d8152" title=" " alt="" coords="765,177,868,203"/>
+<area shape="poly" id="edge14_Node000010_Node000012" title=" " alt="" coords="637,153,753,175,752,181,636,159"/>
+<area shape="rect" id="Node000017" href="$muscle__activation_8c.html#a5bcab0a432f4401f206e0366535f005e" title="High&#45;Level Procedure for Muscle Activation Update." alt="" coords="723,292,911,317"/>
+<area shape="poly" id="edge19_Node000016_Node000017" title=" " alt="" coords="625,302,709,302,709,307,625,307"/>
+<area shape="poly" id="edge20_Node000017_Node000003" title=" " alt="" coords="884,290,909,277,940,242,973,194,978,197,944,245,912,281,887,294"/>
+<area shape="poly" id="edge23_Node000017_Node000006" title=" " alt="" coords="890,290,909,277,922,262,930,247,936,216,940,182,946,164,956,145,961,139,965,142,961,147,951,166,945,183,941,217,935,249,927,265,912,281,893,294"/>
+<area shape="poly" id="edge21_Node000017_Node000009" title=" " alt="" coords="868,289,910,277,953,261,955,266,912,282,870,294"/>
+<area shape="rect" id="Node000018" href="$math_8c.html#a3f73e4cd9eab76eeee084eabf2b98ec9" title=" " alt="" coords="969,292,1015,317"/>
+<area shape="poly" id="edge22_Node000017_Node000018" title=" " alt="" coords="911,302,955,302,955,307,911,307"/>
+<area shape="rect" id="Node000021" href="$muscle__activation_8c.html#a8bc18accda5d9acdf28357164879241e" title="Compute intermediate deformed covariant basis vectors." alt="" coords="735,227,899,267"/>
+<area shape="poly" id="edge26_Node000020_Node000021" title=" " alt="" coords="391,244,721,244,720,250,391,249"/>
+<area shape="poly" id="edge27_Node000021_Node000003" title=" " alt="" coords="880,225,910,213,957,189,959,193,912,218,882,230"/>
+<area shape="poly" id="edge29_Node000021_Node000006" title=" " alt="" coords="890,225,909,213,925,197,934,181,943,164,957,144,962,138,966,142,961,148,947,167,939,184,929,200,912,217,892,229"/>
+<area shape="poly" id="edge28_Node000021_Node000009" title=" " alt="" coords="899,245,953,245,953,250,899,250"/>
+<area shape="rect" id="Node000024" href="$muscle__activation_8c.html#a4c5d08ae67f23baed5c8a45656a64f84" title=" " alt="" coords="749,341,884,367"/>
+<area shape="poly" id="edge32_Node000023_Node000024" title=" " alt="" coords="617,351,736,351,736,357,617,357"/>
+<area shape="poly" id="edge33_Node000024_Node000018" title=" " alt="" coords="868,339,910,327,955,314,957,319,911,333,870,344"/>
+<area shape="rect" id="Node000025" href="$math_8c.html#af0179b195a2871aea7107cba32d42211" title=" " alt="" coords="959,341,1025,367"/>
+<area shape="poly" id="edge34_Node000024_Node000025" title=" " alt="" coords="884,351,945,351,945,357,884,357"/>
+</map>

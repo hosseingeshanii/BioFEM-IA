@@ -1,0 +1,20 @@
+<map id="ElemUpdateGeom0Subdiv" name="ElemUpdateGeom0Subdiv">
+<area shape="rect" id="Node000001" title="Update reference midsurface geometry cache for one element." alt="" coords="588,118,781,143"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#aeca513213e67a07a712cc41e8c6412ea" title="One&#45;time DMPlex geometry setup." alt="" coords="357,42,540,67"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="631,116,488,70,490,65,632,111"/>
+<area shape="rect" id="Node000005" href="$cuda__processes_8c.html#a627a27228923fbc3e63f0f4e1c5aa765" title=" " alt="" coords="136,92,281,118"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="574,127,281,112,281,106,574,122"/>
+<area shape="rect" id="Node000006" href="$kokkos__processes_8c.html#a3f18ca1bc94cfbc69753dccb70a43699" title=" " alt="" coords="369,143,528,168"/>
+<area shape="poly" id="edge6_Node000001_Node000006" title=" " alt="" coords="575,145,529,150,528,145,574,140"/>
+<area shape="rect" id="Node000007" href="$dmplex__geom_8c.html#aa2b24de348fff4079de659ff63ba9b85" title="Synchronise remote coordinates and evaluate the geometry kernel for all local cells." alt="" coords="372,192,525,218"/>
+<area shape="poly" id="edge8_Node000001_Node000007" title=" " alt="" coords="638,150,541,184,501,195,500,190,539,179,636,145"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,118,60,143"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="401,40,340,22,265,10,225,8,185,11,146,19,109,33,85,51,65,74,41,119,37,116,61,71,81,47,107,28,145,13,184,5,225,3,266,5,342,17,403,35"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="119,43,299,68"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="344,58,299,58,299,53,344,52"/>
+<area shape="poly" id="edge5_Node000005_Node000003" title=" " alt="" coords="123,120,61,129,60,124,122,115"/>
+<area shape="poly" id="edge7_Node000006_Node000003" title=" " alt="" coords="355,153,60,135,60,129,356,148"/>
+<area shape="rect" id="Node000008" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="108,194,309,219"/>
+<area shape="poly" id="edge9_Node000007_Node000008" title=" " alt="" coords="358,208,310,209,310,203,358,203"/>
+<area shape="poly" id="edge10_Node000008_Node000003" title=" " alt="" coords="147,192,107,177,52,146,54,141,109,172,149,187"/>
+</map>

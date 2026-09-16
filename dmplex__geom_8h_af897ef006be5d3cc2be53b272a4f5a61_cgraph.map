@@ -1,0 +1,43 @@
+<map id="RunDMPlexGeomSubdiv" name="RunDMPlexGeomSubdiv">
+<area shape="rect" id="Node000001" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="5,244,185,269"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#acd9d927472d6fc4a438b9c505e2f27c7" title="Free all memory owned by the DMPlex geometry context." alt="" coords="233,55,431,80"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="111,242,302,87,305,91,114,246"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#aeca513213e67a07a712cc41e8c6412ea" title="One&#45;time setup of the distributed DMPlex geometry context." alt="" coords="241,244,423,269"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="185,254,227,254,227,259,185,259"/>
+<area shape="rect" id="Node000019" href="$dmplex__geom_8c.html#af7fb8fc68c27b224f0458d0c42911fe6" title="Per&#45;Newton&#45;step geometry update." alt="" coords="235,367,429,392"/>
+<area shape="poly" id="edge18_Node000001_Node000019" title=" " alt="" coords="123,267,296,358,293,363,120,272"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#a7e60d333a6f6667a8a2f4fdb3651a3f4" title="Free all heap memory owned by a DMPlexPatchExchange and zero the struct." alt="" coords="485,5,713,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="401,52,515,31,516,36,402,57"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#a8661deca8813ac6ed08fa660b602fefe" title="Free all heap memory owned by a DMPlexPatchLayout and zero the struct." alt="" coords="494,55,703,80"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="431,65,480,65,480,70,431,70"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#a25a289b6847656028b83d98388767fc5" title="Build a global table mapping each original vertex index to its owning MPI rank." alt="" coords="503,105,694,145"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="347,242,402,199,439,175,478,154,496,147,498,152,480,159,441,180,405,203,350,246"/>
+<area shape="rect" id="Node000007" href="$dmplex__geom_8c.html#a661af262a984dd056c4489c06984eac8" title="Build the DMPlexPatchExchange SF for cross&#45;rank coordinate fetching." alt="" coords="483,169,714,195"/>
+<area shape="poly" id="edge6_Node000005_Node000007" title=" " alt="" coords="365,241,478,203,512,195,513,200,479,209,367,246"/>
+<area shape="rect" id="Node000008" href="$dmplex__geom_8c.html#ab02736f3446add6db615133986b8a51c" title="Distribute the serial DMPlex and return per&#45;rank original&#45;index arrays." alt="" coords="501,219,696,244"/>
+<area shape="poly" id="edge7_Node000005_Node000008" title=" " alt="" coords="423,245,487,239,488,245,424,251"/>
+<area shape="rect" id="Node000010" href="$dmplex__geom_8c.html#aa4423d1b5775f32ebd063753442784a2" title="Copy Loop subdivision patch stencil data from IBMNodes to a local layout." alt="" coords="498,268,699,293"/>
+<area shape="poly" id="edge9_Node000005_Node000010" title=" " alt="" coords="424,262,484,268,484,273,423,268"/>
+<area shape="rect" id="Node000011" href="$active__strain_8c.html#ac93e65e44aa9af3d11c2165016210d87" title="Update reference midsurface geometry cache for one element." alt="" coords="502,317,695,343"/>
+<area shape="poly" id="edge10_Node000005_Node000011" title=" " alt="" coords="369,267,479,302,519,312,518,317,478,307,367,272"/>
+<area shape="rect" id="Node000018" href="$dmplex__geom_8c.html#a0e285c5152466ed0d16f3ccb265e2c99" title="Broadcast updated vertex coordinates from owning ranks to all ranks that need them." alt="" coords="479,367,719,392"/>
+<area shape="poly" id="edge17_Node000005_Node000018" title=" " alt="" coords="350,267,405,309,441,332,480,352,505,361,504,366,478,356,439,337,402,314,347,272"/>
+<area shape="rect" id="Node000009" href="$dmplex__geom_8c.html#a7888018139fb6d8231505d5c8d4abbf9" title="Construct a serial DMPlex from the IBMNodes connectivity on rank 0." alt="" coords="801,219,951,244"/>
+<area shape="poly" id="edge8_Node000008_Node000009" title=" " alt="" coords="696,229,788,229,788,234,696,234"/>
+<area shape="rect" id="Node000012" href="$active__strain_8c.html#a9ef026a24ded6fec7243fd82f49394c3" title=" " alt="" coords="767,359,985,399"/>
+<area shape="poly" id="edge11_Node000011_Node000012" title=" " alt="" coords="671,340,753,355,753,360,670,345"/>
+<area shape="rect" id="Node000013" href="$math_8c.html#a7ef9263b0a3a10c2cd00bb4dc0059d70" title=" " alt="" coords="1102,268,1169,293"/>
+<area shape="poly" id="edge12_Node000012_Node000013" title=" " alt="" coords="912,357,968,329,1032,302,1088,287,1089,292,1034,307,970,334,915,362"/>
+<area shape="rect" id="Node000014" href="$math_8c.html#a9d60990d26296194c921d537ea26f3c7" title=" " alt="" coords="1102,317,1169,343"/>
+<area shape="poly" id="edge13_Node000012_Node000014" title=" " alt="" coords="981,357,1088,336,1089,341,982,362"/>
+<area shape="rect" id="Node000015" href="$math_8c.html#a870a70f4845a041458d9bdb0dd7aabd3" title=" " alt="" coords="1110,367,1161,392"/>
+<area shape="poly" id="edge14_Node000012_Node000015" title=" " alt="" coords="985,377,1096,377,1096,382,985,382"/>
+<area shape="rect" id="Node000016" href="$active__strain_8c.html#af8eb71852e7e9e1290f27656e66736fe" title=" " alt="" coords="1033,417,1237,457"/>
+<area shape="poly" id="edge15_Node000012_Node000016" title=" " alt="" coords="968,397,1032,411,1031,416,967,402"/>
+<area shape="rect" id="Node000017" href="$math_8c.html#ac616709995f2ae60c4308ffa328337d7" title=" " alt="" coords="1108,481,1163,507"/>
+<area shape="poly" id="edge16_Node000012_Node000017" title=" " alt="" coords="908,397,965,432,1034,466,1095,484,1093,489,1032,471,963,437,905,402"/>
+<area shape="poly" id="edge21_Node000019_Node000018" title=" " alt="" coords="429,377,465,377,465,382,429,382"/>
+<area shape="rect" id="Node000020" href="$active__strain_8c.html#a04fa5da4f55d0663ad5ec7a3534de0af" title="Update current midsurface geometry cache for one element." alt="" coords="506,416,691,441"/>
+<area shape="poly" id="edge19_Node000019_Node000020" title=" " alt="" coords="402,389,516,411,515,416,401,395"/>
+<area shape="poly" id="edge20_Node000020_Node000012" title=" " alt="" coords="670,413,753,399,753,404,671,419"/>
+</map>

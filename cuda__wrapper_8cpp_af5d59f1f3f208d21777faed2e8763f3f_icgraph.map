@@ -1,0 +1,20 @@
+<map id="InitCudaWorkspaceImpl" name="InitCudaWorkspaceImpl">
+<area shape="rect" id="Node000001" title=" " alt="" coords="757,107,933,132"/>
+<area shape="rect" id="Node000002" href="$cuda__wrapper_8cpp.html#af58a317c68baf828e294afef2d80de72" title=" " alt="" coords="563,107,709,132"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="743,122,710,122,710,117,743,117"/>
+<area shape="rect" id="Node000003" href="$cuda__wrapper_8cpp.html#a5b5d23de31ae3759d7867e98dd6ea9e9" title=" " alt="" coords="305,5,511,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="603,102,561,77,514,52,459,33,460,28,516,48,564,72,606,97"/>
+<area shape="rect" id="Node000004" href="$cuda__processes_8c.html#a627a27228923fbc3e63f0f4e1c5aa765" title=" " alt="" coords="108,107,253,132"/>
+<area shape="poly" id="edge8_Node000002_Node000004" title=" " alt="" coords="572,106,514,97,408,89,302,97,231,109,230,104,301,91,408,84,515,91,573,101"/>
+<area shape="rect" id="Node000006" href="$cuda__wrapper_8cpp.html#a483d07d861992ff5192a3dfd0bf632b4" title=" " alt="" coords="301,107,515,132"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="548,122,515,122,515,117,548,117"/>
+<area shape="rect" id="Node000007" href="$cuda__wrapper_8cpp.html#ab291e6a68fd618e7ab67e4a9d5cbf578" title=" " alt="" coords="306,156,510,181"/>
+<area shape="poly" id="edge6_Node000002_Node000007" title=" " alt="" coords="564,138,468,159,467,153,563,132"/>
+<area shape="rect" id="Node000008" href="$cuda__wrapper_8cpp.html#af0503da10b116484b9252c38eaa89a05" title=" " alt="" coords="306,205,510,231"/>
+<area shape="poly" id="edge9_Node000002_Node000008" title=" " alt="" coords="608,142,566,170,516,195,477,208,475,203,514,190,563,165,605,138"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="345,37,302,52,247,81,202,109,199,104,244,76,300,48,343,32"/>
+<area shape="rect" id="Node000005" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,107,60,132"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="94,122,60,122,60,117,94,117"/>
+<area shape="poly" id="edge7_Node000007_Node000004" title=" " alt="" coords="335,156,239,135,241,129,336,150"/>
+<area shape="poly" id="edge10_Node000008_Node000004" title=" " alt="" coords="326,204,300,195,242,165,197,134,200,130,245,160,302,190,328,199"/>
+</map>

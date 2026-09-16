@@ -1,0 +1,19 @@
+<map id="DET3x3" name="DET3x3">
+<area shape="rect" id="Node000001" title=" " alt="" coords="889,55,961,80"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#a4456f61d7effcb0451f1890e5bab63c6" title="Compute elastic second Piola&#45;Kirchhoff stress for one element." alt="" coords="701,5,823,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="876,55,804,33,806,28,877,50"/>
+<area shape="rect" id="Node000008" href="$active__strain_8c.html#af11cd9885b42c34a06fcbb8c5f4b21b1" title="Compute elastic tangent tensor for one element." alt="" coords="683,55,841,80"/>
+<area shape="poly" id="edge6_Node000001_Node000008" title=" " alt="" coords="876,70,842,70,842,65,876,65"/>
+<area shape="rect" id="Node000009" href="$active__strain_8c.html#a9e8e9e018293087ec6b0ce58ce922403" title="Update through&#45;thickness C33 contribution for one element." alt="" coords="708,104,816,129"/>
+<area shape="poly" id="edge8_Node000001_Node000009" title=" " alt="" coords="877,85,806,106,804,101,876,79"/>
+<area shape="rect" id="Node000003" href="$active__strain_8c.html#a3017cdcf59a9d394ac18948cec6e94cf" title="Solve local thickness equation (C33) for one element." alt="" coords="519,55,635,80"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="701,37,626,57,625,52,700,32"/>
+<area shape="rect" id="Node000004" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="341,55,471,80"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="505,70,471,70,471,65,505,65"/>
+<area shape="rect" id="Node000005" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="192,55,293,80"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="328,70,294,70,294,65,328,65"/>
+<area shape="rect" id="Node000006" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="5,55,144,80"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="178,70,145,70,145,65,178,65"/>
+<area shape="poly" id="edge7_Node000008_Node000003" title=" " alt="" coords="669,70,635,70,635,65,669,65"/>
+<area shape="poly" id="edge9_Node000009_Node000003" title=" " alt="" coords="700,103,625,83,626,78,701,98"/>
+</map>

@@ -1,0 +1,32 @@
+<map id="KokkosGeomWorkspace_" name="KokkosGeomWorkspace_">
+<area shape="rect" id="Node000001" title=" " alt="" coords="484,695,669,720"/>
+<area shape="rect" id="Node000002" href="$structFE.html" title=" " alt="" coords="484,607,523,632"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="524,641,568,692,564,696,520,644"/>
+<area shape="rect" id="Node000003" href="$structActData.html" title="Global active&#45;strain data stored in FE context." alt="" coords="202,519,277,544"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="288,546,393,580,485,609,483,614,392,585,286,551"/>
+<area shape="rect" id="Node000004" href="$structMuscleActParams.html" title="Active&#45;muscle model parameters." alt="" coords="5,431,143,456"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="82,469,88,482,97,493,121,508,148,518,202,527,201,532,147,523,119,513,94,497,84,485,77,471"/>
+<area shape="rect" id="Node000005" href="$structElemActData.html" title="Element&#45;level active&#45;strain tensors, stresses, and cached basis/geometry." alt="" coords="177,431,283,456"/>
+<area shape="poly" id="edge4_Node000003_Node000005" title=" " alt="" coords="235,470,241,518,235,518,230,470"/>
+<area shape="rect" id="Node000006" href="$structElem2DTens.html" title="Second&#45;order tensor in covariant and contravariant forms." alt="" coords="52,196,155,221"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="111,234,134,315,154,362,181,405,210,429,206,433,177,408,149,364,129,316,105,235"/>
+<area shape="rect" id="Node000007" href="$structElem4DTens.html" title="Fourth&#45;order tensor (for example, material tangent)." alt="" coords="179,196,281,221"/>
+<area shape="poly" id="edge6_Node000005_Node000007" title=" " alt="" coords="233,235,233,430,227,430,227,235"/>
+<area shape="rect" id="Node000008" href="$structElemVec.html" title="Vector in covariant and contravariant forms." alt="" coords="305,196,384,221"/>
+<area shape="poly" id="edge7_Node000005_Node000008" title=" " alt="" coords="340,235,311,315,290,362,264,408,244,432,240,429,260,405,285,360,306,313,335,234"/>
+<area shape="rect" id="Node000009" href="$structCmpnts.html" title=" " alt="" coords="434,5,506,31"/>
+<area shape="poly" id="edge8_Node000008_Node000009" title=" " alt="" coords="446,41,432,56,405,94,382,134,352,197,347,195,377,132,401,92,428,53,443,38"/>
+<area shape="rect" id="Node000010" href="$structSubdivGeomQP.html" title="Cached subdivision&#45;surface geometry quantities at one quadrature point." alt="" coords="409,196,531,221"/>
+<area shape="poly" id="edge10_Node000010_Node000009" title=" " alt="" coords="473,45,473,196,467,196,467,45"/>
+<area shape="rect" id="Node000014" href="$structIBMNodes.html" title=" " alt="" coords="567,519,655,544"/>
+<area shape="poly" id="edge15_Node000014_Node000009" title=" " alt="" coords="503,37,519,53,583,148,605,189,622,229,646,317,669,430,671,443,669,457,649,493,626,520,622,517,645,490,663,455,665,443,663,431,641,318,617,231,600,191,579,150,515,56,499,41"/>
+<area shape="poly" id="edge9_Node000005_Node000010" title=" " alt="" coords="465,235,451,273,428,320,397,368,357,409,327,422,284,434,283,429,325,417,354,404,393,365,424,318,446,271,460,233"/>
+<area shape="rect" id="Node000011" href="$structDMPlexGeomCtx.html" title="Persistent DMPlex geometry context stored in FE." alt="" coords="395,519,529,544"/>
+<area shape="poly" id="edge11_Node000002_Node000011" title=" " alt="" coords="461,557,466,582,475,594,486,605,483,609,471,598,461,584,456,558"/>
+<area shape="rect" id="Node000012" href="$structDMPlexPatchLayout.html" title="Per&#45;rank local copy of Loop subdivision patch stencil data." alt="" coords="308,431,459,456"/>
+<area shape="poly" id="edge12_Node000011_Node000012" title=" " alt="" coords="405,464,453,516,449,520,401,468"/>
+<area shape="rect" id="Node000013" href="$structDMPlexPatchExchange.html" title="MPI coordinate exchange for cross&#45;rank patch stencil nodes." alt="" coords="483,431,654,456"/>
+<area shape="poly" id="edge13_Node000011_Node000013" title=" " alt="" coords="545,467,478,520,475,516,542,463"/>
+<area shape="poly" id="edge16_Node000001_Node000014" title=" " alt="" coords="613,558,607,611,595,671,585,696,580,694,590,670,602,610,607,558"/>
+<area shape="poly" id="edge14_Node000002_Node000014" title=" " alt="" coords="586,554,565,570,518,609,515,605,562,566,583,550"/>
+</map>

@@ -1,0 +1,9 @@
+<map id="SetGaussianQuadrature" name="SetGaussianQuadrature">
+<area shape="rect" id="Node000001" title="Set 1D Gauss&#45;Legendre points and weights for active&#45;strain integration." alt="" coords="320,31,496,56"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#add9b2ea1963ddf3467e90047c8d5412b" title="Initialize active&#45;strain module (options, storage, and quadrature)." alt="" coords="112,5,268,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="306,34,268,30,269,24,307,29"/>
+<area shape="rect" id="Node000004" href="$muscle__activation_8c.html#aad998374ae4f3ca2c8f14b4c4b2aaafd" title=" " alt="" coords="108,55,272,80"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="307,57,272,61,272,56,306,52"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,5,60,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="98,21,60,21,60,15,98,15"/>
+</map>

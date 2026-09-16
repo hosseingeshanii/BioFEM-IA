@@ -1,0 +1,14 @@
+<map id="DMPlexPatchExchangeDestroy_" name="DMPlexPatchExchangeDestroy_">
+<area shape="rect" id="Node000001" title="Free all heap memory owned by a DMPlexPatchExchange and zero the struct." alt="" coords="585,80,813,105"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#acd9d927472d6fc4a438b9c505e2f27c7" title="Destroy the persistent DMPlex geometry context in fem&#45;&gt;geom_ctx." alt="" coords="338,55,535,80"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="571,83,535,80,536,74,572,78"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="336,104,537,129"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="572,107,538,110,537,105,571,102"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a5708a379fc3617fea5407b19a4832fab" title=" " alt="" coords="123,5,273,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="361,54,260,33,261,28,362,49"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="108,55,288,80"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="324,70,288,70,288,65,324,65"/>
+<area shape="rect" id="Node000004" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,56,60,81"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="134,37,109,45,61,61,59,56,107,39,133,32"/>
+<area shape="poly" id="edge6_Node000006_Node000004" title=" " alt="" coords="322,118,217,111,107,95,60,81,61,76,109,90,218,105,322,112"/>
+</map>
