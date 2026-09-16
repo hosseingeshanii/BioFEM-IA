@@ -1208,25 +1208,45 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
          val = N_phi >> 16, which overflows ibm->patch[] in Patch().
        - Ring-0 boundary nodes appear in 3 base elements → bcount = 6 → REGULAR. */
   PetscInt ec_limit = (ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
+
+  /* Precompute is_bnode[] once (O(sum_n_bnodes)) instead of re-scanning
+     ibm->bnodes for every vertex (was O(n_v * sum_n_bnodes)). */
+  PetscBool *is_bnode_arr;
+  PetscMalloc1(ibm->n_v, &is_bnode_arr);
+  for (nc=0; nc<ibm->n_v; nc++) is_bnode_arr[nc] = PETSC_FALSE;
+  for (i=0; i<ibm->sum_n_bnodes; i++) is_bnode_arr[ibm->bnodes[i]] = PETSC_TRUE;
+
+  /* Precompute a vertex -> incident-element CSR map over [0, ec_limit) so each
+     vertex's touching elements are a direct O(1) lookup instead of an
+     O(ec_limit) scan over every element (was O(n_v * ec_limit) total -- the
+     dominant cost of this function at large mesh sizes). Same CSR pattern
+     already verified correct/fast for Input() in io.c. */
+  PetscInt *vcount, *voffset, *vlist, *vfill;
+  PetscMalloc1(ibm->n_v, &vcount);
+  PetscMemzero(vcount, ibm->n_v*sizeof(PetscInt));
+  for (ec=0; ec<ec_limit; ec++) {
+    vcount[ibm->nv1[ec]]++; vcount[ibm->nv2[ec]]++; vcount[ibm->nv3[ec]]++;
+  }
+  PetscMalloc1(ibm->n_v+1, &voffset);
+  voffset[0] = 0;
+  for (nc=0; nc<ibm->n_v; nc++) voffset[nc+1] = voffset[nc] + vcount[nc];
+  PetscMalloc1(voffset[ibm->n_v], &vlist);
+  PetscMalloc1(ibm->n_v, &vfill);
+  for (nc=0; nc<ibm->n_v; nc++) vfill[nc] = voffset[nc];
+  for (ec=0; ec<ec_limit; ec++) {
+    vlist[vfill[ibm->nv1[ec]]++] = ec;
+    vlist[vfill[ibm->nv2[ec]]++] = ec;
+    vlist[vfill[ibm->nv3[ec]]++] = ec;
+  }
+
   for (nc=0; nc<ibm->n_v; nc++) {
     irr[nc] = 0;
-    count = 0;
     bcount = 0;
 
-    /* Determine whether this node is a boundary node */
-    PetscInt is_bnode = 0;
-    for (i=0; i<ibm->sum_n_bnodes; i++) {
-      if (nc==ibm->bnodes[i]) { is_bnode = 1; break; }
-    }
+    count = voffset[nc+1] - voffset[nc];
+    for (i=0; i<count; i++) elmt[i] = vlist[voffset[nc]+i];
 
-    for (ec=0; ec<ec_limit; ec++) {
-      if (nc==ibm->nv1[ec] || nc==ibm->nv2[ec] || nc==ibm->nv3[ec]) {
-	elmt[count] = ec;
-	count++;
-      }
-    }
-
-    if (is_bnode) {
+    if (is_bnode_arr[nc]) {
       bcount = count + 3;
     }
 
@@ -1248,17 +1268,32 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
       }
     }
   }
-  
+
+  PetscFree(is_bnode_arr);
+  PetscFree(vcount); PetscFree(voffset); PetscFree(vlist); PetscFree(vfill);
+
   for (ec=0; ec<ibm->n_elmt; ec++) { //detects which element vertex is irregular
-    for (nc=0; nc<ibm->n_v; nc++) {
-      if (irr[nc]==1) { 
-	if (nc==ibm->nv1[ec]) {ibm->irv[ec] = 1;}
-	if (nc==ibm->nv2[ec]) {ibm->irv[ec] = 2;}
-	if (nc==ibm->nv3[ec]) {ibm->irv[ec] = 3;}
+    /* O(1) direct lookup instead of scanning all n_v vertices (was
+       O(n_elmt * n_v)). Sorted by vertex index to reproduce the original's
+       exact tie-break behavior when an element has more than one irregular
+       corner: the original iterated nc ascending and let the last match
+       (largest vertex index) win. */
+    PetscInt cand[3] = {ibm->nv1[ec], ibm->nv2[ec], ibm->nv3[ec]};
+    PetscInt slot[3] = {1, 2, 3};
+    PetscInt ta, tb, tc, ts;
+    for (ta=0; ta<3; ta++) {
+      for (tb=ta+1; tb<3; tb++) {
+	if (cand[ta] > cand[tb]) {
+	  tc=cand[ta]; cand[ta]=cand[tb]; cand[tb]=tc;
+	  ts=slot[ta]; slot[ta]=slot[tb]; slot[tb]=ts;
+	}
       }
     }
+    for (ta=0; ta<3; ta++) {
+      if (irr[cand[ta]]==1) { ibm->irv[ec] = slot[ta]; }
+    }
   }
-  
+
   PetscFree(irr);
   PetscFree(elmt);
   PetscPrintf(PETSC_COMM_WORLD, "[IrrVer] done\n");
@@ -1712,6 +1747,17 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
       nv1 = ibm->bnodes[i_next];
       nv2 = ibm->bnodes[i];
 
+      /* nv3 is only assigned inside the catch==2 branch below; reset it to
+       * an explicit "not found" sentinel every iteration so a boundary edge
+       * with no matching element (e.g. cut off by the apex-ring ec_limit
+       * restriction above) can never fall through to reading ibm->x_bp[nv3]
+       * with an uninitialized/stale index -- that was reading whatever nv3
+       * happened to hold from a previous iteration (or uninitialized stack
+       * memory on the very first iteration), silently corrupting ghost
+       * coordinates and, in observed cases, segfaulting later in
+       * AreaNormal() when it dereferences a garbage node index that leaked
+       * through this way. */
+      nv3 = -1;
       for (ec=0; ec<ec_limit; ec++) {
       	catch = 0;
       	if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) {catch++;}
@@ -1725,6 +1771,17 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
       	    nv3 = ibm->nv3[ec];
       	  }
       	}
+      }
+      if (nv3 < 0) {
+      	/* No adjacent element found for this boundary edge. Fall back to
+      	 * nv1 rather than dereference garbage -- degrades to a
+      	 * zero-extrapolation ghost (x_bp[ghost] = x_bp[nv2]) for this one
+      	 * ghost node instead of crashing or corrupting memory. */
+      	PetscPrintf(PETSC_COMM_SELF,
+      	            "[GlobalGhostInit] WARNING: no adjacent element found for boundary edge "
+      	            "(nv1=%d, nv2=%d, edge_n=%d, local_i=%d); falling back to nv3=nv1.\n",
+      	            (int)nv1, (int)nv2, (int)edge_n, (int)local_i);
+      	nv3 = nv1;
       }
 
       ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
@@ -1787,6 +1844,11 @@ PetscErrorCode GlobalGhost(IBMNodes *ibm) {
       nv1 = ibm->bnodes[i_next];
       nv2 = ibm->bnodes[i];
 
+      /* Same uninitialized-nv3 hazard as GlobalGhostInit -- reset each
+       * iteration and fall back to nv1 rather than dereference garbage if
+       * no adjacent element is found (see GlobalGhostInit for the full
+       * explanation). */
+      nv3 = -1;
       for (ec=0; ec<ec_limit; ec++) {
       	catch = 0;
       	if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) {catch++;}
@@ -1799,7 +1861,14 @@ PetscErrorCode GlobalGhost(IBMNodes *ibm) {
       	  } else{
       	    nv3 = ibm->nv3[ec];
       	  }
-      	}	
+      	}
+      }
+      if (nv3 < 0) {
+      	PetscPrintf(PETSC_COMM_SELF,
+      	            "[GlobalGhost] WARNING: no adjacent element found for boundary edge "
+      	            "(nv1=%d, nv2=%d, edge_n=%d, local_i=%d); falling back to nv3=nv1.\n",
+      	            (int)nv1, (int)nv2, (int)edge_n, (int)local_i);
+      	nv3 = nv1;
       }
 
       ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
