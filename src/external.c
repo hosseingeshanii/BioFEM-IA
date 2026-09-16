@@ -989,6 +989,7 @@ PetscErrorCode GhostFix(PetscInt edge_n,FE *fem) {
   struct Cmpnts N,X1,X2,X3,x1,x2,x3,x4,x5,x6,a1,a2,a3,A1,A2,A3,e1,e2,e3,n1,n2,n3,h1,h2,h3;
   for (ec=0; ec<ibm->n_ghosts; ec++) { //Go through ghost nodes
     be=ibm->belmts[ec];
+    if (be < 0) continue; /* unfilled ghost slot (Ghost(): fewer single-boundary-side elements than n_ghosts) */
     n1e=ibm->nv1[be];n2e=ibm->nv2[be];n3e=ibm->nv3[be];
     
     //currentlocation
@@ -1049,6 +1050,7 @@ PetscErrorCode ModifyGhostFix(PetscInt edge_n,FE *fem) {
   
   for (ec=0; ec<ibm->n_ghosts; ec++) { //Go through ghost nodes
     be=ibm->belmts[ec];
+    if (be < 0) continue; /* unfilled ghost slot (Ghost(): fewer single-boundary-side elements than n_ghosts) */
     n1e=ibm->nv1[be];n2e=ibm->nv2[be];n3e=ibm->nv3[be];
 
     //currentlocation
@@ -1148,6 +1150,7 @@ PetscErrorCode GhostFree(PetscInt edge_n, FE *fem) {
   struct Cmpnts x1, x2, x3, x4, x5, x6, a1, a2, a3, e1, e2, e3, n1, n2, n3, h1, h2, h3, n;
   for (ec=0; ec<ibm->n_ghosts; ec++) { //Go through ghost nodes
     be=ibm->belmts[ec];
+    if (be < 0) continue; /* unfilled ghost slot (Ghost(): fewer single-boundary-side elements than n_ghosts) */
     n1e=ibm->nv1[be]; n2e=ibm->nv2[be]; n3e=ibm->nv3[be];
     
     //currentlocation
@@ -1215,6 +1218,7 @@ PetscErrorCode ModifyGhostFree(PetscInt edge_n, FE *fem) {
   VecGetArray(fem->FJ, &FFJ);
   for (ec=0; ec<ibm->n_ghosts; ec++) { //Go through ghost nodes
     be=ibm->belmts[ec];
+    if (be < 0) continue; /* unfilled ghost slot (Ghost(): fewer single-boundary-side elements than n_ghosts) */
     n1e=ibm->nv1[be]; n2e=ibm->nv2[be]; n3e=ibm->nv3[be];
 
     // currentlocation

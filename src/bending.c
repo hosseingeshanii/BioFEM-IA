@@ -817,30 +817,55 @@ PetscErrorCode Ghost(IBMNodes *ibm) {
 
   PetscInt  n4e, n5e, n6e, nv, side, II, ec, gc=0;
 
+  /* belmts/edgefrontnodes/edgefrontnodesI are allocated with n_ghosts slots
+     (InitGhost), but this loop only fills one slot per element that has
+     EXACTLY one unmatched (1000000) nv4/nv5/nv6 side -- elements with
+     side>1 (e.g. mesh corners) are skipped entirely (see the warning
+     below), so gc can legitimately end up below n_ghosts. Sentinel the
+     unfilled tail so it can't be read as a bogus element index downstream. */
+  for (ec=0; ec<ibm->n_ghosts; ec++) {
+    ibm->belmts[ec] = -1; ibm->edgefrontnodes[ec] = -1; ibm->edgefrontnodesI[ec] = -1;
+  }
+
   for (ec=0; ec<ibm->n_elmt; ec++) {
     n4e = ibm->nv4[ec];  n5e = ibm->nv5[ec];  n6e = ibm->nv6[ec];
-    
+
     side = 0;
     if(n4e==1000000) {II = 1;  nv = ibm->nv1[ec];  side += 1;}
     if(n5e==1000000) {II = 2;  nv = ibm->nv2[ec];  side += 1;}
     if(n6e==1000000) {II = 3;  nv = ibm->nv3[ec];  side += 1;}
-    
+
     if(side>1) {
       PetscPrintf(PETSC_COMM_SELF, "element %d has %d boundary sides\n", ec, side);
       PetscPrintf(PETSC_COMM_SELF, "increase serach criteria || check the mesh\n");
     }
-    
+
     if(side==1) {
-      ibm->belmts[gc] = ec;  ibm->edgefrontnodes[gc] = nv;  ibm->edgefrontnodesI[gc] = II;
-      gc += 1;
+      if (gc >= ibm->n_ghosts) {
+        PetscPrintf(PETSC_COMM_SELF,
+                    "[Ghost] WARNING: found more single-boundary-side elements than "
+                    "n_ghosts=%d; dropping element %d (increase n_ghosts or check the mesh).\n",
+                    (int)ibm->n_ghosts, (int)ec);
+      } else {
+        ibm->belmts[gc] = ec;  ibm->edgefrontnodes[gc] = nv;  ibm->edgefrontnodesI[gc] = II;
+        gc += 1;
+      }
     }//if on boundary
-    
+
   }//elements
+
+  if (gc != ibm->n_ghosts) {
+    PetscPrintf(PETSC_COMM_SELF,
+                "[Ghost] WARNING: found %d single-boundary-side elements but n_ghosts=%d "
+                "(some elements have >1 boundary side, see warnings above); "
+                "%d ghost/BC slot(s) left unset.\n",
+                (int)gc, (int)ibm->n_ghosts, (int)(ibm->n_ghosts-gc));
+  }
 
   //add corresponding edge for each boundary element
   PetscInt  i, start, end, edge, edge_n, be, bn, n1e, n2e, n3e, sum;
   //choose an boundary element
-  for (ec=0; ec<ibm->n_ghosts; ec++) {
+  for (ec=0; ec<gc; ec++) {
     be = ibm->belmts[ec];
     n1e = ibm->nv1[be];  n2e = ibm->nv2[be];  n3e = ibm->nv3[be];
     
