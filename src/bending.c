@@ -1310,11 +1310,17 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
    mesh. Candidates come out in the same ascending element-index order the
    original O(n_elmt) scan used, so ties resolve identically (last match
    wins). */
-static PetscInt FindEdgeThirdVertex_(const PetscInt *voffset, const PetscInt *vlist,
+static PetscInt FindEdgeThirdVertex_(const PetscInt *voffset, const PetscInt *vlist, PetscInt v_scan_limit,
                                       const PetscInt *nv1, const PetscInt *nv2, const PetscInt *nv3,
                                       PetscInt a, PetscInt b, PetscInt exclude_elem, PetscInt extra_exclude_v) {
   PetscInt result = 1000000;
   PetscInt pa;
+  /* a or b can still be the 1000000 "unresolved" sentinel here (a boundary
+     element whose neighbor search legitimately found nothing upstream).
+     The original code only ever used such values in equality comparisons
+     against real vertex ids (which never match), so it silently found
+     nothing; voffset[] must not be indexed with them. */
+  if (a < 0 || a >= v_scan_limit || b < 0 || b >= v_scan_limit) return result;
   for (pa = voffset[a]; pa < voffset[a+1]; pa++) {
     PetscInt i = vlist[pa];
     if (i == exclude_elem) continue;
@@ -1392,17 +1398,17 @@ PetscErrorCode Patch(IBMNodes *ibm) {
       p[3] = ibm->nv1[ec];  p[6] = ibm->nv2[ec];  p[7] = ibm->nv3[ec];
 
       //find element common neighbor nodes
-      p[2]  = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[6], ec, -1);
-      p[4]  = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[7], ec, -1);
-      p[10] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[6], p[7], ec, -1);
+      p[2]  = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[3], p[6], ec, -1);
+      p[4]  = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[3], p[7], ec, -1);
+      p[10] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[6], p[7], ec, -1);
 
       //find other neighbors
-      p[0] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[2],  -1, p[6]);
-      p[1] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[4],  -1, p[7]);
-      p[5] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[6], p[2],  -1, p[3]);
-      p[9] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[6], p[10], -1, p[7]);
-      p[11] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[7], p[10], -1, p[6]);
-      p[8] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[7], p[4],  -1, p[3]);
+      p[0] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[3], p[2],  -1, p[6]);
+      p[1] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[3], p[4],  -1, p[7]);
+      p[5] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[6], p[2],  -1, p[3]);
+      p[9] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[6], p[10], -1, p[7]);
+      p[11] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[7], p[10], -1, p[6]);
+      p[8] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[7], p[4],  -1, p[3]);
 
     } else if (ibm->ire[ec]==1) { //for irregular elements
 
@@ -1415,22 +1421,22 @@ PetscErrorCode Patch(IBMNodes *ibm) {
       }
 
       //find element common neighbor nodes
-      p[2]   = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[1], ec, -1);
-      p[v-1] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[v], ec, -1);
-      p[v+1] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[1], p[v], ec, -1);
+      p[2]   = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[0], p[1], ec, -1);
+      p[v-1] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[0], p[v], ec, -1);
+      p[v+1] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[1], p[v], ec, -1);
 
       //find element other neighbor nodes
-      p[3]   = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[2],   -1, p[1]);
-      p[v-2] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[v-1], -1, p[v]);
-      p[v+3] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[1], p[2],   -1, p[0]);
-      p[v+2] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[1], p[v+1], -1, p[v]);
-      p[v+4] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[v], p[v+1], -1, p[1]);
-      p[v+5] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[v], p[v-1], -1, p[0]);
+      p[3]   = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[0], p[2],   -1, p[1]);
+      p[v-2] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[0], p[v-1], -1, p[v]);
+      p[v+3] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[1], p[2],   -1, p[0]);
+      p[v+2] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[1], p[v+1], -1, p[v]);
+      p[v+4] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[v], p[v+1], -1, p[1]);
+      p[v+5] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[v], p[v-1], -1, p[0]);
 
       if (ibm->val[ec]>6) { //for nodes with extra valence
 	for (k=0; k<(v-6); k++) {
-	  p[k+4]   = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[3+k],   -1, p[2+k]);
-	  p[v-3-k] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[v-2-k], -1, p[v-1-k]);
+	  p[k+4]   = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[0], p[3+k],   -1, p[2+k]);
+	  p[v-3-k] = FindEdgeThirdVertex_(voffset, vlist, v_scan_limit, cnv1, cnv2, cnv3, p[0], p[v-2-k], -1, p[v-1-k]);
 	}
       }
 
