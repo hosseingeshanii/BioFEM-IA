@@ -1301,15 +1301,70 @@ PetscErrorCode IrrVer(IBMNodes *ibm) {
   return(0);
 }
 
+/* Find the element sharing edge (a,b) with some triangle, other than
+   exclude_elem (if >=0) and whose third vertex is not extra_exclude_v (if
+   >=0), and return that third vertex -- or 1000000 (the sentinel Patch()
+   uses for "unset") if no such element exists. voffset/vlist is a vertex ->
+   incident-element CSR map (built once per Patch() call) so only elements
+   actually touching vertex a are scanned, instead of every element in the
+   mesh. Candidates come out in the same ascending element-index order the
+   original O(n_elmt) scan used, so ties resolve identically (last match
+   wins). */
+static PetscInt FindEdgeThirdVertex_(const PetscInt *voffset, const PetscInt *vlist,
+                                      const PetscInt *nv1, const PetscInt *nv2, const PetscInt *nv3,
+                                      PetscInt a, PetscInt b, PetscInt exclude_elem, PetscInt extra_exclude_v) {
+  PetscInt result = 1000000;
+  PetscInt pa;
+  for (pa = voffset[a]; pa < voffset[a+1]; pa++) {
+    PetscInt i = vlist[pa];
+    if (i == exclude_elem) continue;
+    PetscInt n1p = nv1[i], n2p = nv2[i], n3p = nv3[i];
+    if (b==n1p || b==n2p || b==n3p) {
+      if (n1p!=a && n1p!=b && n1p!=extra_exclude_v) { result = n1p; }
+      else if (n2p!=a && n2p!=b && n2p!=extra_exclude_v) { result = n2p; }
+      else if (n3p!=a && n3p!=b && n3p!=extra_exclude_v) { result = n3p; }
+    }
+  }
+  return result;
+}
+
 //---------------------------------------------------------------------------
 PetscErrorCode Patch(IBMNodes *ibm) {
 
-  PetscInt  ec, *p, i, m, n1p, n2p, n3p, k;
+  PetscInt  ec, *p, i, k;
   const PetscInt maxPatchWidth = 16;
 
   PetscPrintf(PETSC_COMM_WORLD, "[Patch] enter n_elmt=%d n_ghosts=%d n_elmt_base=%d\n",
               (int)ibm->n_elmt, (int)ibm->n_ghosts, (int)ibm->n_elmt_base);
-  
+
+  /* Every shared-edge lookup below scans ec over [0, n_elmt+2*n_ghosts) and
+     references vertex indices over [0, n_v+n_ghosts) (ghost triangles use
+     ghost-node indices ibm->n_v..ibm->n_v+n_ghosts-1). Build one CSR map
+     covering that full range up front (O(n_elmt+n_ghosts)) instead of
+     rescanning all elements for every slot of every element -- this mirrors
+     the fix already applied to Input() (io.c) and IrrVer() above. */
+  PetscInt ec_scan_limit = ibm->n_elmt + 2*ibm->n_ghosts;
+  PetscInt v_scan_limit = ibm->n_v + ibm->n_ghosts;
+  PetscInt *vcount, *voffset, *vlist, *vfill;
+  PetscMalloc1(v_scan_limit, &vcount);
+  PetscMemzero(vcount, v_scan_limit*sizeof(PetscInt));
+  for (ec=0; ec<ec_scan_limit; ec++) {
+    vcount[ibm->nv1[ec]]++; vcount[ibm->nv2[ec]]++; vcount[ibm->nv3[ec]]++;
+  }
+  PetscMalloc1(v_scan_limit+1, &voffset);
+  voffset[0] = 0;
+  for (i=0; i<v_scan_limit; i++) voffset[i+1] = voffset[i] + vcount[i];
+  PetscMalloc1(voffset[v_scan_limit], &vlist);
+  PetscMalloc1(v_scan_limit, &vfill);
+  for (i=0; i<v_scan_limit; i++) vfill[i] = voffset[i];
+  for (ec=0; ec<ec_scan_limit; ec++) {
+    vlist[vfill[ibm->nv1[ec]]++] = ec;
+    vlist[vfill[ibm->nv2[ec]]++] = ec;
+    vlist[vfill[ibm->nv3[ec]]++] = ec;
+  }
+  PetscFree(vfill);
+  const PetscInt *cnv1 = ibm->nv1, *cnv2 = ibm->nv2, *cnv3 = ibm->nv3;
+
   for (ec=0; ec<ibm->n_elmt; ec++) {
 
     PetscInt  v = ibm->val[ec];
@@ -1335,140 +1390,19 @@ PetscErrorCode Patch(IBMNodes *ibm) {
     if (ibm->ire[ec]==0) { //regular patch
 
       p[3] = ibm->nv1[ec];  p[6] = ibm->nv2[ec];  p[7] = ibm->nv3[ec];
-      
-      for (i=0; i<ibm->n_elmt+2*ibm->n_ghosts; i++) { //find element common neighbor nodes
-	n1p = ibm->nv1[i];  n2p = ibm->nv2[i];  n3p = ibm->nv3[i];
-	
-	m = 0;
-	if(p[3]==n1p || p[3]==n2p || p[3]==n3p) {m++;} 
-	if(p[6]==n1p || p[6]==n2p || p[6]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[3] && n1p!=p[6] && i!=ec) {
-	    p[2] = n1p;
-	  } else if (n2p!=p[3] && n2p!=p[6] && i!=ec) {
-	    p[2] = n2p;
-	  } else if (n3p!=p[3] && n3p!=p[6] && i!=ec) {
-	    p[2] = n3p;
-	  }
-	}
-	
-	m = 0;
-	if(p[3]==n1p || p[3]==n2p || p[3]==n3p) {m++;} 
-	if(p[7]==n1p || p[7]==n2p || p[7]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[3] && n1p!=p[7] && i!=ec) {
-	    p[4] = n1p;
-	  } else if (n2p!=p[3] && n2p!=p[7] && i!=ec) {
-	    p[4] = n2p;
-	  } else if (n3p!=p[3] && n3p!=p[7] && i!=ec) {
-	    p[4] = n3p;
-	  }
-	}
-	
-	m = 0;
-	if(p[6]==n1p || p[6]==n2p || p[6]==n3p) {m++;} 
-	if(p[7]==n1p || p[7]==n2p || p[7]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[6] && n1p!=p[7] && i!=ec) {
-	    p[10] = n1p;
-	  } else if (n2p!=p[6] && n2p!=p[7] && i!=ec) {
-	    p[10] = n2p;
-	  } else if (n3p!=p[6] && n3p!=p[7] && i!=ec) {
-	    p[10] = n3p;
-	  }
-	}
-      } //common neighbors
-      
-      for (i=0; i<ibm->n_elmt+2*ibm->n_ghosts; i++) { //find other neighbors
-	n1p = ibm->nv1[i];  n2p = ibm->nv2[i];  n3p = ibm->nv3[i];
-	
-	m = 0;
-	if(p[3]==n1p || p[3]==n2p || p[3]==n3p) {m++;} 
-	if(p[2]==n1p || p[2]==n2p || p[2]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[3] && n1p!=p[2] && n1p!=p[6]) {
-	    p[0] = n1p;
-	  } else if (n2p!=p[3] && n2p!=p[2] && n2p!=p[6]) {
-	    p[0] = n2p;
-	  } else if (n3p!=p[3] && n3p!=p[2] && n3p!=p[6]) {
-	    p[0] = n3p;
-	  }
-	}
-	
-	m = 0;
-	if(p[3]==n1p || p[3]==n2p || p[3]==n3p) {m++;} 
-	if(p[4]==n1p || p[4]==n2p || p[4]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[3] && n1p!=p[4] && n1p!=p[7]) {
-	    p[1] = n1p;
-	  } else if (n2p!=p[3] && n2p!=p[4] && n2p!=p[7]) {
-	    p[1] = n2p;
-	  } else if (n3p!=p[3] && n3p!=p[4] && n3p!=p[7]) {
-	    p[1] = n3p;
-	  }
-	}    
-	
-	m = 0;
-	if(p[6]==n1p || p[6]==n2p || p[6]==n3p) {m++;} 
-	if(p[2]==n1p || p[2]==n2p || p[2]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[6] && n1p!=p[2] && n1p!=p[3]) {
-	    p[5] = n1p;
-	  } else if (n2p!=p[6] && n2p!=p[2] && n2p!=p[3]) {
-	    p[5] = n2p;
-	  } else if (n3p!=p[6] && n3p!=p[2] && n3p!=p[3]) {
-	    p[5] = n3p;
-	  }
-	}
-	
-	m = 0;
-	if(p[6]==n1p || p[6]==n2p || p[6]==n3p) {m++;} 
-	if(p[10]==n1p || p[10]==n2p || p[10]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[6] && n1p!=p[10] && n1p!=p[7]) {
-	    p[9] = n1p;
-	  } else if (n2p!=p[6] && n2p!=p[10] && n2p!=p[7]) {
-	    p[9] = n2p;
-	  } else if (n3p!=p[6] && n3p!=p[10] && n3p!=p[7]) {
-	    p[9] = n3p;
-	  }
-	}
-	
-	m = 0;
-	if(p[7]==n1p || p[7]==n2p || p[7]==n3p) {m++;} 
-	if(p[10]==n1p || p[10]==n2p || p[10]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[7] && n1p!=p[10] && n1p!=p[6]) {
-	    p[11] = n1p;
-	  } else if (n2p!=p[7] && n2p!=p[10] && n2p!=p[6]) {
-	    p[11] = n2p;
-	  } else if (n3p!=p[7] && n3p!=p[10] && n3p!=p[6]) {
-	    p[11] = n3p;
-	  }
-	}
-	
-	m = 0;
-	if(p[7]==n1p || p[7]==n2p || p[7]==n3p) {m++;} 
-	if(p[4]==n1p || p[4]==n2p || p[4]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[7] && n1p!=p[4] && n1p!=p[3]) {
-	    p[8] = n1p;
-	  } else if (n2p!=p[7] && n2p!=p[4] && n2p!=p[3]) {
-	    p[8] = n2p;
-	  } else if (n3p!=p[7] && n3p!=p[4] && n3p!=p[3]) {
-	    p[8] = n3p;
-	  }
-	}
-      } //for other neighbors      
+
+      //find element common neighbor nodes
+      p[2]  = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[6], ec, -1);
+      p[4]  = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[7], ec, -1);
+      p[10] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[6], p[7], ec, -1);
+
+      //find other neighbors
+      p[0] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[2],  -1, p[6]);
+      p[1] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[3], p[4],  -1, p[7]);
+      p[5] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[6], p[2],  -1, p[3]);
+      p[9] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[6], p[10], -1, p[7]);
+      p[11] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[7], p[10], -1, p[6]);
+      p[8] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[7], p[4],  -1, p[3]);
 
     } else if (ibm->ire[ec]==1) { //for irregular elements
 
@@ -1480,178 +1414,24 @@ PetscErrorCode Patch(IBMNodes *ibm) {
 	p[0] = ibm->nv3[ec];  p[1] = ibm->nv1[ec];  p[v] = ibm->nv2[ec];
       }
 
-      for (i=0; i<ibm->n_elmt+2*ibm->n_ghosts; i++) {   //find element common neighbor nodes
-	n1p = ibm->nv1[i];  n2p = ibm->nv2[i];  n3p = ibm->nv3[i];
+      //find element common neighbor nodes
+      p[2]   = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[1], ec, -1);
+      p[v-1] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[v], ec, -1);
+      p[v+1] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[1], p[v], ec, -1);
 
-	m = 0;
-	if(p[0]==n1p || p[0]==n2p || p[0]==n3p) {m++;} 
-	if(p[1]==n1p || p[1]==n2p || p[1]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[0] && n1p!=p[1] && i!=ec) {
-	    p[2] = n1p;
-	  } else if (n2p!=p[0] && n2p!=p[1] && i!=ec) {
-	    p[2] = n2p;
-	  } else if (n3p!=p[0] && n3p!=p[1] && i!=ec) {
-	    p[2] = n3p;
-	  }
-	}
-
-	m = 0;
-	if(p[0]==n1p || p[0]==n2p || p[0]==n3p) {m++;} 
-	if(p[v]==n1p || p[v]==n2p || p[v]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[0] && n1p!=p[v] && i!=ec) {
-	    p[v-1] = n1p;
-	  } else if (n2p!=p[0] && n2p!=p[v] && i!=ec) {
-	    p[v-1] = n2p;
-	  } else if (n3p!=p[0] && n3p!=p[v] && i!=ec) {
-	    p[v-1] = n3p;
-	  }
-	}
-
-	m = 0;
-	if(p[1]==n1p || p[1]==n2p || p[1]==n3p) {m++;} 
-	if(p[v]==n1p || p[v]==n2p || p[v]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[1] && n1p!=p[v] && i!=ec) {
-	    p[v+1] = n1p;
-	  } else if (n2p!=p[1] && n2p!=p[v] && i!=ec) {
-	    p[v+1] = n2p;
-	  } else if (n3p!=p[1] && n3p!=p[v] && i!=ec) {
-	    p[v+1] = n3p;
-	  }
-	}
-      } //for common neighbors
-
-      for (i=0; i<ibm->n_elmt+2*ibm->n_ghosts; i++) {   //find element other neighbor nodes
-	n1p = ibm->nv1[i];  n2p = ibm->nv2[i];  n3p = ibm->nv3[i];
-	
-	m = 0;
-	if(p[0]==n1p || p[0]==n2p || p[0]==n3p) {m++;} 
-	if(p[2]==n1p || p[2]==n2p || p[2]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[0] && n1p!=p[2] && n1p!=p[1]) {
-	    p[3] = n1p;
-	  } else if (n2p!=p[0] && n2p!=p[2] && n2p!=p[1]) {
-	    p[3] = n2p;
-	  } else if (n3p!=p[0] && n3p!=p[2] && n3p!=p[1]) {
-	    p[3] = n3p;
-	  }
-	}
-
-	m = 0;
-	if(p[0]==n1p || p[0]==n2p || p[0]==n3p) {m++;} 
-	if(p[v-1]==n1p || p[v-1]==n2p || p[v-1]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[0] && n1p!=p[v-1] && n1p!=p[v]) {
-	    p[v-2] = n1p;
-	  } else if (n2p!=p[0] && n2p!=p[v-1] && n2p!=p[v]) {
-	    p[v-2] = n2p;
-	  } else if (n3p!=p[0] && n3p!=p[v-1] && n3p!=p[v]) {
-	    p[v-2] = n3p;
-	  }
-	}
-
-	m = 0;
-	if(p[1]==n1p || p[1]==n2p || p[1]==n3p) {m++;} 
-	if(p[2]==n1p || p[2]==n2p || p[2]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[1] && n1p!=p[2] && n1p!=p[0]) {
-	    p[v+3] = n1p;
-	  } else if (n2p!=p[1] && n2p!=p[2] && n2p!=p[0]) {
-	    p[v+3] = n2p;
-	  } else if (n3p!=p[1] && n3p!=p[2] && n3p!=p[0]) {
-	    p[v+3] = n3p;
-	  }
-	}
-
-	m = 0;
-	if(p[1]==n1p || p[1]==n2p || p[1]==n3p) {m++;} 
-	if(p[v+1]==n1p || p[v+1]==n2p || p[v+1]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[1] && n1p!=p[v+1] && n1p!=p[v]) {
-	    p[v+2] = n1p;
-	  } else if (n2p!=p[1] && n2p!=p[v+1] && n2p!=p[v]) {
-	    p[v+2] = n2p;
-	  } else if (n3p!=p[1] && n3p!=p[v+1] && n3p!=p[v]) {
-	    p[v+2] = n3p;
-	  }
-	}
-
-	m = 0;
-	if(p[v]==n1p || p[v]==n2p || p[v]==n3p) {m++;} 
-	if(p[v+1]==n1p || p[v+1]==n2p || p[v+1]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[v] && n1p!=p[v+1] && n1p!=p[1]) {
-	    p[v+4] = n1p;
-	  } else if (n2p!=p[v] && n2p!=p[v+1] && n2p!=p[1]) {
-	    p[v+4] = n2p;
-	  } else if (n3p!=p[v] && n3p!=p[v+1] && n3p!=p[1]) {
-	    p[v+4] = n3p;
-	  }
-	}
-
-	m = 0;
-	if(p[v]==n1p || p[v]==n2p || p[v]==n3p) {m++;} 
-	if(p[v-1]==n1p || p[v-1]==n2p || p[v-1]==n3p) {m++;} 
-	
-	if (m==2) {
-	  if (n1p!=p[v] && n1p!=p[v-1] && n1p!=p[0]) {
-	    p[v+5] = n1p;
-	  } else if (n2p!=p[v] && n2p!=p[v-1] && n2p!=p[0]) {
-	    p[v+5] = n2p;
-	  } else if (n3p!=p[v] && n3p!=p[v-1] && n3p!=p[0]) {
-	    p[v+5] = n3p;
-	  }
-	}
-
-      }
+      //find element other neighbor nodes
+      p[3]   = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[2],   -1, p[1]);
+      p[v-2] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[v-1], -1, p[v]);
+      p[v+3] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[1], p[2],   -1, p[0]);
+      p[v+2] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[1], p[v+1], -1, p[v]);
+      p[v+4] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[v], p[v+1], -1, p[1]);
+      p[v+5] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[v], p[v-1], -1, p[0]);
 
       if (ibm->val[ec]>6) { //for nodes with extra valence
 	for (k=0; k<(v-6); k++) {
-	  for (i=0; i<ibm->n_elmt+2*ibm->n_ghosts; i++) { 
-	    n1p = ibm->nv1[i];  n2p = ibm->nv2[i];  n3p = ibm->nv3[i];
-
-	    m = 0;
-	    if(p[0]==n1p || p[0]==n2p || p[0]==n3p) {m++;} 
-	    if(p[3+k]==n1p || p[3+k]==n2p || p[3+k]==n3p) {m++;} 
-	    
-	    if (m==2) {
-	      if (n1p!=p[0] && n1p!=p[3+k] && n1p!=p[2+k]) {
-		p[k+4] = n1p;
-	      } else if (n2p!=p[0] && n2p!=p[3+k] && n2p!=p[2+k]) {
-		p[k+4] = n2p;
-	      } else if (n3p!=p[0] && n3p!=p[3+k] && n3p!=p[2+k]) {
-		p[k+4] = n3p;
-	      }
-	    }
-
-
-	    m = 0;
-	    if(p[0]==n1p || p[0]==n2p || p[0]==n3p) {m++;} 
-	    if(p[v-2-k]==n1p || p[v-2-k]==n2p || p[v-2-k]==n3p) {m++;} 
-
-	    if (m==2) {
-	      if (n1p!=p[0] && n1p!=p[v-2-k] && n1p!=p[v-1-k]) {
-		p[v-3-k] = n1p;
-	      } else if (n2p!=p[0] && n2p!=p[v-2-k] && n2p!=p[v-1-k]) {
-		p[v-3-k] = n2p;
-	      } else if (n3p!=p[0] && n3p!=p[v-2-k] && n3p!=p[v-1-k]) {
-		p[v-3-k] = n3p;
-	      }
-	    }
-	    
-	  }
+	  p[k+4]   = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[3+k],   -1, p[2+k]);
+	  p[v-3-k] = FindEdgeThirdVertex_(voffset, vlist, cnv1, cnv2, cnv3, p[0], p[v-2-k], -1, p[v-1-k]);
 	}
-	
       }
 
     }
@@ -1696,8 +1476,11 @@ PetscErrorCode Patch(IBMNodes *ibm) {
     }
     PetscFree(p);
   } //elements
+
+  PetscFree(vcount); PetscFree(voffset); PetscFree(vlist);
+
   PetscPrintf(PETSC_COMM_WORLD, "[Patch] done\n");
-  
+
   return(0);
 }
 
