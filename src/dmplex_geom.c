@@ -44,9 +44,31 @@
 
 #include <petscdmplex.h>
 #include <petscsf.h>
+#include <petsclog.h>
 #include <string.h>
 #include "dmplex_geom.h"
 #include "active_strain.h"
+#include "cuda_bridge.h"
+
+/* PetscLogEvent handles for -log_view profiling of the geometry-kernel path.
+ * Split into "exchange" (PetscSF coordinate broadcast, i.e. cross-rank
+ * communication) and "compute" (per-cell geometry evaluation) so -log_view
+ * output can separate communication cost from compute cost for the MPI
+ * scaling study, without changing any of the existing MPI_Wtime timing. */
+static PetscLogEvent gDMPlexGeomExchangeEvent_ = 0;
+static PetscLogEvent gDMPlexGeomComputeEvent_  = 0;
+static PetscBool     gDMPlexGeomEventsRegistered_ = PETSC_FALSE;
+
+static PetscErrorCode EnsureDMPlexGeomLogEvents_(void)
+{
+  PetscFunctionBegin;
+  if (!gDMPlexGeomEventsRegistered_) {
+    PetscCall(PetscLogEventRegister("DMPlexGeomExchange", 0, &gDMPlexGeomExchangeEvent_));
+    PetscCall(PetscLogEventRegister("DMPlexGeomCompute", 0, &gDMPlexGeomComputeEvent_));
+    gDMPlexGeomEventsRegistered_ = PETSC_TRUE;
+  }
+  PetscFunctionReturn(0);
+}
 
 /** Sentinel stored in DMPlexPatchLayout::patch to mark a missing stencil slot. */
 #define DMPLEX_GEOM_PATCH_MISSING 1000000
@@ -654,20 +676,35 @@ static PetscErrorCode ReportPatchHalo_(const DMPlexPatchLayout *layout,
  * @param[in]     layout   Local patch layout (provides orig_cell mapping).
  * @param[in,out] exchange Coordinate exchange (SF broadcast executed here).
  */
-static PetscErrorCode RunLocalGeometry_(FE *fem, const DMPlexPatchLayout *layout, DMPlexPatchExchange *exchange)
+static PetscErrorCode RunLocalGeometry_(FE *fem, const DMPlexPatchLayout *layout, DMPlexPatchExchange *exchange,
+                                        PetscBool geom_only)
 {
   PetscInt localCells = 0, totalCells = 0;
+  /* geom_only restricts the timed loop to subdivision geometry
+     (ElemUpdateGeom0Subdiv/ElemUpdateGeomSubdiv), skipping the metric/basis
+     update (ElemUpdateG), so this CPU path's timing is scope-matched to the
+     CUDA/Kokkos backends' "SubdivGeomKernel" timers, which measure geometry
+     only. This is an explicit parameter, not a global PetscOptions read,
+     because this same function is also the CPU reference used for
+     correctness verification elsewhere (RunDMPlexGeomProcessesCuda), where
+     geom+metric must both run regardless of what a benchmark run's control
+     file sets -- a global flag would silently break that verification. */
 
   PetscFunctionBeginUser;
+  PetscCall(EnsureDMPlexGeomLogEvents_());
+  PetscCall(PetscLogEventBegin(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
   PetscCall(UpdatePatchRemoteCoordinates_(fem->ibm, exchange));
+  PetscCall(PetscLogEventEnd(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
+  PetscCall(PetscLogEventBegin(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
   for (PetscInt lc = 0; lc < layout->nLocalCells; ++lc) {
     const PetscInt ec = layout->orig_cell[lc];
     if (ec < 0 || ec >= fem->ibm->n_elmt) continue;
     PetscCall(ElemUpdateGeom0Subdiv(fem, ec));
     PetscCall(ElemUpdateGeomSubdiv(fem, ec));
-    PetscCall(ElemUpdateG(fem, ec));
+    if (!geom_only) PetscCall(ElemUpdateG(fem, ec));
     ++localCells;
   }
+  PetscCall(PetscLogEventEnd(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
   PetscCallMPI(MPIU_Allreduce(&localCells, &totalCells, 1, MPIU_INT, MPI_SUM, PETSC_COMM_WORLD));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD,
                         "DMPLex geometry process updated %" PetscInt_FMT
@@ -739,15 +776,25 @@ PetscErrorCode RunDMPlexGeomProcesses(FE *fem)
 
     PetscCall(ReportPatchHalo_(&layout, origVert, fem[ibi].ibm->n_v));
 
-    for (PetscInt iter = 0; iter < n_repeat; ++iter) {
-      t0 = MPI_Wtime();
-      PetscCall(RunLocalGeometry_(&fem[ibi], &layout, &exchange));
-      geom_times[iter] = MPI_Wtime() - t0;
+    {
+      /* Benchmark-only: restrict the timed loop below to geometry, skipping
+         the metric/basis update, so this backend's number is scope-matched
+         to the CUDA/Kokkos "SubdivGeomKernel" (geometry-only) timers used
+         elsewhere for cross-backend comparison. Off by default -- a real
+         solve needs both. */
+      PetscBool geom_only = PETSC_FALSE;
+      PetscCall(PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-dmplex_geom_only", &geom_only, PETSC_NULL));
 
-      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                            "[iter %" PetscInt_FMT "] DMPlexGeomKernel: wall=%.6e s%s\n",
-                            iter, geom_times[iter],
-                            (iter == 0) ? " (cold)" : " (repeat)"));
+      for (PetscInt iter = 0; iter < n_repeat; ++iter) {
+        t0 = MPI_Wtime();
+        PetscCall(RunLocalGeometry_(&fem[ibi], &layout, &exchange, geom_only));
+        geom_times[iter] = MPI_Wtime() - t0;
+
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                              "[iter %" PetscInt_FMT "] DMPlexGeomKernel: wall=%.6e s%s\n",
+                              iter, geom_times[iter],
+                              (iter == 0) ? " (cold)" : " (repeat)"));
+      }
     }
 
     double geom_repeat_total = 0.0;
@@ -769,6 +816,329 @@ PetscErrorCode RunDMPlexGeomProcesses(FE *fem)
                           t_dmplex, t_owner, t_layout, t_exchange,
                           geom_times[0],
                           geom_avg_repeat));
+
+    PetscCall(DMPlexPatchExchangeDestroy_(&exchange));
+    PetscCall(DMPlexPatchLayoutDestroy_(&layout));
+    PetscCall(PetscFree(ownerRank));
+    PetscCall(PetscFree(origCell));
+    PetscCall(PetscFree(origVert));
+    PetscCall(DMDestroy(&dm));
+  }
+  PetscFunctionReturn(0);
+}
+
+/* Correctness-verification helpers: compare a handful of SubdivGeomQP fixed
+ * fields (ndx21/ndx31/nn/gc1/gc2/Aaa/Abb/Aab) between the GPU-computed and
+ * CPU-computed geometry for the same element, used at the end of
+ * RunDMPlexGeomProcessesCuda to sanity-check RunCudaSubdivGeomKernelPartitioned
+ * against the established CPU reference path. Does not compare the
+ * irregular-element INa/INab pointer-array fields (not covered here). */
+/* Tracks both the max absolute difference and the max magnitude of the two
+   operands seen, so callers can apply a combined absolute+relative
+   tolerance (diff <= atol + rtol*scale) instead of a bare absolute one.
+   Needed because CPU and GPU compute mathematically-equivalent but not
+   bit-identical results even for correct code -- e.g. INV() (math.c)
+   expands the 3x3 determinant along the first column while the CUDA
+   Invert3x3_ expands along the first row; both are valid cofactor
+   expansions, but floating-point addition isn't associative, so the two
+   sum to a tiny (~1e-16 relative) different determinant, which then
+   propagates into every entry of the inverted metric tensor. A pure
+   absolute tolerance can't distinguish that from a real bug. */
+static void UpdateAbsDiffAndScaleCmpnts_(Cmpnts a, Cmpnts b, PetscReal *diff, PetscReal *scale)
+{
+  *diff  = PetscMax(*diff,  PetscAbsReal(a.x - b.x));
+  *diff  = PetscMax(*diff,  PetscAbsReal(a.y - b.y));
+  *diff  = PetscMax(*diff,  PetscAbsReal(a.z - b.z));
+  *scale = PetscMax(*scale, PetscMax(PetscAbsReal(a.x), PetscAbsReal(b.x)));
+  *scale = PetscMax(*scale, PetscMax(PetscAbsReal(a.y), PetscAbsReal(b.y)));
+  *scale = PetscMax(*scale, PetscMax(PetscAbsReal(a.z), PetscAbsReal(b.z)));
+}
+
+static void MaxAbsDiffAndScaleGeomQP_(const SubdivGeomQP *a, const SubdivGeomQP *b,
+                                      PetscReal *diff, PetscReal *scale)
+{
+  *diff = 0.0; *scale = 0.0;
+  UpdateAbsDiffAndScaleCmpnts_(a->ndx21, b->ndx21, diff, scale);
+  UpdateAbsDiffAndScaleCmpnts_(a->ndx31, b->ndx31, diff, scale);
+  UpdateAbsDiffAndScaleCmpnts_(a->nn,    b->nn,    diff, scale);
+  UpdateAbsDiffAndScaleCmpnts_(a->gc1,   b->gc1,   diff, scale);
+  UpdateAbsDiffAndScaleCmpnts_(a->gc2,   b->gc2,   diff, scale);
+  UpdateAbsDiffAndScaleCmpnts_(a->Aaa,   b->Aaa,   diff, scale);
+  UpdateAbsDiffAndScaleCmpnts_(a->Abb,   b->Abb,   diff, scale);
+  UpdateAbsDiffAndScaleCmpnts_(a->Aab,   b->Aab,   diff, scale);
+}
+
+static void MaxAbsDiffAndScaleElem2DTens_(const Elem2DTens *a, const Elem2DTens *b,
+                                          PetscReal *diff, PetscReal *scale)
+{
+  *diff = 0.0; *scale = 0.0;
+  for (PetscInt i = 0; i < 3; ++i) {
+    for (PetscInt j = 0; j < 3; ++j) {
+      *diff  = PetscMax(*diff,  PetscAbsReal(a->Cov[i][j] - b->Cov[i][j]));
+      *diff  = PetscMax(*diff,  PetscAbsReal(a->Cont[i][j] - b->Cont[i][j]));
+      *scale = PetscMax(*scale, PetscMax(PetscAbsReal(a->Cov[i][j]), PetscAbsReal(b->Cov[i][j])));
+      *scale = PetscMax(*scale, PetscMax(PetscAbsReal(a->Cont[i][j]), PetscAbsReal(b->Cont[i][j])));
+    }
+  }
+}
+
+/**
+ * @brief Per-rank local geometry update for the partitioned DMPlex+CUDA path:
+ * PetscSF coordinate exchange on the CPU (same as RunLocalGeometry_), then
+ * hand this rank's local cell partition to its own bound GPU for the actual
+ * geometry-kernel compute (RunCudaSubdivGeomKernelPartitioned), instead of
+ * RunLocalGeometry_'s CPU ElemUpdateGeom0Subdiv/ElemUpdateGeomSubdiv loop.
+ *
+ * Also computes the metric tensor on the GPU (RunCudaMetricTensorKernelPartitioned),
+ * matching RunLocalGeometry_'s ElemUpdateG call -- both geometry and metric
+ * stages now run on this rank's bound GPU.
+ *
+ * @param[in,out] fem      FE struct; fem->ibm coordinates are updated in-place.
+ * @param[in]     layout   Local patch layout (this rank's cell partition).
+ * @param[in,out] exchange Coordinate exchange (SF broadcast executed here).
+ */
+/* Seconds spent in the host MPI coordinate exchange / the whole GPU stage,
+   accumulated over calls; the benchmark loop reads and zeroes them. */
+static double gCudaExchangeSec_ = 0.0, gCudaGpuStageSec_ = 0.0;
+
+static PetscErrorCode RunLocalGeometryCuda_(FE *fem, const DMPlexPatchLayout *layout, DMPlexPatchExchange *exchange)
+{
+  PetscFunctionBeginUser;
+  PetscCall(EnsureDMPlexGeomLogEvents_());
+  PetscCall(PetscLogEventBegin(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
+  {
+    const double t_ex0 = MPI_Wtime();
+    PetscCall(UpdatePatchRemoteCoordinates_(fem->ibm, exchange));
+    gCudaExchangeSec_ += MPI_Wtime() - t_ex0;
+  }
+  PetscCall(PetscLogEventEnd(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
+
+  const double t_gpu0 = MPI_Wtime();
+  PetscCall(PetscLogEventBegin(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
+  PetscCall(RunCudaSubdivGeomKernelPartitioned(fem, layout->nLocalCells, layout->orig_cell,
+                                               layout->ire, layout->val, layout->patch, PETSC_TRUE));
+  PetscCall(RunCudaSubdivGeomKernelPartitioned(fem, layout->nLocalCells, layout->orig_cell,
+                                               layout->ire, layout->val, layout->patch, PETSC_FALSE));
+  PetscCall(RunCudaMetricTensorKernelPartitioned(fem, layout->nLocalCells, layout->orig_cell));
+  PetscCall(PetscLogEventEnd(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
+  gCudaGpuStageSec_ += MPI_Wtime() - t_gpu0;
+  PetscFunctionReturn(0);
+}
+
+/**
+ * @brief Entry point: run the distributed DMPlex geometry pipeline for all
+ * bodies, with each rank's local cell partition evaluated on its own bound
+ * GPU instead of on the CPU.
+ *
+ * @details
+ * Identical one-time setup to RunDMPlexGeomProcesses (DMPlex distribution,
+ * owner table, patch layout, coordinate exchange SF -- all CPU/host-side,
+ * unchanged) and the same n_repeat timing loop structure; only the per-
+ * iteration geometry evaluation differs (RunLocalGeometryCuda_ instead of
+ * RunLocalGeometry_). GPU device binding for this rank happens automatically
+ * on the first CUDA call inside RunLocalGeometryCuda_ (see
+ * BindCudaDeviceToRank_ in cuda_kernel.cu).
+ *
+ * Selected via `-cuda_process 1 -dmplex_geom_process 1` together.
+ *
+ * @param[in,out] fem  Array of FE structs, one per body.  fem[ibi].ibm must be
+ *                     populated before calling this function.
+ */
+PetscErrorCode RunDMPlexGeomProcessesCuda(FE *fem)
+{
+  PetscInt           nbody = 1;
+  DMPlexPatchLayout  layout;
+
+  PetscFunctionBeginUser;
+  PetscCall(PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-nbody", &nbody, PETSC_NULL));
+
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                        "Running experimental DMPLex+CUDA subdivision geometry path "
+                        "(CPU setup/exchange, GPU compute; overlap=0, no serial interpolation).\n"));
+
+  for (PetscInt ibi = 0; ibi < nbody; ++ibi) {
+    DM              dm = NULL;
+    PetscMPIInt    *ownerRank = NULL;
+    PetscInt       *origCell = NULL, *origVert = NULL;
+    DMPlexPatchExchange exchange;
+    double          t0;
+    double          setup_time;
+    /* n_repeat=5, with the first TWO iterations (not just one) treated as
+     * warm-up before averaging: iter 0 pays cudaMalloc allocation cost
+     * (Section~\ref{sec:profiling}: cudaMalloc dominates at small scale),
+     * but iter 1 can *still* be anomalously slow even with allocation
+     * reused -- observed directly in the 2-GPU verification run
+     * (Section~\ref{sec:multigpu}): iter 1 took 13.7ms, iter 2 took 0.43ms,
+     * a 30x gap with no allocation difference between them, consistent
+     * with CUDA's lazy JIT compilation of the kernel on its first real
+     * launch and/or GPU clock ramp-up from idle. Averaging iter 1 together
+     * with genuinely steady-state iterations (as the old n_repeat=3 code
+     * did) silently contaminates the "steady-state" number with that
+     * warm-up cost. */
+    const PetscInt  n_repeat = 5;
+    const PetscInt  n_warmup = 2;
+    double          geom_times[5] = {0};
+
+    double t_dmplex, t_owner, t_layout, t_exchange;
+
+    t0 = MPI_Wtime();
+    PetscCall(CreateDistributedDMPlex_(fem[ibi].ibm, &dm, &origCell, &origVert, PETSC_COMM_WORLD));
+    t_dmplex = MPI_Wtime() - t0;
+
+    t0 = MPI_Wtime();
+    PetscCall(BuildOriginalVertexOwnerTable_(dm, fem[ibi].ibm, origVert, &ownerRank, PETSC_COMM_WORLD));
+    t_owner = MPI_Wtime() - t0;
+
+    t0 = MPI_Wtime();
+    PetscCall(DMPlexPatchLayoutCreate_(dm, fem[ibi].ibm, origCell, &layout));
+    t_layout = MPI_Wtime() - t0;
+
+    t0 = MPI_Wtime();
+    PetscCall(BuildPatchCoordinateExchange_(&layout, fem[ibi].ibm, origVert, ownerRank, &exchange, PETSC_COMM_WORLD));
+    t_exchange = MPI_Wtime() - t0;
+
+    setup_time = t_dmplex + t_owner + t_layout + t_exchange;
+
+    PetscCall(ReportPatchHalo_(&layout, origVert, fem[ibi].ibm->n_v));
+
+    /* Sizes/allocates the shared CUDA host-staging buffers (geom_meta,
+     * geom_status, geom, irregular) to ibm->n_elmt * act_data.n_qp --
+     * RunCudaSubdivGeomKernelPartitioned only checks these are big enough,
+     * it never allocates them itself (same contract as the plain
+     * RunCudaSubdivGeomKernel, which RunCudaProcesses() in cuda_processes.c
+     * also calls this before using). */
+    PetscCall(PrepareCudaHostWorkspace(&fem[ibi]));
+
+    double stage_tmp[6];
+    for (PetscInt iter = 0; iter < n_repeat; ++iter) {
+      if (iter == n_warmup) {
+        CudaStageTimersGetReset(stage_tmp);
+        gCudaExchangeSec_ = 0.0; gCudaGpuStageSec_ = 0.0;
+      }
+      t0 = MPI_Wtime();
+      PetscCall(RunLocalGeometryCuda_(&fem[ibi], &layout, &exchange));
+      geom_times[iter] = MPI_Wtime() - t0;
+
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                            "[iter %" PetscInt_FMT "] DMPlexGeomKernelCuda: wall=%.6e s%s\n",
+                            iter, geom_times[iter],
+                            (iter == 0) ? " (cold)" : (iter < n_warmup) ? " (warmup)" : " (steady)"));
+    }
+
+    {
+      /* Per-iteration stage breakdown over the post-warmup iterations, max over
+         ranks: exchange = host MPI coordinate exchange; the GPU stage is split
+         into host->device copy, kernel, device->host copy and host pack/unpack
+         (the residual of gpu_stage is launch/sync/allocation overhead). */
+      const double nit = (double)(n_repeat - n_warmup);
+      double loc[8], mx[8];
+      CudaStageTimersGetReset(stage_tmp);
+      loc[0] = gCudaExchangeSec_ / nit;
+      loc[1] = gCudaGpuStageSec_ / nit;
+      loc[2] = stage_tmp[0] / nit;
+      loc[3] = stage_tmp[1] / nit;
+      loc[4] = stage_tmp[2] / nit;
+      loc[5] = stage_tmp[3] / nit;
+      loc[6] = stage_tmp[4] / nit / 1e6;
+      loc[7] = stage_tmp[5] / nit / 1e6;
+      PetscCallMPI(MPI_Allreduce(loc, mx, 8, MPI_DOUBLE, MPI_MAX, PETSC_COMM_WORLD));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                            "\nGPU stage breakdown per iteration (max over ranks, s):\n"
+                            "  exchange (host MPI)      % .6e\n"
+                            "  gpu stage total          % .6e\n"
+                            "    host->device copy      % .6e   (%.1f MB)\n"
+                            "    kernels                % .6e\n"
+                            "    device->host copy      % .6e   (%.1f MB)\n"
+                            "    host pack/unpack       % .6e\n",
+                            mx[0], mx[1], mx[2], mx[6], mx[3], mx[4], mx[7], mx[5]));
+    }
+
+    double geom_repeat_total = 0.0;
+    for (PetscInt iter = n_warmup; iter < n_repeat; ++iter) geom_repeat_total += geom_times[iter];
+    double geom_avg_repeat = (n_repeat > n_warmup) ? geom_repeat_total / (double)(n_repeat - n_warmup) : geom_times[n_repeat - 1];
+
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                          "\nDMPlex+CUDA geometry timing for body %d (MPI wall-clock, includes CPU<->GPU "
+                          "memcpy but not one-time setup below)\n"
+                          "  task                         time (s)\n"
+                          "  setup (SF + DMPlex)       % .6e\n"
+                          "    CreateDistributedDMPlex % .6e\n"
+                          "    BuildOwnerTable         % .6e\n"
+                          "    PatchLayoutCreate       % .6e\n"
+                          "    BuildCoordExchange      % .6e\n"
+                          "  geom kernel iter-0         % .6e\n"
+                          "  geom kernel avg repeat     % .6e\n",
+                          (int)ibi,
+                          setup_time,
+                          t_dmplex, t_owner, t_layout, t_exchange,
+                          geom_times[0],
+                          geom_avg_repeat));
+
+    /* Correctness verification: fem[ibi].act_data.elem_act_data[ec].geom0/geom/
+     * gm0/gm still hold this rank's GPU-computed results from the last
+     * iteration above. Snapshot a handful of locally-owned cells' fixed
+     * geometry and metric-tensor (qp=0) fields, then re-run the CPU path
+     * (RunLocalGeometry_) on the SAME layout/exchange -- which overwrites
+     * those same act_data entries with CPU-computed values -- and diff.
+     * This checks RunCudaSubdivGeomKernelPartitioned's and
+     * RunCudaMetricTensorKernelPartitioned's actual numerical output against
+     * the established CPU reference, not just that they ran without
+     * crashing or that the element counts happened to split correctly. */
+    {
+      const PetscInt n_check = PetscMin(3, layout.nLocalCells);
+      SubdivGeomQP saved_geom0[3], saved_geom[3];
+      Elem2DTens saved_gm0[3], saved_gm[3];
+      PetscInt saved_ec[3];
+      PetscInt n_saved = 0;
+
+      for (PetscInt lc = 0; lc < layout.nLocalCells && n_saved < n_check; ++lc) {
+        const PetscInt ec = layout.orig_cell[lc];
+        if (ec < 0 || ec >= fem[ibi].ibm->n_elmt) continue;
+        saved_ec[n_saved] = ec;
+        saved_geom0[n_saved] = fem[ibi].act_data.elem_act_data[ec].geom0[0];
+        saved_geom[n_saved]  = fem[ibi].act_data.elem_act_data[ec].geom[0];
+        saved_gm0[n_saved]   = fem[ibi].act_data.elem_act_data[ec].gm0[0];
+        saved_gm[n_saved]    = fem[ibi].act_data.elem_act_data[ec].gm[0];
+        ++n_saved;
+      }
+
+      if (n_saved > 0) {
+        PetscCall(RunLocalGeometry_(&fem[ibi], &layout, &exchange, PETSC_FALSE));
+
+        for (PetscInt k = 0; k < n_saved; ++k) {
+          const PetscInt ec = saved_ec[k];
+          const SubdivGeomQP *cpu_geom0 = &fem[ibi].act_data.elem_act_data[ec].geom0[0];
+          const SubdivGeomQP *cpu_geom  = &fem[ibi].act_data.elem_act_data[ec].geom[0];
+          const Elem2DTens *cpu_gm0 = &fem[ibi].act_data.elem_act_data[ec].gm0[0];
+          const Elem2DTens *cpu_gm  = &fem[ibi].act_data.elem_act_data[ec].gm[0];
+          PetscReal diff0, scale0, diff, scale, gmdiff0, gmscale0, gmdiff, gmscale;
+          MaxAbsDiffAndScaleGeomQP_(&saved_geom0[k], cpu_geom0, &diff0, &scale0);
+          MaxAbsDiffAndScaleGeomQP_(&saved_geom[k],  cpu_geom,  &diff,  &scale);
+          MaxAbsDiffAndScaleElem2DTens_(&saved_gm0[k], cpu_gm0, &gmdiff0, &gmscale0);
+          MaxAbsDiffAndScaleElem2DTens_(&saved_gm[k],  cpu_gm,  &gmdiff,  &gmscale);
+
+          /* Combined absolute+relative tolerance (diff <= atol + rtol*scale):
+             a pure absolute 1e-9 threshold flagged CPU/GPU pairs as
+             MISMATCH purely from the two independently-valid (but not
+             bit-identical) 3x3-inverse formulas above -- see the comment on
+             UpdateAbsDiffAndScaleCmpnts_. atol=1e-9 still catches a genuine
+             near-zero-vs-nonzero bug; rtol=1e-6 comfortably covers the
+             observed ~1e-7 worst-case amplified FP noise while remaining
+             far tighter than any real logic-error magnitude would produce. */
+          const PetscReal atol = 1e-9, rtol = 1e-6;
+          PetscBool ok0   = (diff0   <= atol + rtol*scale0)   ? PETSC_TRUE : PETSC_FALSE;
+          PetscBool ok    = (diff    <= atol + rtol*scale)    ? PETSC_TRUE : PETSC_FALSE;
+          PetscBool gmok0 = (gmdiff0 <= atol + rtol*gmscale0) ? PETSC_TRUE : PETSC_FALSE;
+          PetscBool gmok  = (gmdiff  <= atol + rtol*gmscale)  ? PETSC_TRUE : PETSC_FALSE;
+          PetscCall(PetscPrintf(PETSC_COMM_SELF,
+                                "[DMPlex+CUDA verify] rank-local ec=%" PetscInt_FMT
+                                " max|geom0 diff|=%.3e max|geom diff|=%.3e"
+                                " max|gm0 diff|=%.3e max|gm diff|=%.3e -> %s\n",
+                                ec, (double)diff0, (double)diff, (double)gmdiff0, (double)gmdiff,
+                                (ok0 && ok && gmok0 && gmok) ? "MATCH" : "MISMATCH"));
+        }
+      }
+    }
 
     PetscCall(DMPlexPatchExchangeDestroy_(&exchange));
     PetscCall(DMPlexPatchLayoutDestroy_(&layout));
@@ -857,12 +1227,17 @@ PetscErrorCode FEM_DMPlexGeomSetup(FE *fem, MPI_Comm comm)
   }
 
   /* Compute reference-configuration geometry once — it never changes. */
+  PetscCall(EnsureDMPlexGeomLogEvents_());
+  PetscCall(PetscLogEventBegin(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
   PetscCall(UpdatePatchRemoteCoordinates_(fem->ibm, &ctx->exchange));
+  PetscCall(PetscLogEventEnd(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
+  PetscCall(PetscLogEventBegin(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
   for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
     const PetscInt ec = ctx->layout.orig_cell[lc];
     if (ec < 0 || ec >= fem->ibm->n_elmt) continue;
     PetscCall(ElemUpdateGeom0Subdiv(fem, ec));
   }
+  PetscCall(PetscLogEventEnd(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
 
   ctx->initialized = PETSC_TRUE;
   PetscFunctionReturn(0);
@@ -886,15 +1261,21 @@ PetscErrorCode FEM_DMPlexGeomUpdate(FE *fem)
   PetscCheck(ctx->initialized, ctx->comm, PETSC_ERR_ORDER,
              "FEM_DMPlexGeomSetup must be called before FEM_DMPlexGeomUpdate");
 
+  PetscCall(EnsureDMPlexGeomLogEvents_());
+
   /* Sync current coordinates from owning ranks to all stencil nodes. */
+  PetscCall(PetscLogEventBegin(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
   PetscCall(UpdatePatchRemoteCoordinates_(fem->ibm, &ctx->exchange));
+  PetscCall(PetscLogEventEnd(gDMPlexGeomExchangeEvent_, 0, 0, 0, 0));
 
   /* Evaluate current-configuration geometry for locally owned cells. */
+  PetscCall(PetscLogEventBegin(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
   for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
     const PetscInt ec = ctx->layout.orig_cell[lc];
     if (ec < 0 || ec >= fem->ibm->n_elmt) continue;
     PetscCall(ElemUpdateGeomSubdiv(fem, ec));
   }
+  PetscCall(PetscLogEventEnd(gDMPlexGeomComputeEvent_, 0, 0, 0, 0));
 
   PetscFunctionReturn(0);
 }

@@ -74,7 +74,33 @@ PetscErrorCode Dimension(IBMNodes *ibm, PetscInt ibi) {
   fscanf(fd, "%i", &ibm->n_edge);
 
   fgets(string,128, fd);
-  fscanf(fd, "%i", &ibm->n_ghosts);
+  {
+    /* blist's own declared n_ghosts header can drift out of sync with the
+     * actual per-ring boundary-node counts that follow it in the same file
+     * (observed on a real input: header said 42, the n_edge ring counts
+     * summed to 46). Create() -- called right after this function -- sizes
+     * x_bp/y_bp/z_bp/nv1/nv2/nv3 etc. from ibm->n_ghosts, so trusting a
+     * stale header here means GlobalGhostInit()/GlobalGhost() silently
+     * overflow those buffers later, corrupting adjacent heap memory. Read
+     * the header value but discard it in favor of summing the per-ring
+     * counts directly (the same, authoritative computation Input() already
+     * does for ibm->sum_n_bnodes, just done here too so Create()'s
+     * allocation sizes agree with it from the start). */
+    PetscInt header_n_ghosts = 0, derived_n_ghosts = 0, ring_count = 0;
+    fscanf(fd, "%i", &header_n_ghosts);
+    fgets(string, 128, fd);
+    for (PetscInt e = 0; e < ibm->n_edge; e++) {
+      fscanf(fd, "%d", &ring_count);
+      derived_n_ghosts += ring_count;
+    }
+    if (derived_n_ghosts != header_n_ghosts) {
+      PetscPrintf(PETSC_COMM_WORLD,
+                  "[Dimension] WARNING: blist%2.2d declares n_ghosts=%d but its per-ring "
+                  "boundary-node counts sum to %d; using the derived value.\n",
+                  ibi, (int)header_n_ghosts, (int)derived_n_ghosts);
+    }
+    ibm->n_ghosts = derived_n_ghosts;
+  }
   fclose(fd);
 
   return(0);
@@ -453,7 +479,16 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
   PetscMalloc(n_edge*sizeof(PetscInt), &n_bnodes);
   i = -1;
   fgets(string,128, fd);// skip line one
-  fscanf(fd, "%i", &(ibm->n_ghosts));
+  {
+    /* Read (and discard) the header value here too -- ibm->n_ghosts was
+     * already set correctly in Dimension() from the derived per-ring sum,
+     * before Create() sized the buffers from it; re-overwriting it with
+     * the raw header value here would silently reintroduce the same
+     * stale-header mismatch Dimension() just worked around. See the
+     * comment there for the full explanation. */
+    PetscInt header_n_ghosts_unused;
+    fscanf(fd, "%i", &header_n_ghosts_unused);
+  }
   fgets(string, 128, fd);// skip line two
   PetscPrintf(PETSC_COMM_WORLD, "Number of ghost nodes %d\n", ibm->n_ghosts);
 
@@ -493,36 +528,69 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
   PetscInt   mn, npe; //mn: mutual nodes counter , cn:column number
   PetscReal  cn;
 
-  for (i=0; i<n_elmt; i++) {
-    n1e = nv1[i];  n2e = nv2[i];  n3e = nv3[i];
+  {
+    /* Edge-adjacency via a vertex -> incident-element CSR map, O(n_elmt)
+     * for a well-formed 2D triangulation, instead of the previous
+     * all-pairs O(n_elmt^2) comparison that used to be here. That version
+     * took ~6.6 hours at 612,166 elements (confirmed via BENCH_WALL_SECONDS
+     * on an old mesh-sweep run) -- entirely invisible in this project's
+     * reported timing tables, since those only start measuring after
+     * Input() (this function) already returns. For each element's edge
+     * (a,b), the shared neighbor (if any) is the other element common to
+     * both vertex a's and vertex b's incident-element lists; per-vertex
+     * valence is small and bounded (~6 for a typical 2D mesh) regardless
+     * of n_elmt, so this intersection is cheap. */
+    PetscInt *vcount, *voffset, *vlist, *vfill;
+    PetscMalloc1(ibm->n_v, &vcount);
+    PetscMemzero(vcount, ibm->n_v*sizeof(PetscInt));
+    for (i=0; i<n_elmt; i++) {
+      vcount[nv1[i]]++;  vcount[nv2[i]]++;  vcount[nv3[i]]++;
+    }
+    PetscMalloc1(ibm->n_v+1, &voffset);
+    voffset[0] = 0;
+    for (i=0; i<ibm->n_v; i++) voffset[i+1] = voffset[i] + vcount[i];
+    PetscMalloc1(voffset[ibm->n_v], &vlist);
+    PetscMalloc1(ibm->n_v, &vfill);
+    for (i=0; i<ibm->n_v; i++) vfill[i] = voffset[i];
+    for (i=0; i<n_elmt; i++) {
+      vlist[vfill[nv1[i]]++] = i;
+      vlist[vfill[nv2[i]]++] = i;
+      vlist[vfill[nv3[i]]++] = i;
+    }
 
-    for (j=0; j<n_elmt; j++) {
-      n1pe = nv1[j];  n2pe = nv2[j];  n3pe = nv3[j];
- 
-      mn = 0; cn = 0; npe = 0;
-      if(n1e==n1pe || n1e==n2pe || n1e==n3pe){mn = mn+1;  cn = cn + 3.5;}
-      if(n2e==n1pe || n2e==n2pe || n2e==n3pe){mn = mn+1;  cn = cn + 2.5;}
-      if(n3e==n1pe || n3e==n2pe || n3e==n3pe){mn = mn+1;  cn = cn + 1.5;}
-      
-      if(mn==2){ //we catch the patch, now find the patch element number
-  	if(n1pe!=n1e && n1pe!=n2e && n1pe!=n3e){
-  	  npe = n1pe;
-  	}else if(n2pe!=n1e && n2pe!=n2e && n2pe!=n3e){
-  	  npe = n2pe;
-  	}else{
-  	  npe = n3pe;
-  	}
-  	// put it in right location
-	if(cn==4.){
-  	  nv4[i] = npe;
-  	}else if(cn==5.){
-  	  nv5[i] = npe;
-  	}else{
-          nv6[i] = npe;
-  	}
-      } //end if catch
-    }// end neighbor elements check
-  }// end patch find
+    for (i=0; i<n_elmt; i++) {
+      n1e = nv1[i];  n2e = nv2[i];  n3e = nv3[i];
+      PetscInt edge_a[3] = {n2e, n1e, n1e};
+      PetscInt edge_b[3] = {n3e, n3e, n2e};
+      PetscInt *slot[3];
+      slot[0] = &nv4[i];  slot[1] = &nv5[i];  slot[2] = &nv6[i];
+
+      for (j=0; j<3; j++) {
+        PetscInt a = edge_a[j], b = edge_b[j];
+        PetscInt found = -1, pa, pb;
+        for (pa=voffset[a]; pa<voffset[a+1] && found<0; pa++) {
+          PetscInt cand = vlist[pa];
+          if (cand == i) continue;
+          for (pb=voffset[b]; pb<voffset[b+1]; pb++) {
+            if (vlist[pb] == cand) { found = cand; break; }
+          }
+        }
+        if (found >= 0) {
+          n1pe = nv1[found];  n2pe = nv2[found];  n3pe = nv3[found];
+          if(n1pe!=n1e && n1pe!=n2e && n1pe!=n3e){
+            npe = n1pe;
+          }else if(n2pe!=n1e && n2pe!=n2e && n2pe!=n3e){
+            npe = n2pe;
+          }else{
+            npe = n3pe;
+          }
+          *slot[j] = npe;
+        }
+      }
+    }// end patch find
+
+    PetscFree(vcount);  PetscFree(voffset);  PetscFree(vlist);  PetscFree(vfill);
+  }
    
   //Transfer data to IBM
   for (ec=0; ec<n_elmt; ec++) {

@@ -54,6 +54,7 @@ static PetscInt cuda_metric_tensor = 0;
 extern PetscInt dof, curvature, ConstitutiveLawNonLinear;
 extern PetscInt ti, manufactured, manufactured_fexternal_export, prescribed_force_field;
 extern PetscInt tistart, tisteps;
+extern PetscInt dmplex_geom_process, cuda_process, kokkos_process;
 extern PetscReal E, mu, rho, h0, dt;
 extern PetscReal initial_elas, initial_poisson;
 extern PetscErrorCode FDynamic(FE *fem);
@@ -129,36 +130,53 @@ PetscErrorCode ActDataAllocate(FE *fem)
   /* Ensure all pointers inside each ElemActData start as NULL */
   ierr = PetscMemzero(act->elem_act_data, nelem * sizeof(*act->elem_act_data)); CHKERRQ(ierr);
 
+  /* The geometry-kernel-only benchmark paths (RunDMPlexGeomProcesses[Cuda],
+     RunCudaProcesses, RunKokkosProcesses) run standalone and exit -- they
+     never reach ElemC33Solve/the real elasticity solve, so they only ever
+     touch geom/geom0/gm/gm0/g/g0 below (ElemUpdateG, called from
+     RunLocalGeometry_, writes g/g0 as well as gm/gm0). The other 8 per-qp
+     arrays (Fa, Fa_inv, C, C_inv, Ce, Ce_inv, Se, S, CCe, CC) are solver-only
+     state that was previously allocated unconditionally for every element
+     regardless of which path was running -- at mesh sizes in the millions of
+     elements that is the dominant cost of Init() (confirmed via
+     PetscMemoryGetCurrentUsage tracing: ~6GB/rank of a ~7GB total, for a mesh
+     whose actual replicated ibm-> arrays only account for ~0.2GB). Real
+     solves (none of these three flags set) still get every array, unchanged. */
+  PetscBool skip_solver_arrays = (dmplex_geom_process || cuda_process || kokkos_process)
+                                 ? PETSC_TRUE : PETSC_FALSE;
+
   for (PetscInt ec = 0; ec < nelem; ec++) {
     ElemActData *ead = &act->elem_act_data[ec];
 
-    /* Kinematics */
-    ierr = PetscMalloc1(n_qp, &ead->Fa);     CHKERRQ(ierr);
-    ierr = PetscMalloc1(n_qp, &ead->Fa_inv); CHKERRQ(ierr);
+    if (!skip_solver_arrays) {
+      /* Kinematics */
+      ierr = PetscMalloc1(n_qp, &ead->Fa);     CHKERRQ(ierr);
+      ierr = PetscMalloc1(n_qp, &ead->Fa_inv); CHKERRQ(ierr);
 
-    ierr = PetscMalloc1(n_qp, &ead->C);     CHKERRQ(ierr);
-    ierr = PetscMalloc1(n_qp, &ead->C_inv); CHKERRQ(ierr);
+      ierr = PetscMalloc1(n_qp, &ead->C);     CHKERRQ(ierr);
+      ierr = PetscMalloc1(n_qp, &ead->C_inv); CHKERRQ(ierr);
 
-    ierr = PetscMalloc1(n_qp, &ead->Ce);     CHKERRQ(ierr);
-    ierr = PetscMalloc1(n_qp, &ead->Ce_inv); CHKERRQ(ierr);
+      ierr = PetscMalloc1(n_qp, &ead->Ce);     CHKERRQ(ierr);
+      ierr = PetscMalloc1(n_qp, &ead->Ce_inv); CHKERRQ(ierr);
 
-    /* Stress */
-    ierr = PetscMalloc1(n_qp, &ead->Se); CHKERRQ(ierr);
-    ierr = PetscMalloc1(n_qp, &ead->S);  CHKERRQ(ierr);
+      /* Stress */
+      ierr = PetscMalloc1(n_qp, &ead->Se); CHKERRQ(ierr);
+      ierr = PetscMalloc1(n_qp, &ead->S);  CHKERRQ(ierr);
 
-    /* Metrics */
+      /* Tangents */
+      ierr = PetscMalloc1(n_qp, &ead->CCe); CHKERRQ(ierr);
+      ierr = PetscMalloc1(n_qp, &ead->CC);  CHKERRQ(ierr);
+    }
+
+    /* Bases + Metrics -- needed by the geometry-kernel benchmarks too
+       (ElemUpdateG writes g/g0/gm/gm0 together; the CUDA metric-tensor
+       kernel writes the same fields), so always allocated. */
+    ierr = PetscMalloc1(n_qp, &ead->g);   CHKERRQ(ierr);
+    ierr = PetscMalloc1(n_qp, &ead->g0);  CHKERRQ(ierr);
     ierr = PetscMalloc1(n_qp, &ead->gm);  CHKERRQ(ierr);
     ierr = PetscMalloc1(n_qp, &ead->gm0); CHKERRQ(ierr);
 
-    /* Tangents */
-    ierr = PetscMalloc1(n_qp, &ead->CCe); CHKERRQ(ierr);
-    ierr = PetscMalloc1(n_qp, &ead->CC);  CHKERRQ(ierr);
-
-    /* Bases */
-    ierr = PetscMalloc1(n_qp, &ead->g);  CHKERRQ(ierr);
-    ierr = PetscMalloc1(n_qp, &ead->g0); CHKERRQ(ierr);
-
-    /* Midsurface geometry cache (size 1) */
+    /* Midsurface geometry cache (size 1) -- always needed. */
     ierr = PetscMalloc1(1, &ead->geom);  CHKERRQ(ierr);
     ierr = PetscMalloc1(1, &ead->geom0); CHKERRQ(ierr);
 
@@ -1506,6 +1524,10 @@ PetscErrorCode ElemTotStress(FE *fem, PetscInt ec)
               ead->S[qp].Cont[i][j] = 0.0;
           }
         }
+        /* OLD (Nitti et al. 2021, CMAME 382:113877, eq. A.8) -- kept for reference, do not use.
+         * Its 2nd term comes from (A.4) contracting Fa^-1 with slot 4 of Is instead of slot 2;
+         * exact only at gamma = 0, gives a non-symmetric S otherwise.
+         * Correct: S = Fa^-1 Se Fa^-T (e.g. Pezzuto & Ambrosi 2014, IJNMBE 30, p.1582).
         for (PetscInt i = 0; i < 3; i++)
         {
             for (PetscInt j = 0; j < 3; j++)
@@ -1518,10 +1540,43 @@ PetscErrorCode ElemTotStress(FE *fem, PetscInt ec)
                         {
                             for (PetscInt s = 0; s < 3; s++)
                             {
-                                
+
                                 ead->S[qp].Cont[i][j] += 0.5 * ead->Fa_inv[qp].Cov[w][p] * ead->Fa_inv[qp].Cov[z][s] * ead->gm0[qp].Cont[s][j] * (ead->Se[qp].Cont[p][z] * ead->gm0[qp].Cont[w][i] + ead->Se[qp].Cont[p][i] * ead->gm0[qp].Cont[w][z]);
                             }
                         }
+                    }
+                }
+            }
+        }
+        */
+
+        /*------------------------------------------------------------------
+         * S = Fa^-1 Se Fa^-T  in contravariant components:
+         *    A^i_p  = g0^{iw} Fbar_wp            (mixed comps of Fa^-1)
+         *    S^{ij} = A^i_p Se^{pq} A^j_q
+         * Valid for any (also non-symmetric) Fa.
+         *-----------------------------------------------------------------*/
+        PetscReal A[3][3];
+        for (PetscInt i = 0; i < 3; i++)
+        {
+            for (PetscInt p = 0; p < 3; p++)
+            {
+                A[i][p] = 0.0;
+                for (PetscInt w = 0; w < 3; w++)
+                {
+                    A[i][p] += ead->gm0[qp].Cont[i][w] * ead->Fa_inv[qp].Cov[w][p];
+                }
+            }
+        }
+        for (PetscInt i = 0; i < 3; i++)
+        {
+            for (PetscInt j = 0; j < 3; j++)
+            {
+                for (PetscInt p = 0; p < 3; p++)
+                {
+                    for (PetscInt q = 0; q < 3; q++)
+                    {
+                        ead->S[qp].Cont[i][j] += A[i][p] * ead->Se[qp].Cont[p][q] * A[j][q];
                     }
                 }
             }
@@ -1606,6 +1661,10 @@ PetscErrorCode ElemTotTangMatTens(FE *fem, PetscInt ec)
         for (PetscInt l=0;l<3;l++)
             ead->CC[qp].Cont[i][j][k][l] = 0.0;
 
+        /* OLD (Nitti et al. 2021, CMAME 382:113877, eq. B.6) -- kept for reference, do not use.
+         * Built from the same faulty dCe/dC as (A.4)/(A.5), used twice; wrong for gamma > 0
+         * (1.5% vs finite difference at gamma = 0.2) and not even the derivative of (A.8).
+         * Correct: one Fa^-1 (mixed comps) per index of CCe, below.
         for (PetscInt i = 2; i < 3; i++)
         for (PetscInt j = 2; j < 3; j++)
         for (PetscInt k = 2; k < 3; k++)
@@ -1640,6 +1699,41 @@ PetscErrorCode ElemTotTangMatTens(FE *fem, PetscInt ec)
                           + ead->CCe[qp].Cont[h][k][p][i] * ead->gm0[qp].Cont[w][z]
                         )
                     );
+            }
+        }
+        */
+
+        /*------------------------------------------------------------------
+         * CC = 2 dS/dC with S = Fa^-1 Se Fa^-T, contravariant components:
+         *    A^i_p      = g0^{iw} Fbar_wp            (mixed comps of Fa^-1)
+         *    CC^{ijkl}  = A^i_p A^j_q A^k_r A^l_s CCe^{pqrs}
+         * Only CC^{3333} is needed (C33 Newton in ModElemC33), so the
+         * i,j,k,l ranges stay restricted to 2 as before.
+         *-----------------------------------------------------------------*/
+        PetscReal A[3][3];
+        for (PetscInt i = 0; i < 3; i++)
+        {
+            for (PetscInt p = 0; p < 3; p++)
+            {
+                A[i][p] = 0.0;
+                for (PetscInt w = 0; w < 3; w++)
+                {
+                    A[i][p] += ead->gm0[qp].Cont[i][w] * ead->Fa_inv[qp].Cov[w][p];
+                }
+            }
+        }
+        for (PetscInt i = 2; i < 3; i++)
+        for (PetscInt j = 2; j < 3; j++)
+        for (PetscInt k = 2; k < 3; k++)
+        for (PetscInt l = 2; l < 3; l++)
+        {
+            for (PetscInt p = 0; p < 3; p++)
+            for (PetscInt q = 0; q < 3; q++)
+            for (PetscInt r = 0; r < 3; r++)
+            for (PetscInt s = 0; s < 3; s++)
+            {
+                ead->CC[qp].Cont[i][j][k][l] +=
+                    A[i][p] * A[j][q] * A[k][r] * A[l][s] * ead->CCe[qp].Cont[p][q][r][s];
             }
         }
     }

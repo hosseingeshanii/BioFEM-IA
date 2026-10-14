@@ -253,8 +253,16 @@ int main(int argc, char **argv)
 
   PetscCheck(!(cuda_process && kokkos_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
              "-cuda_process and -kokkos_process are mutually exclusive; choose one preprocessing backend");
-  PetscCheck(!((cuda_process || kokkos_process) && dmplex_geom_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
-             "-dmplex_geom_process is mutually exclusive with -cuda_process and -kokkos_process");
+  /* -cuda_process + -dmplex_geom_process together selects the partitioned
+   * GPU path (RunDMPlexGeomProcessesCuda): DMPlex/PetscSF still do the
+   * distributed setup and per-iteration coordinate exchange on the CPU,
+   * but each rank's local cell partition is handed to its own bound GPU
+   * for the actual geometry-kernel compute, instead of the plain
+   * -dmplex_geom_process CPU compute path. -kokkos_process has no such
+   * integration (yet), so it stays mutually exclusive with
+   * -dmplex_geom_process. */
+  PetscCheck(!(kokkos_process && dmplex_geom_process), PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+             "-dmplex_geom_process is mutually exclusive with -kokkos_process");
 #if defined(BIOFEM_BACKEND_CUDA)
   PetscCheck(!kokkos_process, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
              "This executable was built for direct CUDA; use -cuda_process 1 -kokkos_process 0");
@@ -322,27 +330,43 @@ int main(int argc, char **argv)
 
     /* Phase 2: Active-strain data + DMPlex context.
      * InitActStrainProblem must precede FEM_DMPlexGeomSetup because Setup calls
-     * ElemUpdateGeom0Subdiv which reads fem->act_data.elem_act_data. */
+     * ElemUpdateGeom0Subdiv which reads fem->act_data.elem_act_data.
+     *
+     * FEM_DMPlexGeomSetup builds the distributed multi-rank patch-exchange
+     * context (PetscSF coordinate broadcast, ghost ownership, etc.) that only
+     * the DMPlex-backed solve path uses. The cuda_process/kokkos_process
+     * preprocessing-kernel benchmarks (RunCudaProcesses / RunKokkosProcesses)
+     * run single-process and never touch that context, so skip it there --
+     * it's dead weight on that path and its ghost/patch-exchange machinery
+     * is not needed just to size fem->act_data for the CUDA/Kokkos workspace. */
     if (dmplex_geom_process || muscle_activation) {
       ierr = InitActStrainProblem(&fem[ibi], ibi); CHKERRQ(ierr);
       PetscPrintf(PETSC_COMM_WORLD, "Active-Strain geometry/basis storage initialized.\n");
-      if (muscle_activation) {
+      if (muscle_activation && !cuda_process && !kokkos_process) {
         ierr = FEM_DMPlexGeomSetup(&fem[ibi], PETSC_COMM_WORLD); CHKERRQ(ierr);
         PetscPrintf(PETSC_COMM_WORLD, "DMPlex geometry context initialized.\n");
       }
     }
 
     /* Phase 3: Vec creation — parallel (VecCreateMPI) when geom_ctx.initialized,
-     * serial (VecCreateSeq) otherwise. */
+     * serial (VecCreateSeq) otherwise. Always needed: Init() below (Phase 5)
+     * dereferences fem->x regardless of backend. */
     ierr = InitVecs(&fem[ibi]); CHKERRQ(ierr);
 
     /* Phase 4: Build ibm→global-DOF map for parallel Fint assembly.
-     * Requires Vec ownership ranges from InitVecs. */
-    if (muscle_activation) {
+     * Requires Vec ownership ranges from InitVecs, and (via
+     * FEM_DMPlexGeomBuildNodeMap's own precondition check) requires
+     * FEM_DMPlexGeomSetup to have run -- so skip together with Phase 2
+     * for the same cuda_process/kokkos_process preprocessing-kernel case. */
+    if (muscle_activation && !cuda_process && !kokkos_process) {
       ierr = FEM_DMPlexGeomBuildNodeMap(&fem[ibi]); CHKERRQ(ierr);
     }
 
-    /* Phase 5: Initialize Vec values from reference coordinates. */
+    /* Phase 5: Initialize Vec values from reference coordinates. Always
+     * needed: Init() also calls InitGhost()->Patch(), which builds
+     * ibm->ire/val/patch (the Loop-subdivision connectivity) -- real input
+     * data every backend needs, cuda_process/kokkos_process included, not
+     * solver-only state. */
     Init(&fem[ibi], ibi);
     if (rank == 0) PetscPrintf(PETSC_COMM_SELF, "Init finished \n");
 
@@ -350,6 +374,15 @@ int main(int argc, char **argv)
     if (tistart)  {
       LocationIn(&fem[ibi], tistart, ibi, out_dir);
     }
+  }
+
+  if (dmplex_geom_process && cuda_process) {
+    /* Partitioned GPU path: DMPlex/PetscSF do the distributed setup and
+     * per-iteration coordinate exchange on the CPU, but each rank's local
+     * cell partition is evaluated on its own bound GPU. */
+    ierr = RunDMPlexGeomProcessesCuda(fem); CHKERRQ(ierr);
+    CleanupAndFinalize(fem, ibm, nbody);
+    return 0;
   }
 
   if (dmplex_geom_process) {

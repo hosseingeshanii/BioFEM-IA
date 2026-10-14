@@ -1,3 +1,4 @@
+extern "C" void CudaStageTimerAdd(int slot, double v);
 #include "cuda_bridge.h"
 
 #include <vector>
@@ -26,7 +27,9 @@ extern "C" PetscErrorCode LaunchCudaSubdivGeomKernelImpl(
     PetscInt *meta_out,
     PetscInt *status_out,
     PetscReal *geom_out,
-    PetscReal *irregular_out);
+    PetscReal *irregular_out,
+    PetscBool save_geom_as_reference,
+    PetscBool save_geom_as_current);
 
 extern "C" PetscErrorCode LaunchCudaMetricTensorKernelImpl(
     PetscInt n_elmt,
@@ -39,7 +42,8 @@ extern "C" PetscErrorCode LaunchCudaMetricTensorKernelImpl(
     PetscReal *basis_current_out,
     PetscReal *basis_reference_out,
     PetscReal *metric_current_out,
-    PetscReal *metric_reference_out);
+    PetscReal *metric_reference_out,
+    PetscBool geom_already_on_device);
 
 static constexpr PetscInt kCudaGeomStrideCpp_ = 24;
 static constexpr PetscInt kCudaBasisStrideCpp_ = 18;
@@ -277,7 +281,8 @@ extern "C" PetscErrorCode RunCudaMetricTensorKernel(FE *fem)
                                              basis_current,
                                              basis_reference,
                                              metric_current,
-                                             metric_reference));
+                                             metric_reference,
+                                             PETSC_FALSE));
 
   for (PetscInt ec = 0; ec < ibm->n_elmt; ++ec) {
     ElemActData *ead = &act->elem_act_data[ec];
@@ -320,6 +325,127 @@ extern "C" PetscErrorCode RunCudaMetricTensorKernel(FE *fem)
   PetscFunctionReturn(0);
 }
 
+/* Partitioned variant for the DMPlex+CUDA path, mirroring
+ * RunCudaSubdivGeomKernelPartitioned's relationship to RunCudaSubdivGeomKernel:
+ * same packing/kernel-call/unpacking structure as RunCudaMetricTensorKernel
+ * above, but only this rank's local cell subset is packed into the host
+ * staging buffers and sent to the kernel; results are copied back into
+ * fem->act_data.elem_act_data[ec] via the local-to-global orig_cell map. */
+extern "C" PetscErrorCode RunCudaMetricTensorKernelPartitioned(
+    FE *fem,
+    PetscInt nLocalCells,
+    const PetscInt *localOrigCell)
+{
+  PetscFunctionBegin;
+  PetscCheck(fem != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "FE pointer must not be NULL");
+  PetscCheck(fem->ibm != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "IBM pointer must not be NULL");
+  PetscCheck(nLocalCells >= 0, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "nLocalCells must be non-negative");
+  if (nLocalCells == 0) PetscFunctionReturn(0);
+  PetscCheck(localOrigCell != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "localOrigCell must not be NULL");
+  PetscCall(InitCudaWorkspace());
+
+  IBMNodes *ibm = fem->ibm;
+  ActData *act = &fem->act_data;
+  PetscCheck(act->n_qp > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "n_qp must be > 0");
+  PetscCheck(act->theta != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "act->theta must not be NULL");
+  PetscCheck(act->elem_act_data != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,
+             "act->elem_act_data must not be NULL");
+
+  const size_t n_local = static_cast<size_t>(nLocalCells);
+  const size_t n_qp = static_cast<size_t>(act->n_qp);
+  const size_t n_entries = n_local * n_qp;
+
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.theta, n_qp, "theta"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.metric_status, n_entries, "metric_status"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.basis_current,
+                                 n_entries * kCudaBasisStrideCpp_, "basis_current"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.basis_reference,
+                                 n_entries * kCudaBasisStrideCpp_, "basis_reference"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.metric_current,
+                                 n_entries * kCudaMetricStrideCpp_, "metric_current"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.metric_reference,
+                                 n_entries * kCudaMetricStrideCpp_, "metric_reference"));
+
+  PetscReal *theta = g_cuda_host_workspace_.theta.data();
+  PetscInt *status = g_cuda_host_workspace_.metric_status.data();
+  PetscReal *basis_current = g_cuda_host_workspace_.basis_current.data();
+  PetscReal *basis_reference = g_cuda_host_workspace_.basis_reference.data();
+  PetscReal *metric_current = g_cuda_host_workspace_.metric_current.data();
+  PetscReal *metric_reference = g_cuda_host_workspace_.metric_reference.data();
+
+  for (PetscInt qp = 0; qp < act->n_qp; ++qp) {
+    theta[qp] = PetscRealPart(act->theta[qp]);
+  }
+
+  /* No host pack loop here: d_geom_current/d_geom_reference were already
+     populated on the device by the two preceding
+     RunCudaSubdivGeomKernelPartitioned calls (current/reference coords) via a
+     device-to-device copy from d_geom_out, so we hand the kernel
+     geom_already_on_device=PETSC_TRUE and skip the old
+     download->unpack->repack->upload round trip entirely. This assumes the
+     geometry and metric partitioned calls for a given iteration share the
+     same localOrigCell ordering/count, which the DMPlexPatchLayout-derived
+     nLocalCells/localOrigCell arguments guarantee within one iteration. */
+  PetscCall(LaunchCudaMetricTensorKernelImpl(nLocalCells,
+                                             act->n_qp,
+                                             fem->h0,
+                                             theta,
+                                             NULL,
+                                             NULL,
+                                             status,
+                                             basis_current,
+                                             basis_reference,
+                                             metric_current,
+                                             metric_reference,
+                                             /*geom_already_on_device=*/PETSC_TRUE));
+
+  const double t_up0_ = MPI_Wtime();
+  for (PetscInt lc = 0; lc < nLocalCells; ++lc) {
+    const PetscInt ec = localOrigCell[lc];
+    if (ec < 0 || ec >= ibm->n_elmt) continue;
+
+    ElemActData *ead = &act->elem_act_data[ec];
+    for (PetscInt qp = 0; qp < act->n_qp; ++qp) {
+      const size_t entry = static_cast<size_t>(lc) * n_qp + static_cast<size_t>(qp);
+      PetscCheck(status[entry] == 0, PETSC_COMM_SELF, PETSC_ERR_LIB,
+                 "CUDA metric kernel failed for element %" PetscInt_FMT " (local cell %" PetscInt_FMT
+                 "), qp %" PetscInt_FMT " with status %d",
+                 ec, lc, qp, (int)status[entry]);
+
+      const size_t basis_base = entry * kCudaBasisStrideCpp_;
+      const size_t metric_base = entry * kCudaMetricStrideCpp_;
+
+      ead->g[qp].Cov[0] = UnpackCmpnts_(&basis_current[basis_base + 0]);
+      ead->g[qp].Cov[1] = UnpackCmpnts_(&basis_current[basis_base + 3]);
+      ead->g[qp].Cov[2] = UnpackCmpnts_(&basis_current[basis_base + 6]);
+      ead->g[qp].Cont[0] = UnpackCmpnts_(&basis_current[basis_base + 9]);
+      ead->g[qp].Cont[1] = UnpackCmpnts_(&basis_current[basis_base + 12]);
+      ead->g[qp].Cont[2] = UnpackCmpnts_(&basis_current[basis_base + 15]);
+
+      ead->g0[qp].Cov[0] = UnpackCmpnts_(&basis_reference[basis_base + 0]);
+      ead->g0[qp].Cov[1] = UnpackCmpnts_(&basis_reference[basis_base + 3]);
+      ead->g0[qp].Cov[2] = UnpackCmpnts_(&basis_reference[basis_base + 6]);
+      ead->g0[qp].Cont[0] = UnpackCmpnts_(&basis_reference[basis_base + 9]);
+      ead->g0[qp].Cont[1] = UnpackCmpnts_(&basis_reference[basis_base + 12]);
+      ead->g0[qp].Cont[2] = UnpackCmpnts_(&basis_reference[basis_base + 15]);
+
+      for (PetscInt i = 0; i < 3; ++i) {
+        for (PetscInt j = 0; j < 3; ++j) {
+          const size_t ij = static_cast<size_t>(3 * i + j);
+          ead->gm[qp].Cov[i][j] = metric_current[metric_base + ij];
+          ead->gm[qp].Cont[i][j] = metric_current[metric_base + 9 + ij];
+          ead->gm0[qp].Cov[i][j] = metric_reference[metric_base + ij];
+          ead->gm0[qp].Cont[i][j] = metric_reference[metric_base + 9 + ij];
+        }
+      }
+    }
+  }
+
+  CudaStageTimerAdd(3, MPI_Wtime() - t_up0_);
+
+  PetscFunctionReturn(0);
+}
+
 extern "C" PetscErrorCode RunCudaSubdivGeomKernel(FE *fem, PetscBool use_reference_coords)
 {
   PetscFunctionBegin;
@@ -353,7 +479,9 @@ extern "C" PetscErrorCode RunCudaSubdivGeomKernel(FE *fem, PetscBool use_referen
                                            meta,
                                            status,
                                            geom,
-                                           irregular));
+                                           irregular,
+                                           /*save_geom_as_reference=*/PETSC_FALSE,
+                                           /*save_geom_as_current=*/PETSC_FALSE));
 
   // Copy geometry data from device to host structures
   for (PetscInt ec = 0; ec < ibm->n_elmt; ++ec) {
@@ -405,6 +533,121 @@ extern "C" PetscErrorCode RunCudaSubdivGeomKernel(FE *fem, PetscBool use_referen
       PetscCall(PetscMemcpy(target_geom->INab2, &irregular[irregular_base + 4*nen], (size_t)nen * sizeof(PetscReal)));
     }
   }
+
+  PetscFunctionReturn(0);
+}
+
+/* Partitioned variant for the DMPlex+CUDA path: same as RunCudaSubdivGeomKernel
+ * above, except the kernel only processes this rank's local cell subset
+ * (nLocalCells/localIre/localVal/localPatch, from a DMPlexPatchLayout) instead
+ * of the whole, undistributed ibm->n_elmt/ire/val/patch. Coordinates are still
+ * read from the full ibm->x_bp/y_bp/z_bp arrays -- localPatch entries use
+ * original/global vertex indices, and those arrays are kept correctly patched
+ * for this rank's stencil needs by the DMPlex PetscSF exchange (unchanged by
+ * this function). The device-side kernel itself (LaunchCudaSubdivGeomKernelImpl)
+ * is unmodified -- it only ever saw "some number of cells with some patch
+ * data" and does not care whether that's the whole mesh or a partition. */
+extern "C" PetscErrorCode RunCudaSubdivGeomKernelPartitioned(
+    FE *fem,
+    PetscInt nLocalCells,
+    const PetscInt *localOrigCell,
+    const PetscInt *localIre,
+    const PetscInt *localVal,
+    const PetscInt *localPatch,
+    PetscBool use_reference_coords)
+{
+  PetscFunctionBegin;
+  PetscCheck(fem != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "FE pointer must not be NULL");
+  PetscCheck(fem->ibm != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "IBM pointer must not be NULL");
+  PetscCheck(nLocalCells >= 0, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "nLocalCells must be non-negative");
+  if (nLocalCells == 0) PetscFunctionReturn(0);
+  PetscCheck(localOrigCell != NULL && localIre != NULL && localVal != NULL && localPatch != NULL,
+             PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "Local layout arrays must not be NULL");
+  PetscCall(InitCudaWorkspace());
+
+  IBMNodes *ibm = fem->ibm;
+  const PetscReal *xb = use_reference_coords ? ibm->x_bp0 : ibm->x_bp;
+  const PetscReal *yb = use_reference_coords ? ibm->y_bp0 : ibm->y_bp;
+  const PetscReal *zb = use_reference_coords ? ibm->z_bp0 : ibm->z_bp;
+
+  const size_t n_local = static_cast<size_t>(nLocalCells);
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.geom_meta, n_local * 3u, "geom_meta"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.geom_status, n_local, "geom_status"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.geom, n_local * kCudaGeomStrideCpp_, "geom"));
+  PetscCall(CheckHostBufferSize_(g_cuda_host_workspace_.irregular, n_local * 80u, "irregular"));
+
+  PetscInt *meta = g_cuda_host_workspace_.geom_meta.data();
+  PetscInt *status = g_cuda_host_workspace_.geom_status.data();
+  PetscReal *geom = g_cuda_host_workspace_.geom.data();
+  PetscReal *irregular = g_cuda_host_workspace_.irregular.data();
+
+  PetscCall(LaunchCudaSubdivGeomKernelImpl(nLocalCells,
+                                           localIre,
+                                           localVal,
+                                           localPatch,
+                                           xb,
+                                           yb,
+                                           zb,
+                                           meta,
+                                           status,
+                                           geom,
+                                           irregular,
+                                           /*save_geom_as_reference=*/use_reference_coords,
+                                           /*save_geom_as_current=*/(PetscBool)!use_reference_coords));
+
+  const double t_gu0_ = MPI_Wtime();
+  // Copy geometry data from device to host structures, remapping each
+  // local cell lc back to its original/global element index for the
+  // act_data write-back (ghost cells outside [0, ibm->n_elmt) are skipped,
+  // matching RunLocalGeometry_'s CPU-path convention).
+  for (PetscInt lc = 0; lc < nLocalCells; ++lc) {
+    const PetscInt ec = localOrigCell[lc];
+    if (ec < 0 || ec >= ibm->n_elmt) continue;
+
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    PetscCheck(ead != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,
+               "Element %" PetscInt_FMT " act data must not be NULL", ec);
+
+    const size_t meta_base = static_cast<size_t>(lc) * 3u;
+    const size_t geom_base = static_cast<size_t>(lc) * 24u;
+    const size_t irregular_base = static_cast<size_t>(lc) * 80u;
+
+    PetscInt is_irregular = meta[meta_base + 0];
+    PetscInt v = meta[meta_base + 1];
+    PetscInt nen = meta[meta_base + 2];
+
+    SubdivGeomQP *target_geom = use_reference_coords ? &ead->geom0[0] : &ead->geom[0];
+
+    target_geom->is_irregular = is_irregular;
+    target_geom->v = v;
+    target_geom->nen = nen;
+
+    target_geom->ndx21 = UnpackCmpnts_(&geom[geom_base + 0]);
+    target_geom->ndx31 = UnpackCmpnts_(&geom[geom_base + 3]);
+    target_geom->nn = UnpackCmpnts_(&geom[geom_base + 6]);
+    target_geom->gc1 = UnpackCmpnts_(&geom[geom_base + 9]);
+    target_geom->gc2 = UnpackCmpnts_(&geom[geom_base + 12]);
+    target_geom->Aaa = UnpackCmpnts_(&geom[geom_base + 15]);
+    target_geom->Abb = UnpackCmpnts_(&geom[geom_base + 18]);
+    target_geom->Aab = UnpackCmpnts_(&geom[geom_base + 21]);
+
+    if (is_irregular) {
+      if (target_geom->INa0 == NULL) {
+        PetscCall(PetscMalloc1(nen, &target_geom->INa0));
+        PetscCall(PetscMalloc1(nen, &target_geom->INa1));
+        PetscCall(PetscMalloc1(nen, &target_geom->INab0));
+        PetscCall(PetscMalloc1(nen, &target_geom->INab1));
+        PetscCall(PetscMalloc1(nen, &target_geom->INab2));
+      }
+      PetscCall(PetscMemcpy(target_geom->INa0, &irregular[irregular_base], (size_t)nen * sizeof(PetscReal)));
+      PetscCall(PetscMemcpy(target_geom->INa1, &irregular[irregular_base + nen], (size_t)nen * sizeof(PetscReal)));
+      PetscCall(PetscMemcpy(target_geom->INab0, &irregular[irregular_base + 2*nen], (size_t)nen * sizeof(PetscReal)));
+      PetscCall(PetscMemcpy(target_geom->INab1, &irregular[irregular_base + 3*nen], (size_t)nen * sizeof(PetscReal)));
+      PetscCall(PetscMemcpy(target_geom->INab2, &irregular[irregular_base + 4*nen], (size_t)nen * sizeof(PetscReal)));
+    }
+  }
+
+  CudaStageTimerAdd(3, MPI_Wtime() - t_gu0_);
 
   PetscFunctionReturn(0);
 }

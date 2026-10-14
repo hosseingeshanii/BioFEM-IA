@@ -76,6 +76,15 @@ PetscErrorCode FEM_DMPlexGeomSyncGhostDOFs(FE *fem, Vec R);
 PetscErrorCode RunDMPlexGeomProcesses(FE *fem);
 
 /**
+ * @brief Benchmark: same as RunDMPlexGeomProcesses, but each rank's local
+ * cell partition is evaluated on its own bound GPU instead of on the CPU.
+ * DMPlex/PetscSF setup and per-iteration coordinate exchange are unchanged
+ * (still CPU/host-side); geometry AND metric-tensor compute both move to
+ * CUDA. Selected via `-cuda_process 1 -dmplex_geom_process 1` together.
+ */
+PetscErrorCode RunDMPlexGeomProcessesCuda(FE *fem);
+
+/**
  * @brief Drop-in geometry call: setup + update + destroy in one shot.
  *
  * Wraps FEM_DMPlexGeomSetup / FEM_DMPlexGeomUpdate / FEM_DMPlexGeomDestroy for

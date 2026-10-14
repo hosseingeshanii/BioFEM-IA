@@ -18,6 +18,22 @@ public:
   PetscInt elem_capacity = 0;
   PetscInt metric_entry_capacity = 0;
   PetscBool alloc_log = PETSC_FALSE;
+  PetscBool cache_topology = PETSC_TRUE;
+  /* -cuda_geom_phase_timing 1 (default off): diagnostic only, adds a
+     clock64()-based cycle counter per SubdivGeomKernel_ phase
+     (prep/gather, 15-way reduction, single-thread final assembly),
+     atomicAdd-accumulated into d_phase_cycles and printed once per
+     LaunchCudaSubdivGeomKernelImpl call. Answers "which phase actually
+     dominates" without needing Nsight Compute (blocked on this cluster).
+     Left at PETSC_FALSE, this adds one null-pointer check per block and
+     is not expected to perturb any other measurement in this document. */
+  PetscBool geom_phase_timing = PETSC_FALSE;
+  unsigned long long *d_phase_cycles = NULL; /* [0]=prep [1]=reduce [2]=final */
+
+  const PetscInt *topology_ire_host = NULL;
+  const PetscInt *topology_val_host = NULL;
+  const PetscInt *topology_patch_host = NULL;
+  PetscInt topology_n_elmt = -1;
 
   PetscInt *d_nv1 = NULL;
   PetscInt *d_nv2 = NULL;
@@ -265,6 +281,57 @@ static PetscErrorCode CudaCheck_(cudaError_t code, const char *what)
   PetscFunctionReturn(0);
 }
 
+/* Per-stage accumulators for the breakdown report: 0 host->device seconds,
+   1 kernel seconds, 2 device->host seconds, 3 host pack/unpack seconds
+   (added from cuda_wrapper.cpp), 4 host->device bytes, 5 device->host bytes. */
+static double g_stage_[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+extern "C" void CudaStageTimerAdd(int slot, double v)
+{
+  if (slot >= 0 && slot < 6) g_stage_[slot] += v;
+}
+extern "C" void CudaStageTimersGetReset(double *out)
+{
+  for (int i = 0; i < 6; ++i) { out[i] = g_stage_[i]; g_stage_[i] = 0.0; }
+}
+
+static PetscBool g_cuda_device_bound_ = PETSC_FALSE;
+
+/* Bind this rank to a distinct GPU on its node, so multi-rank runs on a
+ * multi-GPU node don't all silently pile onto device 0 (the CUDA default).
+ * Node-local rank is computed via MPI_Comm_split_type(MPI_COMM_TYPE_SHARED),
+ * which is portable across schedulers (no dependence on SLURM_LOCALID or
+ * any particular launcher), then device = local_rank % device_count. Must
+ * run before any other CUDA call in this process (first cudaMalloc etc.),
+ * since cudaSetDevice only affects device selection for calls made after
+ * it. Idempotent -- only does the MPI/CUDA work once per process. */
+static PetscErrorCode BindCudaDeviceToRank_(void)
+{
+  MPI_Comm local_comm;
+  PetscMPIInt local_rank = 0, world_rank = 0;
+  int device_count = 0, device_id = 0;
+
+  PetscFunctionBegin;
+  if (g_cuda_device_bound_) PetscFunctionReturn(0);
+
+  PetscCallMPI(MPI_Comm_split_type(PETSC_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local_comm));
+  PetscCallMPI(MPI_Comm_rank(local_comm, &local_rank));
+  PetscCallMPI(MPI_Comm_free(&local_comm));
+  PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &world_rank));
+
+  PetscCall(CudaCheck_(cudaGetDeviceCount(&device_count), "cudaGetDeviceCount"));
+  PetscCheck(device_count > 0, PETSC_COMM_SELF, PETSC_ERR_SUP, "No CUDA devices visible to this process");
+
+  device_id = static_cast<int>(local_rank) % device_count;
+  PetscCall(CudaCheck_(cudaSetDevice(device_id), "cudaSetDevice"));
+
+  PetscPrintf(PETSC_COMM_SELF,
+              "[CUDA device] world_rank=%d node_local_rank=%d -> bound to device %d of %d visible\n",
+              (int)world_rank, (int)local_rank, device_id, device_count);
+
+  g_cuda_device_bound_ = PETSC_TRUE;
+  PetscFunctionReturn(0);
+}
+
 static PetscErrorCode CudaMallocTimed_(void **ptr, size_t bytes, const char *what, PetscBool log_enabled,
                                        PetscLogDouble *elapsed)
 {
@@ -302,6 +369,12 @@ static PetscErrorCode ConfigureCudaWorkspaceOptions_(CudaWorkspace_ *ws)
   PetscFunctionBegin;
   PetscCheck(ws != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "CUDA workspace must not be NULL");
   PetscCall(PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-cuda_alloc_log", &ws->alloc_log, PETSC_NULL));
+  PetscCall(PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-cuda_cache_topology", &ws->cache_topology, PETSC_NULL));
+  PetscCall(PetscOptionsGetBool(PETSC_NULL, PETSC_NULL, "-cuda_geom_phase_timing", &ws->geom_phase_timing, PETSC_NULL));
+  if (ws->geom_phase_timing && ws->d_phase_cycles == NULL) {
+    PetscCall(CudaCheck_(cudaMalloc(reinterpret_cast<void **>(&ws->d_phase_cycles), 3 * sizeof(unsigned long long)),
+                         "cudaMalloc(d_phase_cycles)"));
+  }
   PetscFunctionReturn(0);
 }
 
@@ -420,6 +493,13 @@ static PetscErrorCode EnsureElementCapacity_(CudaWorkspace_ *ws, PetscInt elem_c
   PetscCall(CudaMallocTimed_(reinterpret_cast<void **>(&ws->d_geom_reference), geom_bytes,
                              "cudaMalloc(d_geom_reference)", alloc_log, &malloc_time));
 
+  /* d_ire/d_val/d_patch were just freed and reallocated above, so any previously
+   * cached topology upload is now stale regardless of host pointer/size. */
+  ws->topology_ire_host = NULL;
+  ws->topology_val_host = NULL;
+  ws->topology_patch_host = NULL;
+  ws->topology_n_elmt = -1;
+
   ws->elem_capacity = elem_capacity;
   const size_t malloc_bytes = 6u * elem_bytes + elem_coord_bytes + patch_bytes + meta_bytes +
                               3u * geom_bytes + irregular_bytes;
@@ -524,6 +604,7 @@ static PetscErrorCode DestroyCudaWorkspace_(CudaWorkspace_ *ws)
   PetscCall(CudaFreePtr_(reinterpret_cast<void **>(&ws->d_basis_reference)));
   PetscCall(CudaFreePtr_(reinterpret_cast<void **>(&ws->d_metric_current)));
   PetscCall(CudaFreePtr_(reinterpret_cast<void **>(&ws->d_metric_reference)));
+  PetscCall(CudaFreePtr_(reinterpret_cast<void **>(&ws->d_phase_cycles)));
 
   ws->coord_capacity = 0;
   ws->elem_capacity = 0;
@@ -534,6 +615,7 @@ static PetscErrorCode DestroyCudaWorkspace_(CudaWorkspace_ *ws)
 extern "C" PetscErrorCode InitCudaWorkspaceImpl(void)
 {
   PetscFunctionBegin;
+  PetscCall(BindCudaDeviceToRank_());
   if (g_cuda_workspace_ == NULL) {
     g_cuda_workspace_ = new CudaWorkspace_();
   }
@@ -611,13 +693,17 @@ __global__ static void SubdivGeomKernel_(PetscInt n_elmt,
                                          PetscInt *meta_out,
                                          PetscInt *status_out,
                                          PetscReal *geom_out,
-                                         PetscReal *irregular_out)
+                                         PetscReal *irregular_out,
+                                         unsigned long long *phase_cycles_out /* [0]=prep [1]=reduce
+                                           [2]=final; NULL disables timing (default) */)
 {
   const PetscInt ec = static_cast<PetscInt>(blockIdx.x);
   const PetscInt tid = static_cast<PetscInt>(threadIdx.x);
   if (ec >= n_elmt) {
     return;
   }
+  long long t_start_ = 0, t_prep_ = 0, t_reduce_ = 0;
+  if (phase_cycles_out != NULL && tid == 0) t_start_ = clock64();
 
   const PetscInt meta_base = 3 * ec;
   const PetscInt geom_base = kCudaGeomStride_ * ec;
@@ -674,6 +760,7 @@ __global__ static void SubdivGeomKernel_(PetscInt n_elmt,
       }
     }
     __syncthreads();
+    if (phase_cycles_out != NULL && tid == 0) t_prep_ = clock64();
     if (tid < 15) {
       PetscReal sum = 0.0;
       for (PetscInt i = 0; i < kCudaRegularNen_; ++i) {
@@ -682,6 +769,7 @@ __global__ static void SubdivGeomKernel_(PetscInt n_elmt,
       geom_sum_s[tid] = sum;
     }
     __syncthreads();
+    if (phase_cycles_out != NULL && tid == 0) t_reduce_ = clock64();
 
     if (tid != 0) {
       return;
@@ -730,6 +818,13 @@ __global__ static void SubdivGeomKernel_(PetscInt n_elmt,
     StoreCmpnts_(geom_out, geom_base + 15, Aaa);
     StoreCmpnts_(geom_out, geom_base + 18, Abb);
     StoreCmpnts_(geom_out, geom_base + 21, Aab);
+
+    if (phase_cycles_out != NULL) {
+      const long long t_final_ = clock64();
+      atomicAdd(&phase_cycles_out[0], (unsigned long long)(t_prep_ - t_start_));
+      atomicAdd(&phase_cycles_out[1], (unsigned long long)(t_reduce_ - t_prep_));
+      atomicAdd(&phase_cycles_out[2], (unsigned long long)(t_final_ - t_reduce_));
+    }
 
     // if (ec < 3) {
     //   printf("[CUDA geom kernel] ec=%d regular ndx21=(%.6e, %.6e, %.6e) nn=(%.6e, %.6e, %.6e)\n",
@@ -832,6 +927,7 @@ __global__ static void SubdivGeomKernel_(PetscInt n_elmt,
       geom_part_s[scalar][node_id] = IN_s[in_index][node_id] * GeomCoord_(scalar, x, y, z);
     }
     __syncthreads();
+    if (phase_cycles_out != NULL && tid == 0) t_prep_ = clock64();
     if (tid < 15) {
       PetscReal sum = 0.0;
       for (PetscInt i = 0; i < nen; ++i) {
@@ -840,6 +936,7 @@ __global__ static void SubdivGeomKernel_(PetscInt n_elmt,
       geom_sum_s[tid] = sum;
     }
     __syncthreads();
+    if (phase_cycles_out != NULL && tid == 0) t_reduce_ = clock64();
 
     if (tid != 0) {
       return;
@@ -885,6 +982,13 @@ __global__ static void SubdivGeomKernel_(PetscInt n_elmt,
     StoreCmpnts_(geom_out, geom_base + 15, Aaa);
     StoreCmpnts_(geom_out, geom_base + 18, Abb);
     StoreCmpnts_(geom_out, geom_base + 21, Aab);
+
+    if (phase_cycles_out != NULL) {
+      const long long t_final_ = clock64();
+      atomicAdd(&phase_cycles_out[0], (unsigned long long)(t_prep_ - t_start_));
+      atomicAdd(&phase_cycles_out[1], (unsigned long long)(t_reduce_ - t_prep_));
+      atomicAdd(&phase_cycles_out[2], (unsigned long long)(t_final_ - t_reduce_));
+    }
 
     // if (ec < 3) {
     //   printf("[CUDA geom kernel] ec=%d irregular v=%d nen=%d ndx21=(%.6e, %.6e, %.6e)\n",
@@ -1040,7 +1144,9 @@ extern "C" PetscErrorCode LaunchCudaSubdivGeomKernelImpl(
     PetscInt *meta_out,
     PetscInt *status_out,
     PetscReal *geom_out,
-    PetscReal *irregular_out)
+    PetscReal *irregular_out,
+    PetscBool save_geom_as_reference,
+    PetscBool save_geom_as_current)
 {
   CudaWorkspace_ *ws = NULL;
   PetscInt max_node_index = -1;
@@ -1082,16 +1188,52 @@ extern "C" PetscErrorCode LaunchCudaSubdivGeomKernelImpl(
   PetscCall(EnsureElementCapacity_(ws, n_elmt));
   PetscCall(EnsureCoordCapacity_(ws, max_node_index + 1));
 
-  PetscCall(CudaCheck_(cudaMemcpy(ws->d_ire, ire, elem_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(ire)"));
-  PetscCall(CudaCheck_(cudaMemcpy(ws->d_val, val, elem_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(val)"));
-  PetscCall(CudaCheck_(cudaMemcpy(ws->d_patch, patch, patch_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(patch)"));
+  const double t_h2d0_ = MPI_Wtime();
+  {
+    const PetscBool topology_unchanged = (ws->cache_topology &&
+        ws->topology_ire_host == ire &&
+        ws->topology_val_host == val &&
+        ws->topology_patch_host == patch &&
+        ws->topology_n_elmt == n_elmt) ? PETSC_TRUE : PETSC_FALSE;
+    if (topology_unchanged) {
+      if (ws->alloc_log) {
+        PetscPrintf(PETSC_COMM_SELF,
+                    "[CUDA topology] reuse n_elmt=%" PetscInt_FMT " (skipped ire/val/patch memcpy)\n",
+                    n_elmt);
+      }
+    } else {
+      PetscCall(CudaCheck_(cudaMemcpy(ws->d_ire, ire, elem_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(ire)"));
+      PetscCall(CudaCheck_(cudaMemcpy(ws->d_val, val, elem_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(val)"));
+      PetscCall(CudaCheck_(cudaMemcpy(ws->d_patch, patch, patch_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(patch)"));
+      if (ws->cache_topology) {
+        ws->topology_ire_host = ire;
+        ws->topology_val_host = val;
+        ws->topology_patch_host = patch;
+        ws->topology_n_elmt = n_elmt;
+      }
+      if (ws->alloc_log) {
+        PetscPrintf(PETSC_COMM_SELF,
+                    "[CUDA topology] upload n_elmt=%" PetscInt_FMT " cached=%s\n",
+                    n_elmt,
+                    ws->cache_topology ? "true" : "false");
+      }
+    }
+  }
   PetscCall(CudaCheck_(cudaMemcpy(ws->d_x, xb, coord_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(xb)"));
   PetscCall(CudaCheck_(cudaMemcpy(ws->d_y, yb, coord_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(yb)"));
   PetscCall(CudaCheck_(cudaMemcpy(ws->d_z, zb, coord_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(zb)"));
+  CudaStageTimerAdd(0, MPI_Wtime() - t_h2d0_);
+  CudaStageTimerAdd(4, 3.0 * (double)coord_bytes);
 
+  const double t_k0_ = MPI_Wtime();
   {
     const int threads_per_block = kCudaGeomThreadsPerElement_;
     const int blocks = static_cast<int>(n_elmt);
+    unsigned long long *phase_cycles_arg = ws->geom_phase_timing ? ws->d_phase_cycles : NULL;
+    if (phase_cycles_arg != NULL) {
+      PetscCall(CudaCheck_(cudaMemset(phase_cycles_arg, 0, 3 * sizeof(unsigned long long)),
+                           "cudaMemset(d_phase_cycles)"));
+    }
     SubdivGeomKernel_<<<blocks, threads_per_block>>>(n_elmt,
                                                      ws->d_ire,
                                                      ws->d_val,
@@ -1102,11 +1244,52 @@ extern "C" PetscErrorCode LaunchCudaSubdivGeomKernelImpl(
                                                      ws->d_meta_out,
                                                      ws->d_status_elem_out,
                                                      ws->d_geom_out,
-                                                     ws->d_irregular_out);
+                                                     ws->d_irregular_out,
+                                                     phase_cycles_arg);
     PetscCall(CudaCheck_(cudaGetLastError(), "SubdivGeomKernel_ launch"));
     PetscCall(CudaCheck_(cudaDeviceSynchronize(), "cudaDeviceSynchronize(SubdivGeomKernel_)"));
+    if (phase_cycles_arg != NULL) {
+      unsigned long long h_phase_cycles[3] = {0, 0, 0};
+      PetscCall(CudaCheck_(cudaMemcpy(h_phase_cycles, phase_cycles_arg, 3 * sizeof(unsigned long long),
+                                      cudaMemcpyDeviceToHost),
+                           "cudaMemcpy(d_phase_cycles->host)"));
+      const double total = (double)(h_phase_cycles[0] + h_phase_cycles[1] + h_phase_cycles[2]);
+      PetscCall(PetscPrintf(PETSC_COMM_SELF,
+                            "[CUDA geom phase timing] n_elmt=%" PetscInt_FMT
+                            " prep=%.1f%% (%llu cyc) reduce=%.1f%% (%llu cyc) final=%.1f%% (%llu cyc)"
+                            " [summed over all blocks, clock64() cycles, not wall-clock]\n",
+                            n_elmt,
+                            total > 0 ? 100.0 * (double)h_phase_cycles[0] / total : 0.0, h_phase_cycles[0],
+                            total > 0 ? 100.0 * (double)h_phase_cycles[1] / total : 0.0, h_phase_cycles[1],
+                            total > 0 ? 100.0 * (double)h_phase_cycles[2] / total : 0.0, h_phase_cycles[2]));
+    }
+  }
+  CudaStageTimerAdd(1, MPI_Wtime() - t_k0_);
+
+  /* Feed this call's device-side geometry output directly into the metric
+     kernel's device input slots (device-to-device, on-chip bandwidth, no
+     PCIe) instead of the old path: download to host, unpack into
+     ElemActData, then (in RunCudaMetricTensorKernelPartitioned) repack and
+     re-upload. d_geom_current/d_geom_reference are already sized to
+     n_elmt*kCudaGeomStride_ by the EnsureElementCapacity_ call above, same
+     as d_geom_out, so this is a same-size copy. The plain (non-partitioned)
+     callers pass PETSC_FALSE for both flags and are unaffected. */
+  if (save_geom_as_reference || save_geom_as_current) {
+    const double t_sv0_ = MPI_Wtime();
+    if (save_geom_as_reference) {
+      PetscCall(CudaCheck_(cudaMemcpy(ws->d_geom_reference, ws->d_geom_out, geom_bytes,
+                                      cudaMemcpyDeviceToDevice),
+                           "cudaMemcpy(d_geom_out->d_geom_reference, D2D)"));
+    }
+    if (save_geom_as_current) {
+      PetscCall(CudaCheck_(cudaMemcpy(ws->d_geom_current, ws->d_geom_out, geom_bytes,
+                                      cudaMemcpyDeviceToDevice),
+                           "cudaMemcpy(d_geom_out->d_geom_current, D2D)"));
+    }
+    CudaStageTimerAdd(1, MPI_Wtime() - t_sv0_);
   }
 
+  const double t_d0_ = MPI_Wtime();
   PetscCall(CudaCheck_(cudaMemcpy(meta_out, ws->d_meta_out, meta_bytes, cudaMemcpyDeviceToHost),
                        "cudaMemcpy(meta_out)"));
   PetscCall(CudaCheck_(cudaMemcpy(status_out, ws->d_status_elem_out, elem_bytes, cudaMemcpyDeviceToHost),
@@ -1115,6 +1298,8 @@ extern "C" PetscErrorCode LaunchCudaSubdivGeomKernelImpl(
                        "cudaMemcpy(geom_out)"));
   PetscCall(CudaCheck_(cudaMemcpy(irregular_out, ws->d_irregular_out, irregular_bytes, cudaMemcpyDeviceToHost),
                        "cudaMemcpy(irregular_out)"));
+  CudaStageTimerAdd(2, MPI_Wtime() - t_d0_);
+  CudaStageTimerAdd(5, (double)(meta_bytes + elem_bytes + geom_bytes + irregular_bytes));
 
   PetscFunctionReturn(0);
 }
@@ -1130,15 +1315,18 @@ extern "C" PetscErrorCode LaunchCudaMetricTensorKernelImpl(
     PetscReal *basis_current_out,
     PetscReal *basis_reference_out,
     PetscReal *metric_current_out,
-    PetscReal *metric_reference_out)
+    PetscReal *metric_reference_out,
+    PetscBool geom_already_on_device)
 {
   CudaWorkspace_ *ws = NULL;
 
   PetscFunctionBegin;
   PetscCheck(n_elmt >= 0, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "n_elmt must be non-negative");
   PetscCheck(n_qp > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "n_qp must be positive");
-  PetscCheck(theta != NULL && geom_current != NULL && geom_reference != NULL,
-             PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "Kernel input arrays must not be NULL");
+  PetscCheck(theta != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "theta must not be NULL");
+  PetscCheck(geom_already_on_device || (geom_current != NULL && geom_reference != NULL),
+             PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,
+             "geom_current/geom_reference must not be NULL unless geom_already_on_device");
   PetscCheck(status_out != NULL && basis_current_out != NULL && basis_reference_out != NULL &&
              metric_current_out != NULL && metric_reference_out != NULL,
              PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "Kernel output arrays must not be NULL");
@@ -1157,12 +1345,22 @@ extern "C" PetscErrorCode LaunchCudaMetricTensorKernelImpl(
   PetscCall(EnsureElementCapacity_(ws, n_elmt));
   PetscCall(EnsureMetricEntryCapacity_(ws, metric_entry_capacity));
 
+  const double t_mh0_ = MPI_Wtime();
   PetscCall(CudaCheck_(cudaMemcpy(ws->d_theta, theta, qp_bytes, cudaMemcpyHostToDevice), "cudaMemcpy(theta)"));
-  PetscCall(CudaCheck_(cudaMemcpy(ws->d_geom_current, geom_current, geom_bytes, cudaMemcpyHostToDevice),
-                       "cudaMemcpy(geom_current)"));
-  PetscCall(CudaCheck_(cudaMemcpy(ws->d_geom_reference, geom_reference, geom_bytes, cudaMemcpyHostToDevice),
-                       "cudaMemcpy(geom_reference)"));
+  /* When the geometry kernel already left its output resident on the device
+     (d_geom_current/d_geom_reference populated via a prior D2D copy from
+     d_geom_out -- see LaunchCudaSubdivGeomKernelImpl), skip the host upload
+     entirely: the data is already where the metric kernel needs it. */
+  if (!geom_already_on_device) {
+    PetscCall(CudaCheck_(cudaMemcpy(ws->d_geom_current, geom_current, geom_bytes, cudaMemcpyHostToDevice),
+                         "cudaMemcpy(geom_current)"));
+    PetscCall(CudaCheck_(cudaMemcpy(ws->d_geom_reference, geom_reference, geom_bytes, cudaMemcpyHostToDevice),
+                         "cudaMemcpy(geom_reference)"));
+  }
+  CudaStageTimerAdd(0, MPI_Wtime() - t_mh0_);
+  CudaStageTimerAdd(4, (double)(qp_bytes + (geom_already_on_device ? 0 : 2 * geom_bytes)));
 
+  const double t_mk0_ = MPI_Wtime();
   {
     const int threads_per_block = 256;
     const int blocks = static_cast<int>((total_entries + threads_per_block - 1) / threads_per_block);
@@ -1180,7 +1378,9 @@ extern "C" PetscErrorCode LaunchCudaMetricTensorKernelImpl(
     PetscCall(CudaCheck_(cudaGetLastError(), "MetricTensorKernel_ launch"));
     PetscCall(CudaCheck_(cudaDeviceSynchronize(), "cudaDeviceSynchronize(MetricTensorKernel_)"));
   }
+  CudaStageTimerAdd(1, MPI_Wtime() - t_mk0_);
 
+  const double t_md0_ = MPI_Wtime();
   PetscCall(CudaCheck_(cudaMemcpy(status_out, ws->d_status_metric_out, status_bytes, cudaMemcpyDeviceToHost),
                        "cudaMemcpy(status_out)"));
   PetscCall(CudaCheck_(cudaMemcpy(basis_current_out, ws->d_basis_current, basis_bytes, cudaMemcpyDeviceToHost),
@@ -1191,6 +1391,8 @@ extern "C" PetscErrorCode LaunchCudaMetricTensorKernelImpl(
                        "cudaMemcpy(metric_current_out)"));
   PetscCall(CudaCheck_(cudaMemcpy(metric_reference_out, ws->d_metric_reference, metric_bytes, cudaMemcpyDeviceToHost),
                        "cudaMemcpy(metric_reference_out)"));
+  CudaStageTimerAdd(2, MPI_Wtime() - t_md0_);
+  CudaStageTimerAdd(5, (double)(status_bytes + 2 * basis_bytes + 2 * metric_bytes));
 
   PetscFunctionReturn(0);
 }

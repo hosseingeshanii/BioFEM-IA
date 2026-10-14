@@ -40,6 +40,24 @@ PetscErrorCode RunCudaSubdivGeomKernel(FE *fem, PetscBool use_reference_coords)
   PetscFunctionReturn(0);
 }
 
+PetscErrorCode RunCudaSubdivGeomKernelPartitioned(
+    FE *fem,
+    PetscInt nLocalCells,
+    const PetscInt *localOrigCell,
+    const PetscInt *localIre,
+    const PetscInt *localVal,
+    const PetscInt *localPatch,
+    PetscBool use_reference_coords)
+{
+  PetscFunctionBegin;
+  PetscCheck(fem != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "FE pointer must not be NULL");
+  (void)nLocalCells; (void)localOrigCell; (void)localIre; (void)localVal; (void)localPatch;
+  (void)use_reference_coords;
+  SETERRQ(PETSC_COMM_SELF, PETSC_ERR_SUP,
+          "CUDA kernel support is not enabled in this build. Rebuild with USE_CUDA=1.");
+  PetscFunctionReturn(0);
+}
+
 PetscErrorCode RunCudaMetricTensorKernel(FE *fem)
 {
   PetscFunctionBegin;
@@ -48,3 +66,19 @@ PetscErrorCode RunCudaMetricTensorKernel(FE *fem)
           "CUDA kernel support is not enabled in this build. Rebuild with USE_CUDA=1.");
   PetscFunctionReturn(0);
 }
+
+PetscErrorCode RunCudaMetricTensorKernelPartitioned(
+    FE *fem,
+    PetscInt nLocalCells,
+    const PetscInt *localOrigCell)
+{
+  PetscFunctionBegin;
+  PetscCheck(fem != NULL, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL, "FE pointer must not be NULL");
+  (void)nLocalCells; (void)localOrigCell;
+  SETERRQ(PETSC_COMM_SELF, PETSC_ERR_SUP,
+          "CUDA kernel support is not enabled in this build. Rebuild with USE_CUDA=1.");
+  PetscFunctionReturn(0);
+}
+
+void CudaStageTimerAdd(int slot, double v) { (void)slot; (void)v; }
+void CudaStageTimersGetReset(double *out) { for (int i = 0; i < 6; ++i) out[i] = 0.0; }

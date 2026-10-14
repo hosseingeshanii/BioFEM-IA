@@ -128,10 +128,11 @@ def detect_cluster() -> dict:
 # Jobfile builders
 # ---------------------------------------------------------------------------
 def _run_jobfile(
-    *, backend, executable, run_dir, np, time, account,
+    *, backend, executable, run_dir, np, time, account, partition="",
     mpi_flags, load_env, gpu, petsc_opts="", slurm_output="",
 ) -> str:
     acct_line   = f"#SBATCH --account={account}" if account else ""
+    part_line   = f"#SBATCH --partition={partition}" if partition else ""
     gpu_line    = "#SBATCH --gpus=1" if gpu else ""
     output_line = f"#SBATCH --output={slurm_output}" if slurm_output else f"#SBATCH --output=biofem_{backend}_%j.out"
     ntasks      = 1 if gpu else np
@@ -153,6 +154,7 @@ def _run_jobfile(
         f"#SBATCH --cpus-per-task=1\n"
         f"#SBATCH --mem=8G\n"
         f"{output_line}\n"
+        f"{part_line}\n"
         f"{gpu_line}\n"
         f"{acct_line}\n"
         f"\nset -euo pipefail\n"
@@ -165,9 +167,10 @@ def _run_jobfile(
 
 def _sweep_jobfile(
     *, backend, executable, case_dir, nx, ny, ntasks, nnodes, nelems,
-    time, memory, account, mpi_flags, load_env, gpu,
+    time, memory, account, partition="", mpi_flags, load_env, gpu,
 ) -> str:
     acct_line = f"#SBATCH --account={account}" if account else ""
+    part_line = f"#SBATCH --partition={partition}" if partition else ""
     gpu_line  = "#SBATCH --gpus=1" if gpu else ""
     env_block = load_env if load_env else "# no load-env.sh found"
     if gpu:
@@ -186,6 +189,7 @@ def _sweep_jobfile(
         f"#SBATCH --cpus-per-task=1\n"
         f"#SBATCH --mem={memory}\n"
         f"#SBATCH --output=out_{backend}_nx{nx}_ny{ny}_np{ntasks}\n"
+        f"{part_line}\n"
         f"{gpu_line}\n"
         f"{acct_line}\n"
         f"\nset -euo pipefail\n"
@@ -223,6 +227,7 @@ def cmd_run(args):
     cfg       = load_site_config()
     cluster   = detect_cluster()
     account   = args.account or cfg.get("slurm", "account", fallback="")
+    partition = args.partition or cfg.get("slurm", "partition", fallback="")
     mpi_flags = cfg.get("mpi", "extra_flags", fallback="")
     load_env  = _load_env_line()
 
@@ -265,9 +270,13 @@ def cmd_run(args):
         if not account:
             print("[biofem] Warning: no SLURM account set. Job may be rejected.", file=sys.stderr)
             print("         Pass --account YOUR_ACCOUNT, or set it in config/site.cfg", file=sys.stderr)
+        if info["gpu"] and not partition:
+            print("[biofem] Warning: no SLURM partition set for a GPU backend.", file=sys.stderr)
+            print("         --gpus=1 alone may not route to a GPU partition on this cluster.", file=sys.stderr)
+            print("         Pass --partition YOUR_GPU_PARTITION, or set it in config/site.cfg", file=sys.stderr)
         jf = _run_jobfile(
             backend=args.backend, executable=executable, run_dir=run_dir,
-            np=args.np, time=args.time, account=account,
+            np=args.np, time=args.time, account=account, partition=partition,
             mpi_flags=mpi_flags, load_env=load_env, gpu=info["gpu"],
             petsc_opts=petsc_opts, slurm_output=args.slurm_output,
         )
@@ -370,12 +379,17 @@ def cmd_sweep(args):
 
     cfg       = load_site_config()
     account   = args.account or cfg.get("slurm", "account", fallback="")
+    partition = args.partition or cfg.get("slurm", "partition", fallback="")
     mpi_flags = cfg.get("mpi", "extra_flags", fallback="")
     load_env  = _load_env_line()
 
     if not account:
         print("[biofem] Warning: no SLURM account set. Jobs may be rejected.", file=sys.stderr)
         print("         Pass --account YOUR_ACCOUNT, or set it in config/site.cfg", file=sys.stderr)
+    if info["gpu"] and not partition:
+        print("[biofem] Warning: no SLURM partition set for a GPU backend.", file=sys.stderr)
+        print("         --gpus=1 alone may not route to a GPU partition on this cluster.", file=sys.stderr)
+        print("         Pass --partition YOUR_GPU_PARTITION, or set it in config/site.cfg", file=sys.stderr)
 
     nx_list = [int(x) for x in args.nx.split(",")]
     ny_list = [int(x) for x in args.ny.split(",")]
@@ -432,7 +446,7 @@ def cmd_sweep(args):
                 backend=args.backend, executable=executable,
                 case_dir=case_dir, nx=nx, ny=ny, ntasks=ntasks,
                 nnodes=nnodes, nelems=nelems,
-                time=time_limit, memory=memory, account=account,
+                time=time_limit, memory=memory, account=account, partition=partition,
                 mpi_flags=mpi_flags, load_env=load_env, gpu=info["gpu"],
             )
             jobfile = case_dir / f"jobfile_np{ntasks}.slurm"
@@ -1099,6 +1113,8 @@ Run:
                        help="SLURM time limit (default: 01:00:00)")
     p_run.add_argument("--account", default="",
                        help="SLURM account (overrides site.cfg)")
+    p_run.add_argument("--partition", default="",
+                       help="SLURM partition (overrides site.cfg; needed for GPU backends on most clusters)")
     p_run.add_argument("--local", action="store_true",
                        help="run directly in this terminal instead of submitting to SLURM")
     p_run.add_argument("--monitor", default="",
@@ -1137,6 +1153,8 @@ Run:
                       help="directory for generated case folders (default: ./sweep)")
     p_sw.add_argument("--account", default="",
                       help="SLURM account (overrides site.cfg)")
+    p_sw.add_argument("--partition", default="",
+                      help="SLURM partition (overrides site.cfg; needed for GPU backends on most clusters)")
     p_sw.add_argument("--min-elems-per-task", type=int, default=100,
                       help="skip (mesh, ntasks) with fewer elements/task (default: 100)")
     p_sw.add_argument("--failed-only", action="store_true",

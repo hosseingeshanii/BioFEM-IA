@@ -15,7 +15,6 @@ endif
 SRCDIR      = src
 INCDIR      = include
 BUILDDIR    = build
-OBJDIR      = ${BUILDDIR}/obj
 USE_CUDA   ?= 1
 USE_KOKKOS ?= 0
 ifeq (${USE_CUDA},1)
@@ -25,6 +24,15 @@ BACKEND ?= kokkos
 else
 BACKEND ?= cpu
 endif
+# Each backend gets its own object directory (obj-<backend>, not a single
+# shared obj/) so building one backend never leaves another backend's
+# executable linked against stale objects compiled with the wrong
+# USE_CUDA/USE_KOKKOS flags -- and so testt-dmplex, testt-cuda,
+# testt-kokkos-cuda, testt-kokkos-openmp can all exist and be submitted as
+# jobs at the same time, since building one no longer requires deleting
+# the others. OBJDIR uses plain '=' (lazy/recursive expansion), so this is
+# safe even though BACKEND is only fully resolved above.
+OBJDIR      = ${BUILDDIR}/obj-${BACKEND}
 TEST_EXE    = ${BUILDDIR}/testt-${BACKEND}
 
 ifeq (${USE_CUDA},1)
@@ -79,6 +87,8 @@ SOURCEC = \
 	${SRCDIR}/inverse.c \
 	${SRCDIR}/active_strain.c \
 	${SRCDIR}/dmplex_geom.c \
+	${SRCDIR}/lv_geometry.c \
+	${SRCDIR}/lv_geometry_unstructured.c \
 	${SRCDIR}/manufactured_active_strain.c \
 	${SRCDIR}/cuda_processes.c \
 	${SRCDIR}/kokkos_processes.c \
@@ -147,9 +157,16 @@ asan: CFLAGS += ${SAN_FLAGS}
 asan: LIBS += -fsanitize=address,undefined
 asan: cleanobj testt
 
-.PHONY: testt asan cleanobj clean dmplex dmplex-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean build build-cuda build-kokkos-cuda build-kokkos-openmp install
+.PHONY: testt asan cleanobj cleanall clean dmplex dmplex-clean direct-cuda direct-cuda-clean cuda cuda-clean kokkos-cuda kokkos-cuda-clean kokkos-openmp kokkos-openmp-clean build-all build build-cuda build-kokkos-cuda build-kokkos-openmp install
 
+# Removes only the current backend's own object dir + executable (safe to
+# run before rebuilding one backend without disturbing any other backend's
+# already-built binary). For a full nuke of every backend's build output,
+# use `cleanall` instead.
 cleanobj:
+	rm -rf ${OBJDIR} ${TEST_EXE}
+
+cleanall:
 	rm -rf ${BUILDDIR} *.o testt testt-*
 
 dmplex:
@@ -179,6 +196,11 @@ kokkos-openmp:
 
 kokkos-openmp-clean:
 	$(MAKE) CONFIG=config/kokkos-openmp.mk cleanobj testt
+
+# Builds every legacy backend in one go. Safe to run any time -- each
+# backend's objects and executable live in their own obj-<backend>/ and
+# testt-<backend>, so this never deletes a binary another job is using.
+build-all: dmplex direct-cuda kokkos-cuda kokkos-openmp
 
 # ── cmake-based build and install ────────────────────────────────────────
 clean::
