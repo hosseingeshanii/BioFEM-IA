@@ -1,0 +1,5 @@
+<map id="GammaOfTimeCurrent" name="GammaOfTimeCurrent">
+<area shape="rect" id="Node000001" title="Current scalar gamma(t) for element ec, including its activation wavefront delay (before per&#45;element ..." alt="" coords="5,5,176,31"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#a531c5edc60da84f65d9dedf0a80a193b" title="Return the active&#45;strain gamma at the current time step." alt="" coords="224,5,400,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="177,15,210,15,210,21,177,21"/>
+</map>

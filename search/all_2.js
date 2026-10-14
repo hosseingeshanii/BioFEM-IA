@@ -1,0 +1,26 @@
+var searchData=
+[
+  ['b_0',['b',['../structLVParams.html#a3ffb51f08be613727123a480e81351d2',1,'LVParams']]],
+  ['backends_1',['Backends',['../index.html#autotoc_md9',1,'']]],
+  ['backward_5fpass_2',['backward_pass',['../mlp_8c.html#a2aeef94f6b174527c5b7983c25229818',1,'mlp.c']]],
+  ['basis_5fcurrent_3',['basis_current',['../classCudaHostWorkspace__.html#ab5abc9ff1fb6a118cf9da6f50bcf360b',1,'CudaHostWorkspace_']]],
+  ['basis_5freference_4',['basis_reference',['../classCudaHostWorkspace__.html#a0774a82b55f43e7f647ec4c42ae60d00',1,'CudaHostWorkspace_']]],
+  ['bcs_2ec_5',['bcs.c',['../bcs_8c.html',1,'']]],
+  ['belmts_6',['belmts',['../structIBMNodes.html#a58bc3dc0e2fc76c14defca2addef792e',1,'IBMNodes']]],
+  ['belmtsedge_7',['belmtsedge',['../structIBMNodes.html#a63cc71c8b812439c4b11364ab4e3e6d4',1,'IBMNodes']]],
+  ['bending_8',['bending',['../structFE.html#a8be395b5f5b79f1ad6d9ab3d3aeb56f0',1,'FE::bending'],['../bending_8c.html#a21ebca2aff31427661e7b25b5edc450d',1,'bending:&#160;bending.c'],['../inverse_8c.html#a21ebca2aff31427661e7b25b5edc450d',1,'bending:&#160;inverse.c'],['../main_8c.html#a21ebca2aff31427661e7b25b5edc450d',1,'bending:&#160;main.c']]],
+  ['bending_2ec_9',['bending.c',['../bending_8c.html',1,'']]],
+  ['bendingnonlinear_10',['bendingnonlinear',['../bending_8c.html#af81ecf5fbfd52082e0abd3184f12c14f',1,'BendingNonLinear(PetscInt ec, struct Cmpnts X1, struct Cmpnts X2, struct Cmpnts X3, PetscReal Strain[3], PetscReal _S[3], PetscInt method, IBMNodes *ibm):&#160;material.c'],['../material_8c.html#af81ecf5fbfd52082e0abd3184f12c14f',1,'BendingNonLinear(PetscInt ec, struct Cmpnts X1, struct Cmpnts X2, struct Cmpnts X3, PetscReal Strain[3], PetscReal _S[3], PetscInt method, IBMNodes *ibm):&#160;material.c']]],
+  ['best_5floss_11',['best_loss',['../main_8c.html#afb10dab185a5d949c3c48157062cd646',1,'main.c']]],
+  ['beta1_12',['beta1',['../main_8c.html#a19c9e344a110ad448f5be2b8173f3937',1,'BETA1:&#160;main.c'],['../material_8c.html#a19c9e344a110ad448f5be2b8173f3937',1,'BETA1:&#160;main.c']]],
+  ['beta2_13',['beta2',['../main_8c.html#a9180d391000e3ebf42668b2d1ded93b0',1,'BETA2:&#160;main.c'],['../material_8c.html#a9180d391000e3ebf42668b2d1ded93b0',1,'BETA2:&#160;material.c']]],
+  ['bhvfiberdirupdate_14',['BHVFiberDirUpdate',['../material_8c.html#a5da7362ed34e0d7b99ef0e783198a72a',1,'material.c']]],
+  ['biases_15',['biases',['../mlp_8c.html#a9b7b1ac0c82e63898690d740761feedf',1,'mlp.c']]],
+  ['biofem_20ia_16',['BioFEM-IA',['../index.html',1,'']]],
+  ['bnodes_17',['bnodes',['../structIBMNodes.html#a2eb58d33cee2e52d6cf5b7a30221f2d9',1,'IBMNodes']]],
+  ['boundingsphere_18',['BoundingSphere',['../contact_8c.html#a6792e9026d762c1ea211d1b713da8d88',1,'contact.c']]],
+  ['build_20and_20install_19',['Build and install',['../index.html#autotoc_md2',1,'']]],
+  ['buildoriginalvertexownertable_5f_20',['BuildOriginalVertexOwnerTable_',['../dmplex__geom_8c.html#a25a289b6847656028b83d98388767fc5',1,'dmplex_geom.c']]],
+  ['buildpatchcoordinateexchange_5f_21',['BuildPatchCoordinateExchange_',['../dmplex__geom_8c.html#a661af262a984dd056c4489c06984eac8',1,'dmplex_geom.c']]],
+  ['buildserialdmplex_5f_22',['BuildSerialDMPlex_',['../dmplex__geom_8c.html#a7888018139fb6d8231505d5c8d4abbf9',1,'dmplex_geom.c']]]
+];

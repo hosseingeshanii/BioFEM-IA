@@ -1,0 +1,15 @@
+<map id="CreateDistributedDMPlex_" name="CreateDistributedDMPlex_">
+<area shape="rect" id="Node000001" title="Distribute the serial DMPlex and return per&#45;rank original&#45;index arrays." alt="" coords="516,55,711,80"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#aeca513213e67a07a712cc41e8c6412ea" title="One&#45;time DMPlex geometry setup." alt="" coords="259,104,442,129"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="532,85,420,107,419,101,531,80"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="250,5,451,31"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="531,55,419,33,420,28,532,49"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="233,55,468,80"/>
+<area shape="poly" id="edge6_Node000001_Node000006" title=" " alt="" coords="502,70,468,70,468,65,502,65"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="68,55,123,80"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="271,104,123,75,124,70,272,99"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="5,104,185,129"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="246,119,186,119,186,114,246,114"/>
+<area shape="poly" id="edge5_Node000005_Node000003" title=" " alt="" coords="272,36,124,65,123,60,271,31"/>
+<area shape="poly" id="edge7_Node000006_Node000003" title=" " alt="" coords="219,70,123,70,123,65,219,65"/>
+</map>

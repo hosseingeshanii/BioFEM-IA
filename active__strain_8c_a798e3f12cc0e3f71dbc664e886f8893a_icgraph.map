@@ -1,0 +1,24 @@
+<map id="ComputeContravariantBasis" name="ComputeContravariantBasis">
+<area shape="rect" id="Node000001" title=" " alt="" coords="945,56,1151,81"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#a993ef27fda81bb402cba4aa14fa9b51a" title="Build current covariant/contravariant basis vectors for one element." alt="" coords="785,56,897,81"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="932,71,898,71,898,66,932,66"/>
+<area shape="rect" id="Node000003" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="600,7,729,32"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="781,55,711,35,712,30,783,50"/>
+<area shape="rect" id="Node000007" href="$cuda__processes_8c.html#a627a27228923fbc3e63f0f4e1c5aa765" title=" " alt="" coords="592,56,737,81"/>
+<area shape="poly" id="edge6_Node000002_Node000007" title=" " alt="" coords="771,71,738,71,738,66,771,66"/>
+<area shape="rect" id="Node000008" href="$dmplex__geom_8c.html#a14490a5ebe1fce84a8ad0654ef0e798b" title="Synchronise remote coordinates and evaluate the geometry kernel for all local cells." alt="" coords="391,107,544,132"/>
+<area shape="poly" id="edge8_Node000002_Node000008" title=" " alt="" coords="782,87,738,97,637,110,545,118,544,113,637,105,737,91,781,82"/>
+<area shape="rect" id="Node000004" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="417,5,518,31"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="586,21,518,21,518,16,586,16"/>
+<area shape="rect" id="Node000005" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="156,5,295,31"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="403,21,295,21,295,15,403,15"/>
+<area shape="rect" id="Node000006" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,81,60,107"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="154,37,109,52,54,83,51,79,107,48,152,32"/>
+<area shape="poly" id="edge7_Node000007_Node000006" title=" " alt="" coords="578,75,61,96,60,90,578,69"/>
+<area shape="rect" id="Node000009" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="125,107,326,132"/>
+<area shape="poly" id="edge9_Node000008_Node000009" title=" " alt="" coords="377,122,326,122,326,117,377,117"/>
+<area shape="rect" id="Node000010" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="108,156,343,181"/>
+<area shape="poly" id="edge11_Node000008_Node000010" title=" " alt="" coords="392,137,289,159,288,153,391,132"/>
+<area shape="poly" id="edge10_Node000009_Node000006" title=" " alt="" coords="115,107,60,100,61,95,115,102"/>
+<area shape="poly" id="edge12_Node000010_Node000006" title=" " alt="" coords="128,155,107,147,74,129,47,109,50,105,77,124,109,142,130,150"/>
+</map>

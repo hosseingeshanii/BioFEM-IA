@@ -1,0 +1,9 @@
+<map id="SnapshotGeom_" name="SnapshotGeom_">
+<area shape="rect" id="Node000001" title=" " alt="" coords="525,5,653,31"/>
+<area shape="rect" id="Node000002" href="$kokkos__processes_8c.html#acd08387342193f96e5f2e9c1a2560332" title=" " alt="" coords="315,5,477,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="512,21,478,21,478,15,512,15"/>
+<area shape="rect" id="Node000003" href="$kokkos__processes_8c.html#a3f18ca1bc94cfbc69753dccb70a43699" title=" " alt="" coords="108,5,267,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="301,21,267,21,267,15,301,15"/>
+<area shape="rect" id="Node000004" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,5,60,31"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="94,21,60,21,60,15,94,15"/>
+</map>

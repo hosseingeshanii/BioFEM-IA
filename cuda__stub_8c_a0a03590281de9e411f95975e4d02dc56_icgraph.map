@@ -1,0 +1,14 @@
+<map id="CudaStageTimerAdd" name="CudaStageTimerAdd">
+<area shape="rect" id="Node000001" title="Partitioned variant of RunCudaMetricTensorKernel for the DMPlex+CUDA path: operates on a per&#45;rank loc..." alt="" coords="948,42,1103,67"/>
+<area shape="rect" id="Node000002" href="$cuda__wrapper_8cpp.html#a3733d0b75bbfb459a639d5b04f9fa1cf" title=" " alt="" coords="661,5,865,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="934,47,865,39,865,34,934,42"/>
+<area shape="rect" id="Node000006" href="$cuda__wrapper_8cpp.html#aeaa7478434001105fb15f56df55622a2" title="Partitioned variant of RunCudaSubdivGeomKernel for the DMPlex+CUDA path: operates on a per&#45;rank local..." alt="" coords="625,70,900,95"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="935,67,882,73,882,67,934,62"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#a30dded199da09376f4867a4006039b2c" title=" " alt="" coords="391,42,577,67"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="647,40,578,48,577,42,647,35"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="108,42,343,67"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="377,57,343,57,343,52,377,52"/>
+<area shape="rect" id="Node000005" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,42,60,67"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="94,57,60,57,60,52,94,52"/>
+<area shape="poly" id="edge6_Node000006_Node000003" title=" " alt="" coords="622,71,577,67,578,61,623,66"/>
+</map>
