@@ -103,6 +103,19 @@ PetscErrorCode FExternal(FE *fem) {
     PetscCall(FExternalPrescribedForceFieldIn(ti, fem));
   }
 
+  /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): uniform x-traction
+   * on the right edge (1). Default 9e5 N/m^2 = 9000 N/m line load / h0 = 0.01 m.
+   * Kinematic BCs (edge 0 in y, edge 3 in x) are applied in FormFunctionFEM. */
+  {
+    PetscInt  plate_on = 0;
+    PetscReal plate_P  = 9.e5;
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &plate_on, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-rect_plate_traction", &plate_P, PETSC_NULL);
+    if (plate_on) {
+      EdgeConstPressure(1, plate_P, 0, fem);
+    }
+  }
+
   /* Pinched-hemisphere benchmark (Simo, Rifai & Fox 1990; Asadi & Borazjani
    * 2023 Fig. A6): two pairs of equal-and-opposite point forces 2P at four
    * equatorial nodes, ramped linearly 0 -> hemi_pmax over the run so the

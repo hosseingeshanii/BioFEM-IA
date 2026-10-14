@@ -45,6 +45,7 @@ PetscReal  newmark_gamma=0.5; /* Newmark-beta gamma. 0.5 = average-acceleration,
                                   FDynamic() (residual) and xAccVel() (post-step state update) --
                                   both read this global rather than hardcoding their own. */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
+PetscInt   rect_plate_nitti=0; /* Nitti et al. 2021 Sec 5.1 flat plate: edge 0 fixed in y, edge 3 fixed in x (load in bcs.c) */
 PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
 PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DOFs across the 3
                                   apex_pin_nodes) instead of/in addition to lv_fix_apex/lv_fix_base --
@@ -214,6 +215,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-disable_fdyn", &disable_fdyn, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-newmark_gamma", &newmark_gamma, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &rect_plate_nitti, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_rigid_min", &lv_rigid_min, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex_cap", &lv_fix_apex_cap, PETSC_NULL);
@@ -876,6 +878,13 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
 
   VecWAXPY(R,-1., fem->Fext, fem->Fint);
   VecAXPY(R,1., fem->Fdyn);
+
+  /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): bottom edge (0)
+   * fixed in y, left edge (3) fixed in x; traction on edge 1 is in bcs.c. */
+  if (rect_plate_nitti) {
+    ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
+    ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
+  }
 
   //---------2d case
   // if(twod){
