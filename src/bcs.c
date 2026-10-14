@@ -104,15 +104,39 @@ PetscErrorCode FExternal(FE *fem) {
   }
 
   /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): uniform x-traction
-   * on the right edge (1). Default 9e5 N/m^2 = 9000 N/m line load / h0 = 0.01 m.
-   * Kinematic BCs (edge 0 in y, edge 3 in x) are applied in FormFunctionFEM. */
+   * on the right edge (nodes at max x0). Default 9e5 N/m^2 = 9000 N/m line load / h0.
+   * Edges are found from reference coordinates, not blist segments, so the blist
+   * can be the single closed perimeter ring the ghost-node code expects.
+   * Lumped nodal forces: each edge segment of length b carries b*h0*P, half to
+   * each end. Kinematic BCs (bottom in y, left in x) are in FormFunctionFEM. */
   {
     PetscInt  plate_on = 0;
     PetscReal plate_P  = 9.e5;
     PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &plate_on, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-rect_plate_traction", &plate_P, PETSC_NULL);
     if (plate_on) {
-      EdgeConstPressure(1, plate_P, 0, fem);
+      PetscReal xmax = -1.e30, xmin = 1.e30, tol;
+      PetscInt  nr = 0, *rn, *ry;
+      for (PetscInt n = 0; n < ibm->n_v; n++) {
+        xmax = PetscMax(xmax, ibm->x_bp0[n]);  xmin = PetscMin(xmin, ibm->x_bp0[n]);
+      }
+      tol = 1.e-8 * (xmax - xmin);
+      PetscCall(PetscMalloc2(ibm->n_v, &rn, ibm->n_v, &ry));
+      for (PetscInt n = 0; n < ibm->n_v; n++) {
+        if (PetscAbsReal(ibm->x_bp0[n] - xmax) < tol) {
+          rn[nr] = n;  ry[nr] = (PetscInt)floor(1.e8 * ibm->y_bp0[n] + 0.5);  nr++;
+        }
+      }
+      PetscCall(PetscSortIntWithArray(nr, ry, rn));     /* order right-edge nodes by y */
+      for (PetscInt k = 0; k < nr; k++) {
+        PetscReal f = 0.0;
+        if (k > 0)      f += 0.5 * plate_P * h0 * PetscAbsReal(ibm->y_bp0[rn[k]] - ibm->y_bp0[rn[k-1]]);
+        if (k < nr - 1) f += 0.5 * plate_P * h0 * PetscAbsReal(ibm->y_bp0[rn[k+1]] - ibm->y_bp0[rn[k]]);
+        PetscCall(NodeForce(rn[k], f, 0, fem));
+      }
+      PetscCall(PetscFree2(rn, ry));
+      PetscCall(VecAssemblyBegin(fem->Fext));
+      PetscCall(VecAssemblyEnd(fem->Fext));
     }
   }
 

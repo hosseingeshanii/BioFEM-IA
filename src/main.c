@@ -855,8 +855,13 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
       // EdgeDirectionalFix(3, 0, fem, R);
       // EdgeFreeR(fem, R);
       GlobalGhost(ibm);
-      GhostDirectionalFix(ibm, 0, 1);
-      GhostDirectionalFix(ibm, 3, 0);
+      /* Plate-specific ghost fixes (edge 0 in y, edge 3 in x); only meaningful
+       * for a 4-segment blist -- guarded so a single closed ring doesn't index
+       * n_bnodes[1..3] out of range. */
+      if (ibm->n_edge >= 4) {
+        GhostDirectionalFix(ibm, 0, 1);
+        GhostDirectionalFix(ibm, 3, 0);
+      }
     }
   }
 
@@ -879,11 +884,20 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   VecWAXPY(R,-1., fem->Fext, fem->Fint);
   VecAXPY(R,1., fem->Fdyn);
 
-  /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): bottom edge (0)
-   * fixed in y, left edge (3) fixed in x; traction on edge 1 is in bcs.c. */
+  /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): nodes at min y0
+   * fixed in y, nodes at min x0 fixed in x (found from coordinates, not blist
+   * segments); traction on the max-x edge is in bcs.c. */
   if (rect_plate_nitti) {
-    ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
-    ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
+    PetscReal xmin = 1.e30, ymin = 1.e30, xmax = -1.e30, tol;
+    for (PetscInt n = 0; n < ibm->n_v; n++) {
+      xmin = PetscMin(xmin, ibm->x_bp0[n]);  xmax = PetscMax(xmax, ibm->x_bp0[n]);
+      ymin = PetscMin(ymin, ibm->y_bp0[n]);
+    }
+    tol = 1.e-8 * (xmax - xmin);
+    for (PetscInt n = 0; n < ibm->n_v; n++) {
+      if (PetscAbsReal(ibm->x_bp0[n] - xmin) < tol) { ierr = NodeDirectionalFix(n, 0, fem, R); CHKERRQ(ierr); }
+      if (PetscAbsReal(ibm->y_bp0[n] - ymin) < tol) { ierr = NodeDirectionalFix(n, 1, fem, R); CHKERRQ(ierr); }
+    }
   }
 
   //---------2d case
