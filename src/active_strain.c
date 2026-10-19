@@ -48,7 +48,7 @@ typedef PetscErrorCode (*ElemFunc)(FE *fem, PetscInt ec);
 PetscInt fiber_based_act_coeff;
 PetscInt curv_based_act_coeffs;
 PetscInt cart_fib_act;
-PetscInt ghost_force_map = 0; /* -ghost_force_map 1: map Fint on ghost nodes back to real nodes */
+PetscInt ghost_force_map = 1; /* -ghost_force_map 0 disables mapping Fint on ghost nodes back to real nodes (old behaviour) */
 static PetscInt cuda_metric_tensor = 0;
 
 /* External globals from the rest of the code */
