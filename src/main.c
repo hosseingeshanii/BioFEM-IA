@@ -527,6 +527,25 @@ int main(int argc, char **argv)
 	          return (int)ierr;
 	        }
 
+	        /* -debug_c33_elem <ec>: one clean residual evaluation at the converged
+	         * solution, then the rank owning element ec prints its C33 once
+	         * ([C33final]); the per-call [C33dbg] lines also come from
+	         * matrix-free perturbations and line-search trials. */
+	        {
+	          PetscInt dbg = -1;
+	          PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-debug_c33_elem", &dbg, PETSC_NULL);
+	          if (dbg >= 0) {
+	            ierr = FormFunctionFEM(snes, U, fem[ibi].Res, (void *)&fem[ibi]); CHKERRQ(ierr);
+	            DMPlexGeomCtx *gdbg = &fem[ibi].geom_ctx;
+	            for (PetscInt lc = 0; lc < gdbg->layout.nLocalCells; ++lc) {
+	              if (gdbg->layout.orig_cell[lc] != dbg) continue;
+	              ElemActData *edbg = &fem[ibi].act_data.elem_act_data[dbg];
+	              PetscPrintf(PETSC_COMM_SELF, "[C33final] step=%d ec=%d C33=%.10e S33=%.3e\n",
+	                          (int)ti, (int)dbg, (double)edbg->C[0].Cov[2][2], (double)edbg->S[0].Cont[2][2]);
+	            }
+	          }
+	        }
+
 	        ierr = SNESGetConvergedReason(snes, &reason);
 	        if (ierr) {
 	          PetscPrintf(PETSC_COMM_WORLD,
