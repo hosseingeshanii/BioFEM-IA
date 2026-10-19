@@ -615,6 +615,7 @@ PetscErrorCode Input(IBMNodes *ibm, PetscInt ibi) {
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------
+extern PetscErrorCode LVEndoCavityVolume(IBMNodes *ibm, PetscReal *V);
 PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
 
   PetscMPIInt rank;
@@ -685,13 +686,15 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
    * rings don't represent a closed-cavity boundary. Appended one line per
    * Output() call, so it grows alongside the VTK series at no extra cost. */
   if (lv_geom_process && ibm->n_bnodes[0] >= 3) {
-    PetscReal V;
+    PetscReal V, Vendo;
     LVCavityVolume(ibm, &V);
+    LVEndoCavityVolume(ibm, &Vendo);
     char volpath[128];
     snprintf(volpath, sizeof(volpath), "%s/lv_volume%2.2d.dat", dir, (int)ibi);
     FILE *vf = fopen(volpath, "a");
     if (vf) {
-      fprintf(vf, "%d %.8f\n", (int)ti, V);
+      /* columns: step, midsurface-closed volume, endocardial cavity volume */
+      fprintf(vf, "%d %.8f %.8f\n", (int)ti, V, Vendo);
       fclose(vf);
     }
   }
@@ -976,6 +979,15 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
     PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
     for (i=0; i<ibm->n_elmt; i++) {
       PetscFPrintf(PETSC_COMM_WORLD, f, "%f \n", GammaOfTimeCurrent(fem, i) * ibm->gamma_scale[i]);
+    }
+  }
+  /* through-thickness stretch lambda3 = sqrt(C33) = thickness/h0 (per element,
+   * updated once per converged step by UpdateElementThickness) */
+  if (muscle_activation) {
+    PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS lambda3 float\n");
+    PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
+    for (i=0; i<ibm->n_elmt; i++) {
+      PetscFPrintf(PETSC_COMM_WORLD, f, "%.8f \n", ibm->thickness[i] / h0);
     }
   }
 

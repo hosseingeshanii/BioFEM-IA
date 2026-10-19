@@ -45,7 +45,7 @@ PetscReal  newmark_gamma=0.5; /* Newmark-beta gamma. 0.5 = average-acceleration,
                                   FDynamic() (residual) and xAccVel() (post-step state update) --
                                   both read this global rather than hardcoding their own. */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
-PetscInt   rect_plate_nitti=0, rect_plate_fix_z=0, rect_plate_pins=0; /* Nitti et al. 2021 Sec 5.1 flat plate: edge 0 fixed in y, edge 3 fixed in x (load in bcs.c) */
+PetscInt   rect_plate_nitti=0, rect_plate_fix_z=0, rect_plate_pins=0, lv_base_tangent_pins=0; /* Nitti et al. 2021 Sec 5.1 flat plate: edge 0 fixed in y, edge 3 fixed in x (load in bcs.c) */
 PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
 PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DOFs across the 3
                                   apex_pin_nodes) instead of/in addition to lv_fix_apex/lv_fix_base --
@@ -218,6 +218,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &rect_plate_nitti, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_fix_z", &rect_plate_fix_z, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_pins", &rect_plate_pins, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_base_tangent_pins", &lv_base_tangent_pins, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_rigid_min", &lv_rigid_min, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex_cap", &lv_fix_apex_cap, PETSC_NULL);
@@ -928,6 +929,30 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   } else if (rect_plate_nitti) {
     ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
     ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
+  }
+  /* -lv_base_tangent_pins 1: remove the in-plane rigid modes of an LV whose base
+   * is fixed axially (x,y translation + rotation about the long axis z) without
+   * restraining radial motion: at the base-rim nodes nearest 0, 90 and 180 deg
+   * (about the rim centroid, reference config.) fix only the axis-aligned
+   * tangential direction (y, x, y). Stands in for Pezzuto & Ambrosi 2014's null
+   * average displacement/rotation. */
+  if (lv_base_tangent_pins && ibm->n_bnodes[0] >= 3) {
+    const PetscInt nr = ibm->n_bnodes[0];
+    PetscReal cx = 0.0, cy = 0.0;
+    for (PetscInt j = 0; j < nr; j++) { cx += ibm->x_bp0[ibm->bnodes[j]]; cy += ibm->y_bp0[ibm->bnodes[j]]; }
+    cx /= nr; cy /= nr;
+    const PetscReal tgt[3] = {0.0, 0.5*PETSC_PI, PETSC_PI};
+    const PetscInt  dir[3] = {1, 0, 1};
+    for (PetscInt k = 0; k < 3; k++) {
+      PetscInt best = -1; PetscReal bd = 1.e30;
+      for (PetscInt j = 0; j < nr; j++) {
+        const PetscInt n = ibm->bnodes[j];
+        PetscReal d = PetscAbsReal(atan2(ibm->y_bp0[n]-cy, ibm->x_bp0[n]-cx) - tgt[k]);
+        if (d > PETSC_PI) d = 2.0*PETSC_PI - d;
+        if (d < bd) { bd = d; best = n; }
+      }
+      ierr = NodeDirectionalFix(best, dir[k], fem, R); CHKERRQ(ierr);
+    }
   }
   /* -rect_plate_fix_z 1: also fix z on all plate edges (flat in-plane problem);
    * removes out-of-plane rigid modes (needed with -rect_plate_pins). */

@@ -879,6 +879,75 @@ PetscErrorCode WriteLVFiberVTK(IBMNodes *ibm, const char *filepath)
  *   V = (1/6) sum_over_triangles  v0 . (v1 x v2)
  * valid for any closed, consistently outward-oriented triangulated surface.
  */
+/* Signed volume enclosed by a triangulated LV wall surface given by node
+ * positions P (3*n_v), closed by a fan cap from the base-rim centroid. */
+static PetscReal LVClosedVolumeFromPositions_(IBMNodes *ibm, const PetscReal *P)
+{
+  const PetscInt n_rim = ibm->n_bnodes[0];
+  PetscReal vol6 = 0.0;
+  for (PetscInt e = 0; e < ibm->n_elmt; e++) {
+    const PetscInt a = ibm->nv1[e], b = ibm->nv2[e], c = ibm->nv3[e];
+    struct Cmpnts v0 = {P[3*a], P[3*a+1], P[3*a+2]};
+    struct Cmpnts v1 = {P[3*b], P[3*b+1], P[3*b+2]};
+    struct Cmpnts v2 = {P[3*c], P[3*c+1], P[3*c+2]};
+    vol6 += DOT(v0, CROSS(v1, v2));
+  }
+  struct Cmpnts cen = {0.0, 0.0, 0.0};
+  for (PetscInt j = 0; j < n_rim; j++) {
+    const PetscInt n = ibm->bnodes[j];
+    cen.x += P[3*n]; cen.y += P[3*n+1]; cen.z += P[3*n+2];
+  }
+  cen = AMULT(1.0 / n_rim, cen);
+  for (PetscInt j = 0; j < n_rim; j++) {
+    const PetscInt na = ibm->bnodes[j], nb = ibm->bnodes[(j + 1) % n_rim];
+    struct Cmpnts pa = {P[3*na], P[3*na+1], P[3*na+2]};
+    struct Cmpnts pb = {P[3*nb], P[3*nb+1], P[3*nb+2]};
+    struct Cmpnts tc = AMULT(1.0 / 3.0, PLUS(PLUS(cen, pa), pb));
+    if (DOT(CROSS(MINUS(pa, cen), MINUS(pb, cen)), tc) < 0.0) { struct Cmpnts t = pa; pa = pb; pb = t; }
+    vol6 += DOT(cen, CROSS(pa, pb));
+  }
+  return vol6 / 6.0;
+}
+
+/* Endocardial cavity volume: each midsurface node is moved to the endocardium,
+ * x_endo = x - (h/2) n, with n the outward unit normal (area-weighted average of
+ * the adjacent element normals ibm->nf_*, oriented away from the wall centroid)
+ * and h the current wall thickness at the node (average of the adjacent
+ * elements' ibm->thickness = h0*sqrt(C33), updated once per converged step).
+ * The endocardial surface is then closed at its base rim like LVCavityVolume. */
+PetscErrorCode LVEndoCavityVolume(IBMNodes *ibm, PetscReal *V) {
+  PetscFunctionBeginUser;
+  const PetscInt n_v = ibm->n_v;
+  PetscReal *nrm, *hs, *cnt, *P;
+  PetscCall(PetscCalloc4(3*n_v, &nrm, n_v, &hs, n_v, &cnt, 3*n_v, &P));
+  for (PetscInt e = 0; e < ibm->n_elmt; e++) {
+    const PetscInt nn[3] = {ibm->nv1[e], ibm->nv2[e], ibm->nv3[e]};
+    for (PetscInt k = 0; k < 3; k++) {
+      const PetscInt n = nn[k];
+      nrm[3*n] += ibm->dA[e]*ibm->nf_x[e]; nrm[3*n+1] += ibm->dA[e]*ibm->nf_y[e]; nrm[3*n+2] += ibm->dA[e]*ibm->nf_z[e];
+      hs[n] += ibm->thickness[e]; cnt[n] += 1.0;
+    }
+  }
+  /* orientation: outward = away from the wall's node centroid (sign summed over all nodes) */
+  PetscReal c[3] = {0, 0, 0}, s = 0.0;
+  for (PetscInt n = 0; n < n_v; n++) { c[0] += ibm->x_bp[n]; c[1] += ibm->y_bp[n]; c[2] += ibm->z_bp[n]; }
+  for (PetscInt d = 0; d < 3; d++) c[d] /= n_v;
+  for (PetscInt n = 0; n < n_v; n++)
+    s += nrm[3*n]*(ibm->x_bp[n]-c[0]) + nrm[3*n+1]*(ibm->y_bp[n]-c[1]) + nrm[3*n+2]*(ibm->z_bp[n]-c[2]);
+  const PetscReal sgn = (s >= 0.0) ? 1.0 : -1.0;
+  for (PetscInt n = 0; n < n_v; n++) {
+    const PetscReal L = PetscSqrtReal(nrm[3*n]*nrm[3*n] + nrm[3*n+1]*nrm[3*n+1] + nrm[3*n+2]*nrm[3*n+2]);
+    const PetscReal h = (cnt[n] > 0) ? hs[n] / cnt[n] : 0.0;
+    const PetscReal f = (L > 0) ? -0.5 * h * sgn / L : 0.0;
+    P[3*n]   = ibm->x_bp[n] + f * nrm[3*n];
+    P[3*n+1] = ibm->y_bp[n] + f * nrm[3*n+1];
+    P[3*n+2] = ibm->z_bp[n] + f * nrm[3*n+2];
+  }
+  *V = PetscAbsReal(LVClosedVolumeFromPositions_(ibm, P));
+  PetscCall(PetscFree4(nrm, hs, cnt, P));
+  PetscFunctionReturn(0);
+}
+
 PetscErrorCode LVCavityVolume(IBMNodes *ibm, PetscReal *V) {
   PetscInt n_rim = ibm->n_bnodes[0];
   if (n_rim < 3) SETERRQ1(PETSC_COMM_WORLD, PETSC_ERR_ARG_OUTOFRANGE,

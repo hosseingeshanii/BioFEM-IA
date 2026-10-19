@@ -1202,6 +1202,16 @@ static PetscReal GammaOfTimeDelayed(const MuscleActParams *p, PetscReal delay)
         PetscReal s = PetscSinReal(PETSC_PI * t / T);
         return p->gamma * s * s;
     }
+    if (p->gamma_ramp_type == 4) {
+        /* linear up to the peak at T/2, linear back to 0 at T (Pezzuto & Ambrosi 2014) */
+        PetscReal x = t / T;
+        if (x >= 1.0) return 0.0;
+        return p->gamma * (1.0 - PetscAbsReal(2.0 * x - 1.0));
+    }
+    if (p->gamma_ramp_type == 5) {
+        /* linear up to the peak at T, then held */
+        return p->gamma * PetscMin(t / T, 1.0);
+    }
     /* type 2: half-sin^2 — smooth monotonic ramp, systole only */
     PetscReal s = PetscSinReal(PETSC_PI * 0.5 * t / T);
     return p->gamma * s * s;
