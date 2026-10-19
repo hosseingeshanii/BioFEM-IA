@@ -908,12 +908,11 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   } else if (rect_plate_nitti) {
     ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
     ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
-    /* -rect_plate_fix_z 1: also fix z on all 4 edges (in-plane membrane
-     * problem as in Nitti Sec 5.1); removes the out-of-plane rigid modes
-     * that make the static (-disable_fdyn) solve singular. */
-    if (rect_plate_fix_z) {
-      for (PetscInt e = 0; e < ibm->n_edge; e++) { ierr = EdgeDirectionalFix(e, 2, fem, R); CHKERRQ(ierr); }
-    }
+  }
+  /* -rect_plate_fix_z 1: also fix z on all plate edges (flat in-plane problem);
+   * removes out-of-plane rigid modes (needed with -rect_plate_pins). */
+  if (rect_plate_nitti && rect_plate_fix_z) {
+    for (PetscInt e = 0; e < ibm->n_edge; e++) { ierr = EdgeDirectionalFix(e, 2, fem, R); CHKERRQ(ierr); }
   }
 
   //---------2d case
