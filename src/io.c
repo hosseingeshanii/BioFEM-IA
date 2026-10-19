@@ -31,6 +31,7 @@ extern PetscReal DOT(struct Cmpnts v1, struct Cmpnts v2);
 extern PetscReal SIZE(struct Cmpnts v1);
 
 
+extern PetscInt BoundaryGhostCount(PetscInt, const PetscInt *, const PetscInt *);
 PetscErrorCode Dimension(IBMNodes *ibm, PetscInt ibi) {
  
   char  string[128];
@@ -86,17 +87,25 @@ PetscErrorCode Dimension(IBMNodes *ibm, PetscInt ibi) {
      * counts directly (the same, authoritative computation Input() already
      * does for ibm->sum_n_bnodes, just done here too so Create()'s
      * allocation sizes agree with it from the start). */
-    PetscInt header_n_ghosts = 0, derived_n_ghosts = 0, ring_count = 0;
+    PetscInt header_n_ghosts = 0, derived_n_ghosts = 0, sum_nb = 0;
+    PetscInt *nb_e = NULL, *bn = NULL;
     fscanf(fd, "%i", &header_n_ghosts);
     fgets(string, 128, fd);
+    PetscMalloc1(PetscMax(1, ibm->n_edge), &nb_e);
     for (PetscInt e = 0; e < ibm->n_edge; e++) {
-      fscanf(fd, "%d", &ring_count);
-      derived_n_ghosts += ring_count;
+      fscanf(fd, "%d", &nb_e[e]);
+      sum_nb += nb_e[e];
     }
+    PetscMalloc1(PetscMax(1, sum_nb), &bn);
+    for (PetscInt k = 0; k < sum_nb; k++) fscanf(fd, "%d", &bn[k]);
+    /* one ghost per boundary edge: open segments n-1, closed rings n
+     * (BoundaryGhostCount, bending.c) */
+    derived_n_ghosts = BoundaryGhostCount(ibm->n_edge, nb_e, bn);
+    PetscFree(nb_e); PetscFree(bn);
     if (derived_n_ghosts != header_n_ghosts) {
       PetscPrintf(PETSC_COMM_WORLD,
-                  "[Dimension] WARNING: blist%2.2d declares n_ghosts=%d but its per-ring "
-                  "boundary-node counts sum to %d; using the derived value.\n",
+                  "[Dimension] WARNING: blist%2.2d declares n_ghosts=%d but its boundary "
+                  "segments give %d ghosts; using the derived value.\n",
                   ibi, (int)header_n_ghosts, (int)derived_n_ghosts);
     }
     ibm->n_ghosts = derived_n_ghosts;

@@ -19,6 +19,7 @@
 
 #include "variables.h"
 #include "lv_geometry.h"
+extern PetscInt BoundaryGhostCount(PetscInt, const PetscInt *, const PetscInt *);
 #include <math.h>
 #include <stdio.h>
 
@@ -157,7 +158,7 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
    * sum_bnodes - n_edge_file (that undercounts by missing each ring's
    * wrap-around edge, which was the actual root cause of the visible gap
    * in the mesh at each ring's seam). */
-  PetscInt n_ghosts_count = sum_bnodes;
+  PetscInt n_ghosts_count = BoundaryGhostCount(n_edge_file, t_nbnodes, t_bnodes); /* = sum_bnodes for closed rings */
 
   ibm->n_v          = n_v;
   ibm->n_elmt       = n_elmt;

@@ -1516,111 +1516,162 @@ PetscErrorCode Patch(IBMNodes *ibm) {
 }
 
 //------------------------------------------------------------------------------------------------------------ 
+//------------------------------------------------------------------------------------------------------------
+/* Boundary-segment topology shared by the ghost-count, GlobalGhostInit,
+ * GlobalGhost and GhostDirectionalFix, so they always agree.
+ *
+ * A blist / mesh boundary section holds n_edge node segments. A segment is
+ *   - OPEN   if one of its two end nodes is also an end node of another
+ *            segment (rectangular plate: 4 sides sharing the 4 corners).
+ *            It has n-1 boundary edges, hence n-1 ghosts.
+ *   - CLOSED otherwise: a ring listed once without repeating its first node
+ *            (LV base ring, hemisphere rims). It has n edges including the
+ *            wrap-around edge last->first, hence n ghosts.
+ * Consecutive open segments whose end/start nodes coincide form a CHAIN;
+ * the chain is closed if its last node is its first node (plate perimeter). */
+static PetscInt BSegStart_(const PetscInt *n_bnodes, PetscInt e)
+{
+  PetscInt s = 0;
+  for (PetscInt k = 0; k < e; k++) s += n_bnodes[k];
+  return s;
+}
+
+PetscBool BoundarySegmentIsOpen(PetscInt n_edge, const PetscInt *n_bnodes, const PetscInt *bnodes, PetscInt e)
+{
+  const PetscInt a0 = bnodes[BSegStart_(n_bnodes, e)];
+  const PetscInt a1 = bnodes[BSegStart_(n_bnodes, e) + n_bnodes[e] - 1];
+  for (PetscInt k = 0; k < n_edge; k++) {
+    if (k == e || n_bnodes[k] == 0) continue;
+    const PetscInt b0 = bnodes[BSegStart_(n_bnodes, k)];
+    const PetscInt b1 = bnodes[BSegStart_(n_bnodes, k) + n_bnodes[k] - 1];
+    if (a0 == b0 || a0 == b1 || a1 == b0 || a1 == b1) return PETSC_TRUE;
+  }
+  return PETSC_FALSE;
+}
+
+PetscInt BoundarySegmentGhostCount(PetscInt n_edge, const PetscInt *n_bnodes, const PetscInt *bnodes, PetscInt e)
+{
+  if (n_bnodes[e] < 2) return 0;
+  return BoundarySegmentIsOpen(n_edge, n_bnodes, bnodes, e) ? n_bnodes[e] - 1 : n_bnodes[e];
+}
+
+PetscInt BoundaryGhostCount(PetscInt n_edge, const PetscInt *n_bnodes, const PetscInt *bnodes)
+{
+  PetscInt n = 0;
+  for (PetscInt e = 0; e < n_edge; e++) n += BoundarySegmentGhostCount(n_edge, n_bnodes, bnodes, e);
+  return n;
+}
+
+PetscInt BoundarySegmentFirstGhost(PetscInt n_edge, const PetscInt *n_bnodes, const PetscInt *bnodes, PetscInt e)
+{
+  PetscInt n = 0;
+  for (PetscInt k = 0; k < e; k++) n += BoundarySegmentGhostCount(n_edge, n_bnodes, bnodes, k);
+  return n;
+}
+
+/* Third node of the element adjacent to boundary edge (nv1,nv2), searched in
+ * [0, ec_limit); -1 if none. */
+static PetscInt BoundaryEdgeThirdNode_(IBMNodes *ibm, PetscInt nv1, PetscInt nv2, PetscInt ec_limit)
+{
+  PetscInt nv3 = -1;
+  for (PetscInt ec = 0; ec < ec_limit; ec++) {
+    PetscInt c = 0;
+    if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) c++;
+    if (nv2==ibm->nv1[ec] || nv2==ibm->nv2[ec] || nv2==ibm->nv3[ec]) c++;
+    if (c == 2) {
+      if      (ibm->nv1[ec]!=nv1 && ibm->nv1[ec]!=nv2) nv3 = ibm->nv1[ec];
+      else if (ibm->nv2[ec]!=nv1 && ibm->nv2[ec]!=nv2) nv3 = ibm->nv2[ec];
+      else                                             nv3 = ibm->nv3[ec];
+    }
+  }
+  return nv3;
+}
+
 PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
 
-  PetscInt  ec, nv1, nv2, nv3, catch, edge_n, edge, start, end, count=0;
+  /* One ghost per boundary EDGE, reflected through the adjacent element:
+   * ghost = nv2 + nv1 - nv3. Segment topology (open / closed, chains) is
+   * defined by the BoundarySegment* helpers above.
+   *
+   * Each ghost owns 2 triangle slots after the real elements:
+   *   n_elmt+2*count   : main triangle  (nv2, nv1, ghost)
+   *   n_elmt+2*count+1 : bridge triangle (ghost, nv2, previous ghost)
+   * "Previous ghost" is the ghost of the boundary edge ending at nv2:
+   *   - closed segment : previous edge in the ring (wrap-around for the first);
+   *   - open segment   : previous edge in the segment, or for the first edge
+   *     the last ghost of the preceding segment of the same chain; for the
+   *     first edge of a chain, the chain's last ghost if the chain closes.
+   * An open chain that does not close leaves one bridge slot without a real
+   * neighbour; it gets a degenerate triangle (ghost, nv2, ghost).
+   * For the LV apex ring (edge 0) the adjacent-element search is limited to
+   * n_elmt_base (cap strips would give the wrong interior node). */
+  PetscInt count = 0;
 
-  for (edge_n=0; edge_n<ibm->n_edge; edge_n++){
-    //compute start&end
-    start = 0;  end = 0;
-    for (edge=0; edge<edge_n+1; edge++) {
-      end += ibm->n_bnodes[edge];
+  for (PetscInt e = 0; e < ibm->n_edge; e++) {
+    const PetscInt  start   = BSegStart_(ibm->n_bnodes, e);
+    const PetscInt  n_local = ibm->n_bnodes[e];
+    const PetscInt  n_g     = BoundarySegmentGhostCount(ibm->n_edge, ibm->n_bnodes, ibm->bnodes, e);
+    const PetscBool open    = BoundarySegmentIsOpen(ibm->n_edge, ibm->n_bnodes, ibm->bnodes, e);
+    const PetscInt  ec_limit = (e == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
+    const PetscInt  seg_first_ghost = count;
+
+    /* previous ghost for the segment's first edge */
+    PetscInt first_prev = -1;
+    if (!open) {
+      first_prev = ibm->n_v + seg_first_ghost + n_g - 1;
+    } else if (e > 0 && ibm->n_bnodes[e-1] > 0 &&
+               ibm->bnodes[start-1] == ibm->bnodes[start]) {
+      first_prev = ibm->n_v + seg_first_ghost - 1;            /* chain continues */
+    } else {
+      /* chain starts here: find its last segment, check whether it closes */
+      PetscInt k = e;
+      while (k+1 < ibm->n_edge && ibm->n_bnodes[k+1] > 0 &&
+             ibm->bnodes[BSegStart_(ibm->n_bnodes, k) + ibm->n_bnodes[k] - 1] ==
+             ibm->bnodes[BSegStart_(ibm->n_bnodes, k+1)]) k++;
+      const PetscInt last_node = ibm->bnodes[BSegStart_(ibm->n_bnodes, k) + ibm->n_bnodes[k] - 1];
+      if (last_node == ibm->bnodes[start]) {
+        const PetscInt k_first = BoundarySegmentFirstGhost(ibm->n_edge, ibm->n_bnodes, ibm->bnodes, k);
+        first_prev = ibm->n_v + k_first
+                   + BoundarySegmentGhostCount(ibm->n_edge, ibm->n_bnodes, ibm->bnodes, k) - 1;
+      } else {
+        PetscPrintf(PETSC_COMM_WORLD,
+                    "[GlobalGhostInit] boundary chain starting at segment %d is open "
+                    "(does not close); first bridge triangle left degenerate.\n", (int)e);
+      }
     }
-    start = end - ibm->n_bnodes[edge_n];
-    PetscInt n_local = end - start;
 
-    /* For the apex ring (edge_n==0), cap strips share outer-outer edges with K=0 base
-       strips.  Searching all elements would find the cap strip (higher index) and
-       reflect through the wrong interior node.  Limit to base elements so we always
-       reflect through the correct ring-1 node. */
-    PetscInt ec_limit = (edge_n == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
-
-    /* Boundary rings are CLOSED loops (n_local nodes, n_local edges,
-     * including the wrap-around edge from the last node back to the
-     * first) -- not open "plate" curves with n_local-1 edges and 2 free
-     * endpoints. The previous version's loop only ever processed
-     * n_local-1 segments (bnodes[i]->bnodes[i+1] for i=start..end-2), so
-     * the closing edge (last node -> first node) never got its own ghost
-     * node or main triangle at all -- a real gap in the mesh (visible as
-     * a hole in ParaView right at each ring's seam). Modular indexing
-     * here processes all n_local edges, and every ghost gets exactly 2
-     * triangles: the main one (real edge + this ghost) and a bridging one
-     * connecting this ghost to the PREVIOUS ghost in ring order (i, i-1
-     * -- local_i==0 wraps to this ring's own last ghost, never reaching
-     * into another ring or off the front). Packs the n_elmt..
-     * n_elmt+2*n_ghosts budget exactly (slots 2*count, 2*count+1), so no
-     * leftover padding is needed for the ghosts themselves.
-     * ibm->n_ghosts must equal sum(n_bnodes), one ghost per boundary node
-     * per ring (see lv_geometry_unstructured.c). */
-    PetscInt ring_first_ghost = count;
-
-    for (PetscInt local_i=0; local_i<n_local; local_i++) {
-      PetscInt i      = start + local_i;
-      PetscInt i_next = start + (local_i+1) % n_local;
-
-      nv1 = ibm->bnodes[i_next];
-      nv2 = ibm->bnodes[i];
-
-      /* nv3 is only assigned inside the catch==2 branch below; reset it to
-       * an explicit "not found" sentinel every iteration so a boundary edge
-       * with no matching element (e.g. cut off by the apex-ring ec_limit
-       * restriction above) can never fall through to reading ibm->x_bp[nv3]
-       * with an uninitialized/stale index -- that was reading whatever nv3
-       * happened to hold from a previous iteration (or uninitialized stack
-       * memory on the very first iteration), silently corrupting ghost
-       * coordinates and, in observed cases, segfaulting later in
-       * AreaNormal() when it dereferences a garbage node index that leaked
-       * through this way. */
-      nv3 = -1;
-      for (ec=0; ec<ec_limit; ec++) {
-      	catch = 0;
-      	if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) {catch++;}
-      	if (nv2==ibm->nv1[ec] || nv2==ibm->nv2[ec] || nv2==ibm->nv3[ec]) {catch++;}
-      	if (catch==2) {
-      	  if (ibm->nv1[ec]!=nv1 && ibm->nv1[ec]!=nv2) {
-      	    nv3 = ibm->nv1[ec];
-      	  } else if (ibm->nv2[ec]!=nv1 && ibm->nv2[ec]!=nv2) {
-      	    nv3 = ibm->nv2[ec];
-      	  } else{
-      	    nv3 = ibm->nv3[ec];
-      	  }
-      	}
-      }
+    for (PetscInt local_i = 0; local_i < n_g; local_i++) {
+      const PetscInt i      = start + local_i;
+      const PetscInt i_next = start + (local_i+1) % n_local;
+      const PetscInt nv1 = ibm->bnodes[i_next];
+      const PetscInt nv2 = ibm->bnodes[i];
+      PetscInt nv3 = BoundaryEdgeThirdNode_(ibm, nv1, nv2, ec_limit);
       if (nv3 < 0) {
-      	/* No adjacent element found for this boundary edge. Fall back to
-      	 * nv1 rather than dereference garbage -- degrades to a
-      	 * zero-extrapolation ghost (x_bp[ghost] = x_bp[nv2]) for this one
-      	 * ghost node instead of crashing or corrupting memory. */
-      	PetscPrintf(PETSC_COMM_SELF,
-      	            "[GlobalGhostInit] WARNING: no adjacent element found for boundary edge "
-      	            "(nv1=%d, nv2=%d, edge_n=%d, local_i=%d); falling back to nv3=nv1.\n",
-      	            (int)nv1, (int)nv2, (int)edge_n, (int)local_i);
-      	nv3 = nv1;
+        PetscPrintf(PETSC_COMM_SELF,
+                    "[GlobalGhostInit] WARNING: no adjacent element found for boundary edge "
+                    "(nv1=%d, nv2=%d, edge_n=%d, local_i=%d); falling back to nv3=nv1.\n",
+                    (int)nv1, (int)nv2, (int)e, (int)local_i);
+        nv3 = nv1;
       }
+      const PetscInt g = ibm->n_v + count;
 
-      ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
-      ibm->y_bp[ibm->n_v+count] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
-      ibm->z_bp[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];
+      ibm->x_bp[g] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
+      ibm->y_bp[g] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
+      ibm->z_bp[g] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];
+      ibm->x_bp0[g] = ibm->x_bp[g];
+      ibm->y_bp0[g] = ibm->y_bp[g];
+      ibm->z_bp0[g] = ibm->z_bp[g];
 
-      ibm->x_bp0[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
-      ibm->y_bp0[ibm->n_v+count] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
-      ibm->z_bp0[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];
-
-      /* Main triangle: the real boundary edge plus this ghost. */
+      /* main triangle */
       ibm->nv2[ibm->n_elmt+2*count] = nv2;
       ibm->nv1[ibm->n_elmt+2*count] = nv1;
-      ibm->nv3[ibm->n_elmt+2*count] = ibm->n_v + count;
+      ibm->nv3[ibm->n_elmt+2*count] = g;
 
-      /* Bridging triangle: this ghost (i) to the PREVIOUS ghost in ring
-       * order (i-1), through their shared real boundary node nv2.
-       * local_i==0 wraps ghost_prev to ring_first_ghost+n_local-1 -- this
-       * ring's own last ghost, computed fresh each ring so it never
-       * reaches back into a different ring or before index 0. */
-      PetscInt ghost_prev = (local_i==0) ? (ibm->n_v + ring_first_ghost + n_local - 1)
-                                          : (ibm->n_v + count - 1);
-      ibm->nv1[ibm->n_elmt+2*count+1] = ibm->n_v + count;
+      /* bridge triangle */
+      const PetscInt prev = (local_i == 0) ? first_prev : g - 1;
+      ibm->nv1[ibm->n_elmt+2*count+1] = g;
       ibm->nv2[ibm->n_elmt+2*count+1] = nv2;
-      ibm->nv3[ibm->n_elmt+2*count+1] = ghost_prev;
+      ibm->nv3[ibm->n_elmt+2*count+1] = (prev >= 0) ? prev : g;
 
       count++;
     }
@@ -1633,63 +1684,30 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
 //------------------------------------------------------------------------------------------------------------ 
 PetscErrorCode GlobalGhost(IBMNodes *ibm) {
 
-  PetscInt ec, nv1, nv2, nv3, catch, edge_n, edge, start, end, count=0;
+  /* Positions only; ghost count and order identical to GlobalGhostInit. */
+  PetscInt count = 0;
 
-  for (edge_n=0; edge_n<ibm->n_edge; edge_n++){
-    //compute start&end
-    start = 0; end = 0;
-    for (edge=0; edge<edge_n+1; edge++) {
-      end += ibm->n_bnodes[edge];
-    }
-    start = end - ibm->n_bnodes[edge_n];
-    PetscInt n_local = end - start;
+  for (PetscInt e = 0; e < ibm->n_edge; e++) {
+    const PetscInt start    = BSegStart_(ibm->n_bnodes, e);
+    const PetscInt n_local  = ibm->n_bnodes[e];
+    const PetscInt n_g      = BoundarySegmentGhostCount(ibm->n_edge, ibm->n_bnodes, ibm->bnodes, e);
+    const PetscInt ec_limit = (e == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
 
-    /* Same base-element limit as GlobalGhostInit — see comment there. */
-    PetscInt ec_limit = (edge_n == 0 && ibm->n_elmt_base > 0) ? ibm->n_elmt_base : ibm->n_elmt;
-
-    /* Closed-loop modular indexing -- see GlobalGhostInit for why (must
-     * process all n_local boundary edges, including the wrap-around one,
-     * not just n_local-1). Topology doesn't change here (only positions),
-     * but the ghost COUNT and ORDER must match GlobalGhostInit exactly. */
-    for (PetscInt local_i=0; local_i<n_local; local_i++) {
-      PetscInt i      = start + local_i;
-      PetscInt i_next = start + (local_i+1) % n_local;
-
-      nv1 = ibm->bnodes[i_next];
-      nv2 = ibm->bnodes[i];
-
-      /* Same uninitialized-nv3 hazard as GlobalGhostInit -- reset each
-       * iteration and fall back to nv1 rather than dereference garbage if
-       * no adjacent element is found (see GlobalGhostInit for the full
-       * explanation). */
-      nv3 = -1;
-      for (ec=0; ec<ec_limit; ec++) {
-      	catch = 0;
-      	if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) {catch++;}
-      	if (nv2==ibm->nv1[ec] || nv2==ibm->nv2[ec] || nv2==ibm->nv3[ec]) {catch++;}
-      	if (catch==2) {
-      	  if (ibm->nv1[ec]!=nv1 && ibm->nv1[ec]!=nv2) {
-      	    nv3 = ibm->nv1[ec];
-      	  } else if (ibm->nv2[ec]!=nv1 && ibm->nv2[ec]!=nv2) {
-      	    nv3 = ibm->nv2[ec];
-      	  } else{
-      	    nv3 = ibm->nv3[ec];
-      	  }
-      	}
-      }
+    for (PetscInt local_i = 0; local_i < n_g; local_i++) {
+      const PetscInt nv1 = ibm->bnodes[start + (local_i+1) % n_local];
+      const PetscInt nv2 = ibm->bnodes[start + local_i];
+      PetscInt nv3 = BoundaryEdgeThirdNode_(ibm, nv1, nv2, ec_limit);
       if (nv3 < 0) {
-      	PetscPrintf(PETSC_COMM_SELF,
-      	            "[GlobalGhost] WARNING: no adjacent element found for boundary edge "
-      	            "(nv1=%d, nv2=%d, edge_n=%d, local_i=%d); falling back to nv3=nv1.\n",
-      	            (int)nv1, (int)nv2, (int)edge_n, (int)local_i);
-      	nv3 = nv1;
+        PetscPrintf(PETSC_COMM_SELF,
+                    "[GlobalGhost] WARNING: no adjacent element found for boundary edge "
+                    "(nv1=%d, nv2=%d, edge_n=%d, local_i=%d); falling back to nv3=nv1.\n",
+                    (int)nv1, (int)nv2, (int)e, (int)local_i);
+        nv3 = nv1;
       }
-
       ibm->x_bp[ibm->n_v+count] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
       ibm->y_bp[ibm->n_v+count] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
-      ibm->z_bp[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];     
-      
-      count++;      
+      ibm->z_bp[ibm->n_v+count] = ibm->z_bp[nv2] + ibm->z_bp[nv1] - ibm->z_bp[nv3];
+      count++;
     }
   }
 

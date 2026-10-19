@@ -1799,26 +1799,25 @@ PetscErrorCode EdgeFreeR(FE *fem, Vec R) {
   return(0);
 }
 
+extern PetscInt BoundarySegmentFirstGhost(PetscInt, const PetscInt *, const PetscInt *, PetscInt);
+extern PetscInt BoundarySegmentGhostCount(PetscInt, const PetscInt *, const PetscInt *, PetscInt);
 PetscErrorCode GhostDirectionalFix(IBMNodes *ibm, PetscInt edge_n, PetscInt dir) {
 
-  PetscInt i, ec, nv1, nv2, nv3, catch, edge, start, end, count=0;
-  // modify starting count based on edge_n to ensure correct indexing of ghost nodes
-  for (PetscInt ed=0; ed<edge_n; ed++){  
-    count = count + ibm->n_bnodes[ed] - 1; //total count of ghost nodes up to current edge_n
-  }
-  
-    //compute start&end
-    start = 0; end = 0;
-    for (edge=0; edge<edge_n+1; edge++) {
-      end += ibm->n_bnodes[edge];
-    }
-    start = end - ibm->n_bnodes[edge_n];
+  PetscInt i, ec, nv1, nv2, nv3, catch, start, count;
+  /* Ghost numbering and edge loop identical to GlobalGhostInit
+   * (BoundarySegment* helpers): open segment -> n-1 edges, closed -> n. */
+  count = BoundarySegmentFirstGhost(ibm->n_edge, ibm->n_bnodes, ibm->bnodes, edge_n);
+  start = 0;
+  for (PetscInt k = 0; k < edge_n; k++) start += ibm->n_bnodes[k];
+  const PetscInt n_local = ibm->n_bnodes[edge_n];
+  const PetscInt n_g     = BoundarySegmentGhostCount(ibm->n_edge, ibm->n_bnodes, ibm->bnodes, edge_n);
 
-    for (i=start; i<end-1; i++) {
-      
-      nv1 = ibm->bnodes[i+1];
+    for (PetscInt local_i=0; local_i<n_g; local_i++) {
+      i = start + local_i;
+      nv1 = ibm->bnodes[start + (local_i+1) % n_local];
       nv2 = ibm->bnodes[i];
-      
+      nv3 = nv1;
+
       for (ec=0; ec<ibm->n_elmt; ec++) {
       	catch = 0;
       	if (nv1==ibm->nv1[ec] || nv1==ibm->nv2[ec] || nv1==ibm->nv3[ec]) {catch++;}

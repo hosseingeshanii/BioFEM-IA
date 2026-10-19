@@ -884,20 +884,11 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   VecWAXPY(R,-1., fem->Fext, fem->Fint);
   VecAXPY(R,1., fem->Fdyn);
 
-  /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): nodes at min y0
-   * fixed in y, nodes at min x0 fixed in x (found from coordinates, not blist
-   * segments); traction on the max-x edge is in bcs.c. */
+  /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): blist edge 0
+   * (bottom) fixed in y, edge 3 (left) fixed in x; traction on edge 1 in bcs.c. */
   if (rect_plate_nitti) {
-    PetscReal xmin = 1.e30, ymin = 1.e30, xmax = -1.e30, tol;
-    for (PetscInt n = 0; n < ibm->n_v; n++) {
-      xmin = PetscMin(xmin, ibm->x_bp0[n]);  xmax = PetscMax(xmax, ibm->x_bp0[n]);
-      ymin = PetscMin(ymin, ibm->y_bp0[n]);
-    }
-    tol = 1.e-8 * (xmax - xmin);
-    for (PetscInt n = 0; n < ibm->n_v; n++) {
-      if (PetscAbsReal(ibm->x_bp0[n] - xmin) < tol) { ierr = NodeDirectionalFix(n, 0, fem, R); CHKERRQ(ierr); }
-      if (PetscAbsReal(ibm->y_bp0[n] - ymin) < tol) { ierr = NodeDirectionalFix(n, 1, fem, R); CHKERRQ(ierr); }
-    }
+    ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
+    ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
   }
 
   //---------2d case
