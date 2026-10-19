@@ -65,6 +65,7 @@ typedef struct {
   PetscInt       apex_pin_nodes[3];  /* minimal ("3-2-1") rigid-body pin node indices, see
                                        * lv_geometry_unstructured.c / main.c FormFunctionFEM */
   PetscInt       *bnodes, *n_bnodes, *belmts, *edgefrontnodes, *edgefrontnodesI, *belmtsedge;
+  PetscInt       *ghost_src;  /* 3*n_ghosts: ghost g = x[src1] + x[src2] - x[src3] (GlobalGhostInit) */
   PetscReal	     *nf_x, *nf_y, *nf_z, *Nf_x, *Nf_y, *Nf_z;  // Normal direction
   PetscReal      *dA, *dA0, *m, rho, h0; 
   

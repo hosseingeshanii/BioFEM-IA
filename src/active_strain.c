@@ -48,6 +48,7 @@ typedef PetscErrorCode (*ElemFunc)(FE *fem, PetscInt ec);
 PetscInt fiber_based_act_coeff;
 PetscInt curv_based_act_coeffs;
 PetscInt cart_fib_act;
+PetscInt ghost_force_map = 0; /* -ghost_force_map 1: map Fint on ghost nodes back to real nodes */
 static PetscInt cuda_metric_tensor = 0;
 
 /* External globals from the rest of the code */
@@ -95,6 +96,7 @@ PetscErrorCode GetUserActParams(FE *fem){
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cart_fib_act", &cart_fib_act, PETSC_NULL);
+    PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-ghost_force_map", &ghost_force_map, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);
     PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-gamma_ramp_type",  &(fem->act_data.muscle_act_params.gamma_ramp_type), PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-gamma_T",          &(fem->act_data.muscle_act_params.gamma_T), PETSC_NULL);
@@ -2227,6 +2229,18 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     // ElemTotTangMatTens(fem, ec); 
 
   }
+
+  /* TEMP diagnostic (-debug_c33_elem <ec>): C33 / S33 after the sub-iterations. */
+  {
+    PetscInt dbg = -1;
+    PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-debug_c33_elem", &dbg, PETSC_NULL);
+    if (dbg == ec) {
+      PetscPrintf(PETSC_COMM_SELF, "[C33dbg] ec=%d C33=%.10e S33=%.3e S11=%.6e S22=%.6e S12=%.3e C11=%.6e C22=%.6e g0_11=%.6e g0_33=%.6e\n",
+                  (int)ec, (double)ead->C[0].Cov[2][2], (double)ead->S[0].Cont[2][2], (double)ead->S[0].Cont[0][0],
+                  (double)ead->S[0].Cont[1][1], (double)ead->S[0].Cont[0][1], (double)ead->C[0].Cov[0][0],
+                  (double)ead->C[0].Cov[1][1], (double)ead->gm0[0].Cov[0][0], (double)ead->gm0[0].Cov[2][2]);
+    }
+  }
   
   PetscFunctionReturn(0);
 }
@@ -2345,7 +2359,22 @@ PetscErrorCode FInternalAct(FE *fem){
 
     for (i=0; i<nen; i++) {
       PetscInt node = ibm->patch[16*ec+i];
-      if (node == 1000000 || node < 0 || node >= ibm->n_v) continue;
+      if (node == 1000000 || node < 0) continue;
+      if (node >= ibm->n_v) {
+        /* Ghost node: x_g = x[s1] + x[s2] - x[s3] (GlobalGhostInit), so by
+         * the chain rule its force goes +1 to s1, +1 to s2, -1 to s3. */
+        if (!ghost_force_map || !ibm->ghost_src || node >= ibm->n_v + ibm->n_ghosts) continue;
+        const PetscInt  gc = node - ibm->n_v;
+        const PetscReal sg[3] = {1.0, 1.0, -1.0};
+        for (PetscInt k = 0; k < 3; k++) {
+          PetscInt gdof0 = ctx->ibm_to_global_dof0[ibm->ghost_src[3*gc+k]];
+          if (gdof0 < 0) continue;
+          PetscInt  dofs[3] = {gdof0, gdof0+1, gdof0+2};
+          PetscReal vals[3] = {sg[k]*Fb[dof*i], sg[k]*Fb[dof*i+1], sg[k]*Fb[dof*i+2]};
+          ierr = VecSetValues(fem->Fint, 3, dofs, vals, ADD_VALUES); CHKERRQ(ierr);
+        }
+        continue;
+      }
       PetscInt gdof0 = ctx->ibm_to_global_dof0[node];
       if (gdof0 < 0) continue;
       PetscInt  dofs[3] = {gdof0, gdof0+1, gdof0+2};

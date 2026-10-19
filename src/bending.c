@@ -1607,6 +1607,8 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
    * n_elmt_base (cap strips would give the wrong interior node). */
   PetscInt count = 0;
 
+  if (!ibm->ghost_src && ibm->n_ghosts > 0) PetscMalloc1(3*ibm->n_ghosts, &ibm->ghost_src);
+
   for (PetscInt e = 0; e < ibm->n_edge; e++) {
     const PetscInt  start   = BSegStart_(ibm->n_bnodes, e);
     const PetscInt  n_local = ibm->n_bnodes[e];
@@ -1654,6 +1656,7 @@ PetscErrorCode GlobalGhostInit(IBMNodes *ibm) {
         nv3 = nv1;
       }
       const PetscInt g = ibm->n_v + count;
+      ibm->ghost_src[3*count] = nv1;  ibm->ghost_src[3*count+1] = nv2;  ibm->ghost_src[3*count+2] = nv3;
 
       ibm->x_bp[g] = ibm->x_bp[nv2] + ibm->x_bp[nv1] - ibm->x_bp[nv3];
       ibm->y_bp[g] = ibm->y_bp[nv2] + ibm->y_bp[nv1] - ibm->y_bp[nv3];
