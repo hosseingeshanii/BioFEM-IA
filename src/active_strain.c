@@ -48,6 +48,8 @@ typedef PetscErrorCode (*ElemFunc)(FE *fem, PetscInt ec);
 PetscInt fiber_based_act_coeff;
 PetscInt curv_based_act_coeffs;
 PetscInt cart_fib_act;
+PetscInt  fa_nitti_plate = 0;  /* -fa_nitti_plate 1: Nitti eq. 44-47 Fa on a flat Lx x Ly patch */
+PetscReal fa_nitti_a1 = 1.0, fa_nitti_a2 = 1.0, fa_nitti_Lx = 1.0, fa_nitti_Ly = 1.0;
 PetscInt ghost_force_map = 1; /* -ghost_force_map 0 disables mapping Fint on ghost nodes back to real nodes (old behaviour) */
 static PetscInt cuda_metric_tensor = 0;
 
@@ -97,6 +99,11 @@ PetscErrorCode GetUserActParams(FE *fem){
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cart_fib_act", &cart_fib_act, PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-ghost_force_map", &ghost_force_map, PETSC_NULL);
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-fa_nitti_plate", &fa_nitti_plate, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fa_nitti_a1", &fa_nitti_a1, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fa_nitti_a2", &fa_nitti_a2, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fa_nitti_Lx", &fa_nitti_Lx, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fa_nitti_Ly", &fa_nitti_Ly, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-muscle_act_gamma", &(fem->act_data.muscle_act_params.gamma), PETSC_NULL);
     PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-gamma_ramp_type",  &(fem->act_data.muscle_act_params.gamma_ramp_type), PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-gamma_T",          &(fem->act_data.muscle_act_params.gamma_T), PETSC_NULL);
@@ -1268,7 +1275,16 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
             Fa_cart[0][0] = lambda;
             Fa_cart[1][1] = 1.0;
             Fa_cart[2][2] = 1.0;
+        } else if (fa_nitti_plate) {
+            /* Nitti et al. 2021 eq. (44)-(47), single flat patch parametrized on [0,1]^2:
+             * Fa = I - gamma (a1 g^1 x g^1 + a2 g^2 x g^2) + gamma_n g^3 x g^3 with
+             * contravariant patch vectors |g^1| = 1/Lx, |g^2| = 1/Ly (plate along x, y),
+             * gamma_n from isochoric Fa (eq. 46). */
+            Fa_cart[0][0] = 1.0 - gamma * fa_nitti_a1 / (fa_nitti_Lx * fa_nitti_Lx);
+            Fa_cart[1][1] = 1.0 - gamma * fa_nitti_a2 / (fa_nitti_Ly * fa_nitti_Ly);
+            Fa_cart[2][2] = 1.0/(Fa_cart[0][0]*Fa_cart[1][1]);
         } else {
+            /* in-plane isotropic, isochoric: diag(1-gamma, 1-gamma, (1-gamma)^-2) */
             Fa_cart[0][0] = 1.0 - gamma;
             Fa_cart[1][1] = 1.0 - gamma;
             Fa_cart[2][2] = 1.0/(Fa_cart[0][0]*Fa_cart[1][1]);
