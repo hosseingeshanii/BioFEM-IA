@@ -45,7 +45,7 @@ PetscReal  newmark_gamma=0.5; /* Newmark-beta gamma. 0.5 = average-acceleration,
                                   FDynamic() (residual) and xAccVel() (post-step state update) --
                                   both read this global rather than hardcoding their own. */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
-PetscInt   rect_plate_nitti=0, rect_plate_fix_z=0; /* Nitti et al. 2021 Sec 5.1 flat plate: edge 0 fixed in y, edge 3 fixed in x (load in bcs.c) */
+PetscInt   rect_plate_nitti=0, rect_plate_fix_z=0, rect_plate_pins=0; /* Nitti et al. 2021 Sec 5.1 flat plate: edge 0 fixed in y, edge 3 fixed in x (load in bcs.c) */
 PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
 PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DOFs across the 3
                                   apex_pin_nodes) instead of/in addition to lv_fix_apex/lv_fix_base --
@@ -217,6 +217,7 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &rect_plate_nitti, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_fix_z", &rect_plate_fix_z, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_pins", &rect_plate_pins, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_base", &lv_fix_base, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_rigid_min", &lv_rigid_min, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex_cap", &lv_fix_apex_cap, PETSC_NULL);
@@ -896,7 +897,15 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
 
   /* Nitti et al. 2021 Sec 5.1 flat plate (-rect_plate_nitti 1): blist edge 0
    * (bottom) fixed in y, edge 3 (left) fixed in x; traction on edge 1 in bcs.c. */
-  if (rect_plate_nitti) {
+  if (rect_plate_nitti && rect_plate_pins) {
+    /* Minimal in-plane rigid-mode pins only (free-contraction tests with oblique
+     * fibers): first node of blist edge 0 (bottom-left) fixed in x,y; last node of
+     * edge 0 (bottom-right) fixed in y. */
+    const PetscInt c0 = ibm->bnodes[0], c1 = ibm->bnodes[ibm->n_bnodes[0]-1];
+    ierr = NodeDirectionalFix(c0, 0, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c0, 1, fem, R); CHKERRQ(ierr);
+    ierr = NodeDirectionalFix(c1, 1, fem, R); CHKERRQ(ierr);
+  } else if (rect_plate_nitti) {
     ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
     ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
     /* -rect_plate_fix_z 1: also fix z on all 4 edges (in-plane membrane
@@ -1604,6 +1613,18 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
   // printf("CHECK b InitMaterial\n");
   if (ConstitutiveLawNonLinear) {
     InitMaterial(ibm);
+  }
+  /* -fiber_angle_deg theta: uniform in-plane fiber f = (cos theta, sin theta, 0) on
+   * every element (flat test meshes; file meshes otherwise leave n_fib unset unless
+   * ConstitutiveLawNonLinear). Not used by the LV generators, which set n_fib. */
+  {
+    PetscReal fdeg = 0.0; PetscBool fset = PETSC_FALSE;
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fiber_angle_deg", &fdeg, &fset);
+    if (fset) {
+      for (PetscInt e = 0; e < ibm->n_elmt; e++) {
+        ibm->n_fib[e].x = cos(fdeg*M_PI/180.0);  ibm->n_fib[e].y = sin(fdeg*M_PI/180.0);  ibm->n_fib[e].z = 0.0;
+      }
+    }
   }
 
   if (ti==0) InitVel(0, 0, fem);

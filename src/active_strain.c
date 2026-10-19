@@ -48,6 +48,7 @@ typedef PetscErrorCode (*ElemFunc)(FE *fem, PetscInt ec);
 PetscInt fiber_based_act_coeff;
 PetscInt curv_based_act_coeffs;
 PetscInt cart_fib_act;
+PetscInt  fa_pezzuto = 0;      /* -fa_pezzuto 1: isochoric Fa of Pezzuto & Ambrosi 2014 eq. 11 (with -cart_fib_act 1) */
 PetscInt  fa_nitti_plate = 0;  /* -fa_nitti_plate 1: Nitti eq. 44-47 Fa on a flat Lx x Ly patch */
 PetscReal fa_nitti_a1 = 1.0, fa_nitti_a2 = 1.0, fa_nitti_Lx = 1.0, fa_nitti_Ly = 1.0;
 PetscInt ghost_force_map = 1; /* -ghost_force_map 0 disables mapping Fint on ghost nodes back to real nodes (old behaviour) */
@@ -99,6 +100,7 @@ PetscErrorCode GetUserActParams(FE *fem){
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cart_fib_act", &cart_fib_act, PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-ghost_force_map", &ghost_force_map, PETSC_NULL);
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-fa_pezzuto", &fa_pezzuto, PETSC_NULL);
     PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-fa_nitti_plate", &fa_nitti_plate, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fa_nitti_a1", &fa_nitti_a1, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fa_nitti_a2", &fa_nitti_a2, PETSC_NULL);
@@ -1258,9 +1260,20 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
             ibm->n_fib[ec].y,
             ibm->n_fib[ec].z};
 
-        for (PetscInt i = 0; i < 3; i++)
-            for (PetscInt j = 0; j < 3; j++)
-                Fa_cart[i][j] = (i == j ? 1.0 : 0.0) - gamma * nfiber[i] * nfiber[j];
+        if (fa_pezzuto) {
+            /* Pezzuto & Ambrosi 2014 eq. (11), isochoric (det Fa = 1):
+             * Fa = (1-gamma) f x f + (1-gamma)^(-1/2) (I - f x f), f normalized. */
+            const PetscReal nf = PetscSqrtReal(nfiber[0]*nfiber[0] + nfiber[1]*nfiber[1] + nfiber[2]*nfiber[2]);
+            const PetscReal lf = 1.0 - gamma, lt = 1.0 / PetscSqrtReal(1.0 - gamma);
+            for (PetscInt i = 0; i < 3; i++) nfiber[i] /= nf;
+            for (PetscInt i = 0; i < 3; i++)
+                for (PetscInt j = 0; j < 3; j++)
+                    Fa_cart[i][j] = lt * (i == j ? 1.0 : 0.0) + (lf - lt) * nfiber[i] * nfiber[j];
+        } else {
+            for (PetscInt i = 0; i < 3; i++)
+                for (PetscInt j = 0; j < 3; j++)
+                    Fa_cart[i][j] = (i == j ? 1.0 : 0.0) - gamma * nfiber[i] * nfiber[j];
+        }
     }
     else
     {
