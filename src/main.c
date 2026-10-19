@@ -869,7 +869,8 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
       /* Plate-specific ghost fixes (edge 0 in y, edge 3 in x); only meaningful
        * for a 4-segment blist -- guarded so a single closed ring doesn't index
        * n_bnodes[1..3] out of range. */
-      if (ibm->n_edge >= 4) {
+      if (ibm->n_edge >= 4 && !(rect_plate_nitti && rect_plate_pins)) {
+        /* roller symmetry on the ghosts of edges 0 (y) and 3 (x); not with pin-only BCs */
         GhostDirectionalFix(ibm, 0, 1);
         GhostDirectionalFix(ibm, 3, 0);
       }
