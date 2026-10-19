@@ -106,41 +106,55 @@ PetscErrorCode ConstantVel(PetscReal vel, PetscInt dir, FE *fem)
 PetscErrorCode EdgeConstPressure(PetscInt edge_n, PetscReal P, PetscInt dir, FE *fem) {
   PetscFunctionBeginUser;
 
-  IBMNodes *ibm=fem->ibm;
-  PetscInt start=0, end=0, edge, i, *cbn, *sortbn, nb, ii;
-  for (edge=0; edge<edge_n+1; edge++) {
-    end += ibm->n_bnodes[edge];
+  /* Uniform traction P (per reference area) on blist edge edge_n, direction dir:
+   * each edge segment of reference length b carries b*h0*P, half to each end.
+   * Parallel-safe: every rank holds the full ibm arrays, so only rank 0 adds the
+   * nodal forces (ADD_VALUES through the global DOF map); PETSc routes them to
+   * the owning ranks during the collective assembly below. Serial (no DMPlex
+   * context) falls back to direct indexing. */
+  IBMNodes      *ibm  = fem->ibm;
+  DMPlexGeomCtx *gctx = &fem->geom_ctx;
+  PetscInt       start = 0, i, nb, *cbn, *sortbn;
+  PetscMPIInt    rank;
+
+  for (PetscInt e = 0; e < edge_n; e++) start += ibm->n_bnodes[e];
+  const PetscInt nloc = ibm->n_bnodes[edge_n];
+
+  PetscCall(PetscMalloc2(nloc, &cbn, nloc, &sortbn));
+  for (i = 0; i < nloc; i++) {
+    nb = ibm->bnodes[start + i];
+    cbn[i] = (PetscInt)(100000.0*PetscSqrtReal(pow(ibm->x_bp0[nb], 2) + pow(ibm->y_bp0[nb], 2) + pow(ibm->z_bp0[nb], 2)));
+    sortbn[i] = nb;
   }
-  start = end - ibm->n_bnodes[edge_n];
-  
-  PetscMalloc(ibm->n_bnodes[edge_n]*sizeof(PetscInt), &cbn);
-  PetscMalloc(ibm->n_bnodes[edge_n]*sizeof(PetscInt), &sortbn);
-  ii = 0;
-  for (i=start; i<end; i++) {
-    nb = ibm->bnodes[i];
-    cbn[ii] = (PetscInt)(100000.0*PetscSqrtReal(pow(ibm->x_bp0[nb], 2) + pow(ibm->y_bp0[nb], 2) + pow(ibm->z_bp0[nb], 2)));
-    sortbn[ii] = nb;
-    ii += 1;    
+  PetscCall(PetscSortIntWithArray(nloc, cbn, sortbn));
+
+  PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
+  if (gctx->initialized) {
+    if (rank == 0) {
+      for (i = 0; i < nloc - 1; i++) {
+        const PetscInt  nb1 = sortbn[i], nb2 = sortbn[i+1];
+        const PetscReal b = PetscSqrtReal(pow(ibm->x_bp0[nb2] - ibm->x_bp0[nb1], 2) + pow(ibm->y_bp0[nb2] - ibm->y_bp0[nb1], 2) + pow(ibm->z_bp0[nb2] - ibm->z_bp0[nb1], 2));
+        const PetscReal f = 0.5*b*h0*P;
+        PetscInt d1 = gctx->ibm_to_global_dof0[nb1], d2 = gctx->ibm_to_global_dof0[nb2];
+        if (d1 >= 0) { d1 += dir; PetscCall(VecSetValues(fem->Fext, 1, &d1, &f, ADD_VALUES)); }
+        if (d2 >= 0) { d2 += dir; PetscCall(VecSetValues(fem->Fext, 1, &d2, &f, ADD_VALUES)); }
+      }
+    }
+    PetscCall(VecAssemblyBegin(fem->Fext));
+    PetscCall(VecAssemblyEnd(fem->Fext));
+  } else {
+    PetscReal *FF;
+    PetscCall(VecGetArray(fem->Fext, &FF));
+    for (i = 0; i < nloc - 1; i++) {
+      const PetscInt  nb1 = sortbn[i], nb2 = sortbn[i+1];
+      const PetscReal b = PetscSqrtReal(pow(ibm->x_bp0[nb2] - ibm->x_bp0[nb1], 2) + pow(ibm->y_bp0[nb2] - ibm->y_bp0[nb1], 2) + pow(ibm->z_bp0[nb2] - ibm->z_bp0[nb1], 2));
+      FF[nb1*dof+dir] += b*h0*P/2.;
+      FF[nb2*dof+dir] += b*h0*P/2.;
+    }
+    PetscCall(VecRestoreArray(fem->Fext, &FF));
   }
-  PetscSortIntWithArray(ibm->n_bnodes[edge_n], cbn, sortbn);
 
-  PetscReal *RR, b, *FF;
-  PetscInt nb1, nb2; 
-  VecGetArray(fem->Fext, &FF);
- 
-  for (i=0; i<ibm->n_bnodes[edge_n]-1; i++) {
-    nb1 = sortbn[i];  nb2 = sortbn[i+1];
-    b = PetscSqrtReal(pow(ibm->x_bp0[nb2] - ibm->x_bp0[nb1], 2) + pow(ibm->y_bp0[nb2] - ibm->y_bp0[nb1], 2) + pow(ibm->z_bp0[nb2] - ibm->z_bp0[nb1], 2));
-    
-    FF[nb1*dof+dir] += b*h0*P/2.;
-    FF[nb2*dof+dir] += b*h0*P/2.;
-    //  PetscPrintf(PETSC_COMM_SELF, "edgeLengthFornodes(%d,%d): %le\n",nb1,nb2,b);
-  }
-
-  VecRestoreArray(fem->Fext, &FF);
-
-  PetscFree(cbn);  PetscFree(sortbn);
-
+  PetscCall(PetscFree2(cbn, sortbn));
   PetscFunctionReturn(0);
 }
 
