@@ -694,7 +694,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
     FILE *vf = fopen(volpath, "a");
     if (vf) {
       /* columns: step, midsurface-closed volume, endocardial cavity volume */
-      fprintf(vf, "%d %.8f %.8f\n", (int)ti, V, Vendo);
+      fprintf(vf, "%d %.10e %.10e\n", (int)ti, V, Vendo);
       fclose(vf);
     }
   }

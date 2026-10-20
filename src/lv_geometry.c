@@ -95,6 +95,9 @@ PetscErrorCode LVParamsCreate(LVParams *p)
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_apex",    &p->alpha_apex,   PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_base",    &p->alpha_base,   PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_alpha_midwall", &p->alpha_midwall, PETSC_NULL);
+  /* -lv_a/-lv_b are given in mesh-file units; scale like the coordinates. */
+  p->a /= char_length_z;
+  p->b /= char_length_x;
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_fiber_latitude_sweep", &p->fiber_latitude_sweep, PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_N_taper_rings", &p->N_taper_rings, PETSC_NULL);
   PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-lv_gamma_wave", &p->gamma_wave, PETSC_NULL);

@@ -19,6 +19,7 @@
 
 #include "variables.h"
 #include "lv_geometry.h"
+extern PetscReal  char_length_x, char_length_y, char_length_z;
 extern PetscInt BoundaryGhostCount(PetscInt, const PetscInt *, const PetscInt *);
 #include <math.h>
 #include <stdio.h>
@@ -117,7 +118,8 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
     double x, y, z;
     if (fscanf(fd, "%lf %lf %lf", &x, &y, &z) != 3)
       SETERRQ1(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: node %d", (int)i);
-    tx[i] = x; ty[i] = y; tz[i] = z;
+    /* mesh-file units -> solver units (-char_length_x/y/z, as for blist input) */
+    tx[i] = x / char_length_x; ty[i] = y / char_length_y; tz[i] = z / char_length_z;
   }
 
   if (fscanf(fd, "%d", &n_elmt) != 1) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_FILE_READ, "bad mesh file: n_elmt");
