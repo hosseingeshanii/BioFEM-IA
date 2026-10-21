@@ -247,6 +247,8 @@ _TIME_RE = re.compile(r"body:\d+ Time\((\d+)\)=(\S+)")
 _SNES_RE = re.compile(r"^\s*(\d+) SNES Function norm (\S+)")
 _KSP_RE  = re.compile(r"Linear fem_ solve .* iterations (\d+)")
 _NL_RE   = re.compile(r"Nonlinear fem_ solve (converged|did not converge) due to (\S+) iterations (\d+)")
+_KSPN_RE = re.compile(r"^\s*(\d+) KSP Residual norm (\S+)")
+_LAM_RE  = re.compile(r"Line search: .*lambda=(\S+)")
 _C33_RE  = re.compile(r"\[C33\] step=(\d+) (.*)")
 _KEEP_RE = re.compile(r"\[step\] step=(\d+) not converged .*: (last Newton iterate accepted|rolled back)")
 
@@ -254,22 +256,38 @@ _KEEP_RE = re.compile(r"\[step\] step=(\d+) not converged .*: (last Newton itera
 def parse_solver_log(path):
     """Per solver step: {'step', 't', 'fnorm' (list, one per Newton iteration), 'ksp_its' (total),
     'converged' (bool or None if no SNES summary line), 'reason', 'outcome' ('converged', 'accepted',
-    'rolled back', or None), 'stagnated' (bool), 'c33' (dict from the -log_c33 line, if any)}.
+    'rolled back', or None), 'stagnated' (bool), 'c33' (dict from the -log_c33 line, if any),
+    'lam' (line-search step per Newton iteration, needs -fem_snes_linesearch_monitor),
+    'kred' (GMRES residual reduction per linear solve, needs -fem_ksp_monitor)}.
     Needs -fem_snes_monitor, -fem_ksp_converged_reason, -fem_snes_converged_reason in control.dat."""
-    steps, cur = [], None
+    steps, cur, k0 = [], None, None
     with open(path, errors="replace") as fh:
         for line in fh:
             m = _TIME_RE.search(line)
             if m:
                 cur = dict(step=int(m.group(1)), t=float(m.group(2)), fnorm=[], ksp_its=0, converged=None, reason="",
-                           outcome=None, stagnated=False, c33={})
+                           outcome=None, stagnated=False, c33={}, lam=[], kred=[])
+                k0 = None
                 steps.append(cur)
                 continue
             if cur is None:
                 continue
             m = _SNES_RE.match(line)
             if m:
-                cur["fnorm"].append(float(m.group(2))); continue
+                cur["fnorm"].append(float(m.group(2))); k0 = None; continue
+            m = _KSPN_RE.match(line)
+            if m:
+                r = float(m.group(2))
+                if k0 is None:
+                    k0 = r; cur["kred"].append(1.0)
+                elif k0 > 0:
+                    cur["kred"][-1] = r / k0
+                continue
+            if "Line search: Using full step" in line:
+                cur["lam"].append(1.0); continue
+            m = _LAM_RE.search(line)
+            if m:
+                cur["lam"].append(float(m.group(1))); continue
             m = _KSP_RE.search(line)
             if m:
                 cur["ksp_its"] += int(m.group(1)); continue

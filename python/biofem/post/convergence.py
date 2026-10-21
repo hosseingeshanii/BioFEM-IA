@@ -43,8 +43,10 @@ def plot_history(plt, data, args, out):
     non-converged steps in red; (right) all iterations back to back, step boundaries as ticks."""
     import matplotlib
     steps_sel = _parse_steps(args.steps)
-    fig, axs = plt.subplots(len(data), 2, figsize=(13, 3.8 * len(data)), squeeze=False,
-                            gridspec_kw=dict(width_ratios=[1, 1.6]))
+    has_ls = any(s["lam"] or s["kred"] for _, d in data for s in d["steps"])
+    ncol = 4 if has_ls else 2
+    fig, axs = plt.subplots(len(data), ncol, figsize=(13 if ncol == 2 else 20, 3.8 * len(data)), squeeze=False,
+                            gridspec_kw=dict(width_ratios=[1, 1.6] + ([1, 1] if has_ls else [])))
     for row, (lab, d) in enumerate(data):
         st = [s for s in d["steps"] if len(s["fnorm"]) > 1 and (steps_sel is None or s["step"] in steps_sel)]
         if not st:
@@ -74,6 +76,19 @@ def plot_history(plt, data, args, out):
             k0 += n
         ax.set_title(f"{lab}: all Newton iterations in order (red: steps that did not converge)", fontsize=9)
         style.finish(ax, "Newton iteration (cumulative)")
+        if has_ls:
+            for col, key, title in ((2, "lam", "line-search step length per Newton iteration"),
+                                    (3, "kred", "GMRES reduction per linear solve (final / initial)")):
+                ax = axs[row, col]
+                for s in st:
+                    y = s[key]
+                    if not y:
+                        continue
+                    bad = s["converged"] is False
+                    ax.semilogy(range(len(y)), y, lw=1.6 if bad else 0.8,
+                                color=style.FAIL if bad else cmap(s["step"] * d["dt"] / tmax), alpha=1 if bad else 0.7)
+                ax.set_title(f"{lab}: {title}", fontsize=9)
+                style.finish(ax, "Newton iteration within the step")
     fig.tight_layout()
     hp = out.with_name(out.stem + "_history.png")
     fig.savefig(hp, dpi=130)
