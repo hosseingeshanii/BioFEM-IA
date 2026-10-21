@@ -98,6 +98,7 @@ PetscErrorCode GetUserActParams(FE *fem){
 
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-num_gaussian_quad_points", &(fem->act_data.n_qp), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-C33_subitr_nums", &(fem->act_data.C33_subitr_nums), PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-fiber_transmural_twist_deg", &(fem->act_data.fiber_twist_deg), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cart_fib_act", &cart_fib_act, PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-ghost_force_map", &ghost_force_map, PETSC_NULL);
     PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-fa_pezzuto", &fa_pezzuto, PETSC_NULL);
@@ -161,6 +162,8 @@ PetscErrorCode ActDataAllocate(FE *fem)
 
     if (!skip_solver_arrays) {
       /* Kinematics */
+      ierr = PetscMalloc1(n_qp, &ead->fib);    CHKERRQ(ierr);
+      ead->fib_set = PETSC_FALSE;
       ierr = PetscMalloc1(n_qp, &ead->Fa);     CHKERRQ(ierr);
       ierr = PetscMalloc1(n_qp, &ead->Fa_inv); CHKERRQ(ierr);
 
@@ -316,6 +319,7 @@ PetscErrorCode ActDataDestroy(FE *fem)
 
     ierr = ElemActDataGeomDestroy_(ead); CHKERRQ(ierr);
 
+    ierr = PetscFree(ead->fib);    CHKERRQ(ierr);
     ierr = PetscFree(ead->Fa);     CHKERRQ(ierr);
     ierr = PetscFree(ead->Fa_inv); CHKERRQ(ierr);
     ierr = PetscFree(ead->C);      CHKERRQ(ierr);
@@ -785,6 +789,16 @@ static inline void Compute_a3_alpha_(
   /* Unnormalized:  a3,2 ~ (a1,2 x a2 + a1 x a2,2) with a1,2 = Aab, a2,2 = Abb */
   *a3_2 = PLUS(CROSS(Aab, a2), CROSS(a1, Abb));
 
+  /* a3 = (a1 x a2)/|a1 x a2| is a unit vector, so a3,alpha must be tangent:
+   *   a3,alpha = (I - a3 (x) a3) (a1 x a2),alpha / |a1 x a2|.
+   * Without removing the normal part, g_alpha = a_alpha + theta3 a3,alpha gets a component
+   * along a3, so g0_alpha3 != 0 off the midsurface while C_alpha3 = 0 (Kirchhoff-Love):
+   * the reference state is strained for theta3 != 0 (n_qp > 1). No effect at theta3 = 0. */
+  const struct Cmpnts n = AMULT(1.0 / size_a3, CROSS(a1, a2));
+  const PetscReal d1 = DOT(*a3_1, n), d2 = DOT(*a3_2, n);
+  a3_1->x -= d1 * n.x;  a3_1->y -= d1 * n.y;  a3_1->z -= d1 * n.z;
+  a3_2->x -= d2 * n.x;  a3_2->y -= d2 * n.y;  a3_2->z -= d2 * n.z;
+
   /* Normalize by ||a1 x a2|| */
   a3_1->x /= size_a3;  a3_1->y /= size_a3;  a3_1->z /= size_a3;
   a3_2->x /= size_a3;  a3_2->y /= size_a3;  a3_2->z /= size_a3;
@@ -1231,6 +1245,60 @@ PetscReal GammaOfTimeCurrent(FE *fem, PetscInt ec)
     return GammaOfTimeDelayed(&fem->act_data.muscle_act_params, delay);
 }
 
+/* Fill ead->fib[qp] (Cartesian unit fiber per thickness qp) for element ec, once.
+ * Uniform (default): every qp gets the mid-wall fiber ibm->n_fib[ec].
+ * -fiber_transmural_twist_deg T: rotate the mid-wall fiber about the outward wall normal e_n
+ *   (ibm->n_fib_out[ec], set by the LV generators) so that the helix angle is
+ *   alpha(xi) = alpha_mid - (T/2) xi,  xi = +1 at the epicardium, -1 at the endocardium,
+ *   with xi = theta[qp] * sign(a3 . e_n) (theta in [-1,1] along the shell director a3).
+ *   With e_c = e_n x e_l, f x e_n = e_l for f = e_c, so
+ *   f(xi) = cos(d) f_mid + sin(d) (f_mid x e_n), d = alpha(xi) - alpha_mid. */
+static PetscErrorCode ElemQPFibers_(FE *fem, PetscInt ec)
+{
+    PetscFunctionBeginUser;
+    IBMNodes    *ibm = fem->ibm;
+    ActData     *act = &fem->act_data;
+    ElemActData *ead = &act->elem_act_data[ec];
+    PetscReal f[3] = {ibm->n_fib[ec].x, ibm->n_fib[ec].y, ibm->n_fib[ec].z};
+    PetscReal nf = PetscSqrtReal(f[0]*f[0] + f[1]*f[1] + f[2]*f[2]);
+    PetscCheck(nf > 0.0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "zero fiber vector at element %d", (int)ec);
+    for (PetscInt i = 0; i < 3; i++) f[i] /= nf;
+
+    PetscReal T = act->fiber_twist_deg * PETSC_PI / 180.0;
+    PetscReal en[3] = {ibm->n_fib_out[ec].x, ibm->n_fib_out[ec].y, ibm->n_fib_out[ec].z};
+    if (T != 0.0) {
+        PetscReal ne = PetscSqrtReal(en[0]*en[0] + en[1]*en[1] + en[2]*en[2]);
+        PetscCheck(ne > 0.0, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG,
+                   "-fiber_transmural_twist_deg needs the outward fiber-frame normal (LV meshes only); none at element %d", (int)ec);
+        for (PetscInt i = 0; i < 3; i++) en[i] /= ne;
+    }
+    const PetscReal fxn[3] = {f[1]*en[2] - f[2]*en[1], f[2]*en[0] - f[0]*en[2], f[0]*en[1] - f[1]*en[0]};
+    for (PetscInt qp = 0; qp < act->n_qp; qp++) {
+        PetscReal d = 0.0;
+        if (T != 0.0) {
+            const struct Cmpnts a3 = ead->g0[qp].Cov[2];
+            PetscReal s  = (a3.x*en[0] + a3.y*en[1] + a3.z*en[2] >= 0.0) ? 1.0 : -1.0;
+            PetscReal xi = s * act->theta[qp];
+            d = -0.5 * T * xi;
+        }
+        for (PetscInt i = 0; i < 3; i++) ead->fib[qp][i] = PetscCosReal(d) * f[i] + PetscSinReal(d) * fxn[i];
+    }
+    ead->fib_set = PETSC_TRUE;
+
+    if (ec == 0 && T != 0.0) {
+        PetscPrintf(PETSC_COMM_SELF, "[fiber] element 0, twist %.1f deg: angle from the mid-wall fiber per qp (theta):",
+                    (double)act->fiber_twist_deg);
+        for (PetscInt qp = 0; qp < act->n_qp; qp++) {
+            PetscReal c = ead->fib[qp][0]*f[0] + ead->fib[qp][1]*f[1] + ead->fib[qp][2]*f[2];
+            PetscReal sgn = (ead->fib[qp][0]*fxn[0] + ead->fib[qp][1]*fxn[1] + ead->fib[qp][2]*fxn[2]) >= 0.0 ? 1.0 : -1.0;
+            PetscPrintf(PETSC_COMM_SELF, " %+.2f(%+.3f)", (double)(sgn * PetscAcosReal(PetscMin(1.0, PetscMax(-1.0, c))) * 180.0 / PETSC_PI),
+                        (double)act->theta[qp]);
+        }
+        PetscPrintf(PETSC_COMM_SELF, "\n");
+    }
+    PetscFunctionReturn(0);
+}
+
 /* Deformation gradient */
 PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
 {
@@ -1265,25 +1333,8 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
     /*------------------------------------------------------------*/
     if (cart_fib_act)
     {
-        PetscReal nfiber[3] = {
-            ibm->n_fib[ec].x,
-            ibm->n_fib[ec].y,
-            ibm->n_fib[ec].z};
-
-        if (fa_pezzuto) {
-            /* Pezzuto & Ambrosi 2014 eq. (11), isochoric (det Fa = 1):
-             * Fa = (1-gamma) f x f + (1-gamma)^(-1/2) (I - f x f), f normalized. */
-            const PetscReal nf = PetscSqrtReal(nfiber[0]*nfiber[0] + nfiber[1]*nfiber[1] + nfiber[2]*nfiber[2]);
-            const PetscReal lf = 1.0 - gamma, lt = 1.0 / PetscSqrtReal(1.0 - gamma);
-            for (PetscInt i = 0; i < 3; i++) nfiber[i] /= nf;
-            for (PetscInt i = 0; i < 3; i++)
-                for (PetscInt j = 0; j < 3; j++)
-                    Fa_cart[i][j] = lt * (i == j ? 1.0 : 0.0) + (lf - lt) * nfiber[i] * nfiber[j];
-        } else {
-            for (PetscInt i = 0; i < 3; i++)
-                for (PetscInt j = 0; j < 3; j++)
-                    Fa_cart[i][j] = (i == j ? 1.0 : 0.0) - gamma * nfiber[i] * nfiber[j];
-        }
+        /* Fiber-based F_a is built per thickness qp below, from ead->fib[qp]. */
+        if (!ead->fib_set) { ierr = ElemQPFibers_(fem, ec); CHKERRQ(ierr); }
     }
     else
     {
@@ -1317,6 +1368,22 @@ PetscErrorCode ElemActDefGrad(FE *fem, PetscInt ec)
         // PrintMat3x3("Fa_cart", Fa_cart);
     for (PetscInt qp = 0; qp < fem->act_data.n_qp; qp++)
     {
+        if (cart_fib_act) {
+            /* 1b. Fiber-based active deformation gradient at this qp (Cartesian), fiber ead->fib[qp] */
+            const PetscReal *nfiber = ead->fib[qp];
+            if (fa_pezzuto) {
+                /* Pezzuto & Ambrosi 2014 eq. (11), isochoric (det Fa = 1):
+                 * Fa = (1-gamma) f x f + (1-gamma)^(-1/2) (I - f x f), f unit. */
+                const PetscReal lf = 1.0 - gamma, lt = 1.0 / PetscSqrtReal(1.0 - gamma);
+                for (PetscInt i = 0; i < 3; i++)
+                    for (PetscInt j = 0; j < 3; j++)
+                        Fa_cart[i][j] = lt * (i == j ? 1.0 : 0.0) + (lf - lt) * nfiber[i] * nfiber[j];
+            } else {
+                for (PetscInt i = 0; i < 3; i++)
+                    for (PetscInt j = 0; j < 3; j++)
+                        Fa_cart[i][j] = (i == j ? 1.0 : 0.0) - gamma * nfiber[i] * nfiber[j];
+            }
+        }
         if (ec == 100) {
             // PetscPrintf(PETSC_COMM_WORLD, "\n========== EC %d, QP %d ==========\n", ec, qp);
             

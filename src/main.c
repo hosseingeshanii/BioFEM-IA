@@ -1733,7 +1733,7 @@ PetscErrorCode Free(FE *fem) {
   PetscFree(ibm->x_bp0);  PetscFree(ibm->y_bp0);  PetscFree(ibm->z_bp0);
   PetscFree(ibm->nv1);  PetscFree(ibm->nv2);  PetscFree(ibm->nv3);
   PetscFree(ibm->nv4);  PetscFree(ibm->nv5);  PetscFree(ibm->nv6);
-  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->gamma_scale);  PetscFree(ibm->activation_delay);  PetscFree(ibm->thickness);  PetscFree(ibm->kve0);
+  PetscFree(ibm->n_bnodes);  PetscFree(ibm->bnodes);  PetscFree(ibm->n_fib);  PetscFree(ibm->n_fib_out);  PetscFree(ibm->gamma_scale);  PetscFree(ibm->activation_delay);  PetscFree(ibm->thickness);  PetscFree(ibm->kve0);
   PetscFree(ibm->kve);  PetscFree(fem->StressM);  PetscFree(fem->StrainM);   PetscFree(fem->IE);  PetscFree(fem->CE);  PetscFree(fem->KE);  PetscFree(ibm->m); 
   PetscFree(fem->FC); 
   PetscFree(fem->StressB);  PetscFree(fem->StrainB);

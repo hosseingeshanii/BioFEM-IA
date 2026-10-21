@@ -698,6 +698,7 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
         alpha_cap = (1.0 - zstar_cap) * alpha_apex_rad + zstar_cap * alpha_base_rad;
       }
 
+      ibm->n_fib_out[ec] = e_n;
       ibm->n_fib[ec].x = cos(alpha_cap) * e_c.x + sin(alpha_cap) * e_l.x;
       ibm->n_fib[ec].y = cos(alpha_cap) * e_c.y + sin(alpha_cap) * e_l.y;
       ibm->n_fib[ec].z = cos(alpha_cap) * e_c.z + sin(alpha_cap) * e_l.z;
@@ -791,6 +792,7 @@ PetscErrorCode CreateLVMesh(IBMNodes *ibm, FE *fem, const LVParams *p)
 
     /* Fiber vector in the tangent plane — Bayer 2012 Eq.(7) direction,
      * always unit magnitude; activation strength lives in gamma_scale. */
+    ibm->n_fib_out[ec] = e_n;
     ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
     ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
     ibm->n_fib[ec].z = cos(alpha) * e_c.z + sin(alpha) * e_l.z;

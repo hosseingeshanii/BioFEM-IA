@@ -365,6 +365,7 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
       alpha = (1.0 - zstar) * alpha_apex_rad + zstar * alpha_base_rad;
     }
 
+    ibm->n_fib_out[ec] = e_n;
     ibm->n_fib[ec].x = cos(alpha) * e_c.x + sin(alpha) * e_l.x;
     ibm->n_fib[ec].y = cos(alpha) * e_c.y + sin(alpha) * e_l.y;
     ibm->n_fib[ec].z = cos(alpha) * e_c.z + sin(alpha) * e_l.z;

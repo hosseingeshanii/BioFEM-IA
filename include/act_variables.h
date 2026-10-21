@@ -75,6 +75,11 @@ typedef struct {
     PetscReal    c33_last_delta; /**< |DeltaC33| of the last local C33 sub-iteration (last qp), for -log_c33. */
     PetscInt     c33_clamped;    /**< Local C33 updates cut back by the det(C)>0 guard in the last ElemC33Solve. */
 
+    PetscReal    (*fib)[3];      /**< Fiber direction per thickness qp (Cartesian, unit, tangent to the wall);
+                                      filled once by ElemQPFibers_ from ibm->n_fib (mid-wall) and the transmural
+                                      rule; F_a is built from it per qp. */
+    PetscBool    fib_set;        /**< fib[] has been filled. */
+
 } ElemActData;
 
 /** @brief Active-muscle model parameters. */
@@ -101,6 +106,9 @@ typedef struct {
     PetscReal       mu;                /**< Shear modulus. */
     PetscReal       K;                 /**< Bulk modulus. */
     PetscInt        C33_subitr_nums;   /**< Iteration count for local C33 solve. */
+    PetscReal       fiber_twist_deg;   /**< -fiber_transmural_twist_deg T: helix angle alpha_mid + T/2 at the
+                                            endocardium -> alpha_mid - T/2 at the epicardium, linear in the
+                                            thickness coordinate (Pezzuto 2014: T = 120). 0 = uniform. */
     MuscleActParams muscle_act_params; /**< Muscle-activation parameters. */
     ElemActData     *elem_act_data;    /**< Per-element activation cache. */
 } ActData;

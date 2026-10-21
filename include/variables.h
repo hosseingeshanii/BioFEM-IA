@@ -53,6 +53,9 @@ typedef struct {
   PetscReal      *kve0, *kve;
   PetscInt       *nv1, *nv2, *nv3, *nv4, *nv5, *nv6;
   struct Cmpnts  *n_fib;
+  struct Cmpnts  *n_fib_out;    /* per-element unit OUTWARD wall normal of the fiber frame (e_n, with
+                                   e_c = e_n x e_l); zero if the mesh type sets none. Gives the endo->epi
+                                   direction for -fiber_transmural_twist_deg (active_strain.c). */
   PetscReal      *gamma_scale;  /* per-element multiplier on gamma (1.0 = full activation) */
   PetscReal      *activation_delay; /* per-element activation-wavefront delay [same time units as
                                        -dt], 0.0 = instantaneous everywhere (default). See
