@@ -1838,6 +1838,7 @@ PetscErrorCode ModElemC33(FE *fem, PetscInt ec, PetscReal *delta)
                 }
                 DeltaC33 *= lo;
                 ead->C[qp].Cov[2][2] = C33_old + DeltaC33;
+                ead->c33_clamped++;
             }
         }
 
@@ -2189,6 +2190,8 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
   PetscReal delta;
 
   ead = &fem->act_data.elem_act_data[ec];
+  ead->c33_clamped = 0;
+  delta = 0.0;
 
   for (PetscInt sub_itr = 0; sub_itr < fem->act_data.C33_subitr_nums; sub_itr++){
     
@@ -2269,6 +2272,8 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
 
   }
 
+  ead->c33_last_delta = PetscAbsReal(delta);
+
   /* TEMP diagnostic (-debug_c33_elem <ec>): C33 / S33 after the sub-iterations. */
   {
     PetscInt dbg = -1;
@@ -2281,6 +2286,40 @@ PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
     }
   }
   
+  PetscFunctionReturn(0);
+}
+
+/* -log_c33: one line per step on how well the local plane-stress (C33) solve did, over all
+ * locally owned elements (state of the most recent residual evaluation):
+ *   C33 mean/max, max |last DeltaC33|/C33 (size of the last local update = remaining error),
+ *   max|S^33| / max|S^ab| over all elements (S from before the last local update; 0 if there is
+ *   no in-plane stress), elements whose update was cut by the det(C)>0 guard. */
+PetscErrorCode LogC33Stats(FE *fem, PetscInt step)
+{
+  PetscFunctionBeginUser;
+  DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscReal mx[4] = {0.0, 0.0, 0.0, 0.0};   /* C33 max, rel. last delta max, max |S33|, max in-plane |S| */
+  PetscReal sm[3] = {0.0, 0.0, 0.0};   /* C33 sum, elements, clamped elements */
+  for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
+    const PetscInt ec = ctx->layout.orig_cell[lc];
+    if (ec < 0 || ec >= fem->ibm->n_elmt) continue;
+    ElemActData *ead = &fem->act_data.elem_act_data[ec];
+    PetscReal C33 = ead->C[0].Cov[2][2];
+    PetscReal Sin = PetscMax(PetscMax(PetscAbsReal(ead->S[0].Cont[0][0]), PetscAbsReal(ead->S[0].Cont[1][1])),
+                             PetscAbsReal(ead->S[0].Cont[0][1]));
+    mx[0] = PetscMax(mx[0], C33);
+    mx[1] = PetscMax(mx[1], ead->c33_last_delta / PetscMax(PetscAbsReal(C33), 1e-300));
+    mx[2] = PetscMax(mx[2], PetscAbsReal(ead->S[0].Cont[2][2]));
+    mx[3] = PetscMax(mx[3], Sin);
+    sm[0] += C33; sm[1] += 1.0; sm[2] += (ead->c33_clamped > 0) ? 1.0 : 0.0;
+  }
+  MPI_Allreduce(MPI_IN_PLACE, mx, 4, MPIU_REAL, MPIU_MAX, PETSC_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, sm, 3, MPIU_REAL, MPIU_SUM, PETSC_COMM_WORLD);
+  PetscPrintf(PETSC_COMM_WORLD,
+              "[C33] step=%d C33_mean=%.6f C33_max=%.6f last_dC33_rel_max=%.3e S33_rel_max=%.3e clamped_elems=%d subitr=%d\n",
+              (int)step, (double)(sm[0] / PetscMax(sm[1], 1.0)), (double)mx[0], (double)mx[1],
+              (double)(mx[3] > 0.0 ? mx[2] / mx[3] : 0.0),
+              (int)sm[2], (int)fem->act_data.C33_subitr_nums);
   PetscFunctionReturn(0);
 }
 

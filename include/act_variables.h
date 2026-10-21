@@ -72,6 +72,9 @@ typedef struct {
     SubdivGeomQP *geom;  /**< Size-1 midsurface cache for current configuration. */
     SubdivGeomQP *geom0; /**< Size-1 midsurface cache for reference configuration. */
 
+    PetscReal    c33_last_delta; /**< |DeltaC33| of the last local C33 sub-iteration (last qp), for -log_c33. */
+    PetscInt     c33_clamped;    /**< Local C33 updates cut back by the det(C)>0 guard in the last ElemC33Solve. */
+
 } ElemActData;
 
 /** @brief Active-muscle model parameters. */

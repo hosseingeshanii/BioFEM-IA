@@ -247,18 +247,22 @@ _TIME_RE = re.compile(r"body:\d+ Time\((\d+)\)=(\S+)")
 _SNES_RE = re.compile(r"^\s*(\d+) SNES Function norm (\S+)")
 _KSP_RE  = re.compile(r"Linear fem_ solve .* iterations (\d+)")
 _NL_RE   = re.compile(r"Nonlinear fem_ solve (converged|did not converge) due to (\S+) iterations (\d+)")
+_C33_RE  = re.compile(r"\[C33\] step=(\d+) (.*)")
+_KEEP_RE = re.compile(r"\[step\] step=(\d+) not converged .*: (last Newton iterate accepted|rolled back)")
 
 
 def parse_solver_log(path):
     """Per solver step: {'step', 't', 'fnorm' (list, one per Newton iteration), 'ksp_its' (total),
-    'converged' (bool or None if no SNES summary line), 'reason'}.
+    'converged' (bool or None if no SNES summary line), 'reason', 'outcome' ('converged', 'accepted',
+    'rolled back', or None), 'stagnated' (bool), 'c33' (dict from the -log_c33 line, if any)}.
     Needs -fem_snes_monitor, -fem_ksp_converged_reason, -fem_snes_converged_reason in control.dat."""
     steps, cur = [], None
     with open(path, errors="replace") as fh:
         for line in fh:
             m = _TIME_RE.search(line)
             if m:
-                cur = dict(step=int(m.group(1)), t=float(m.group(2)), fnorm=[], ksp_its=0, converged=None, reason="")
+                cur = dict(step=int(m.group(1)), t=float(m.group(2)), fnorm=[], ksp_its=0, converged=None, reason="",
+                           outcome=None, stagnated=False, c33={})
                 steps.append(cur)
                 continue
             if cur is None:
@@ -272,4 +276,14 @@ def parse_solver_log(path):
             m = _NL_RE.search(line)
             if m:
                 cur["converged"] = m.group(1) == "converged"; cur["reason"] = m.group(2)
+                cur["outcome"] = "converged" if cur["converged"] else cur["outcome"]
+                continue
+            if "[SNES] stagnated" in line:
+                cur["stagnated"] = True; continue
+            m = _KEEP_RE.search(line)
+            if m:
+                cur["outcome"] = "accepted" if m.group(2).startswith("last") else "rolled back"; continue
+            m = _C33_RE.search(line)
+            if m:
+                cur["c33"] = {k: float(v) for k, v in (kv.split("=") for kv in m.group(2).split())}
     return steps

@@ -45,6 +45,11 @@ PetscReal  newmark_gamma=0.5; /* Newmark-beta gamma. 0.5 = average-acceleration,
                                   FDynamic() (residual) and xAccVel() (post-step state update) --
                                   both read this global rather than hardcoding their own. */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
+PetscInt   log_c33=0;            /* -log_c33 1: one [C33] line per step on the local plane-stress solve (LogC33Stats) */
+PetscInt   snes_stagnation_its=0;/* -snes_stagnation_its N: stop Newton when ||R|| fell < 1% over the last N iterations */
+PetscReal  accept_reduction=1.0; /* -accept_reduction r: a step whose SNES did not converge keeps its last Newton iterate
+                                    if ||R_end|| < r*||R_start|| (default 1: any decrease); otherwise the step is
+                                    rolled back to its start state. 0 = always roll back. */
 PetscInt   rect_plate_nitti=0, rect_plate_fix_z=0, rect_plate_pins=0, lv_base_tangent_pins=0; /* Nitti et al. 2021 Sec 5.1 flat plate: edge 0 fixed in y, edge 3 fixed in x (load in bcs.c) */
 PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
 PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DOFs across the 3
@@ -169,6 +174,28 @@ static PetscErrorCode ResidualMonitor(SNES snes, PetscInt its, PetscReal rnorm, 
   return PETSC_SUCCESS;
 }
 
+/* SNES convergence test = PETSc default + stagnation stop (-snes_stagnation_its N): if ||R|| has not
+ * dropped by 1% over the last N Newton iterations, stop with SNES_DIVERGED_MAX_IT. Needs the SNES
+ * convergence history (set right after SNESSetFromOptions). */
+#define SNES_HIST_MAX 100000
+static PetscReal snes_hist[SNES_HIST_MAX];
+static PetscErrorCode SNESConvergedStagnation(SNES snes, PetscInt it, PetscReal xnorm, PetscReal snorm,
+                                              PetscReal fnorm, SNESConvergedReason *reason, void *ctx)
+{
+  PetscFunctionBeginUser;
+  PetscCall(SNESConvergedDefault(snes, it, xnorm, snorm, fnorm, reason, NULL));
+  if (*reason == SNES_CONVERGED_ITERATING && snes_stagnation_its > 0 && it >= snes_stagnation_its) {
+    PetscReal *hist; PetscInt n;
+    PetscCall(SNESGetConvergenceHistory(snes, &hist, NULL, &n));
+    if (n > snes_stagnation_its && fnorm > 0.99 * hist[n - 1 - snes_stagnation_its]) {
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[SNES] stagnated: ||R|| %.3e vs %.3e %d iterations ago\n",
+                            (double)fnorm, (double)hist[n - 1 - snes_stagnation_its], (int)snes_stagnation_its));
+      *reason = SNES_DIVERGED_MAX_IT;
+    }
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 int main(int argc, char **argv)
 {
   /* Pass "control.dat" as the options file so PETSc loads it BEFORE argv.
@@ -213,6 +240,9 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-outghost", &outghost, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-write_3d_shell", &write_3d_shell, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-disable_fdyn", &disable_fdyn, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-log_c33", &log_c33, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-snes_stagnation_its", &snes_stagnation_its, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-accept_reduction", &accept_reduction, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-newmark_gamma", &newmark_gamma, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &rect_plate_nitti, PETSC_NULL);
@@ -489,8 +519,11 @@ int main(int argc, char **argv)
         Vec U;
         PetscErrorCode ierr;
         SNESConvergedReason reason;
+        Vec Xstart;                      /* state at the start of the step, for rollback */
         VecDuplicate(fem[ibi].x, &U);
         VecCopy(fem[ibi].x, U);
+        VecDuplicate(fem[ibi].x, &Xstart);
+        VecCopy(fem[ibi].x, Xstart);
 
         /* Trace vertex 20 (first free ring) at key stages.
          * ibm->x_bp is replicated on all ranks after each FormFunctionFEM Allreduce. */
@@ -512,6 +545,8 @@ int main(int argc, char **argv)
         // SNESSetJacobian(snes, J, J, MatMFFDComputeJacobian, (void *)&fem[ibi]);
         SNESSetJacobian(snes, J, J, NULL, (void *)&fem[ibi]);
         SNESSetFromOptions(snes);
+        SNESSetConvergenceHistory(snes, snes_hist, NULL, SNES_HIST_MAX, PETSC_TRUE);
+        if (snes_stagnation_its > 0) SNESSetConvergenceTest(snes, SNESConvergedStagnation, NULL, NULL);
         if (monitor_residual && res_log_fp) {
           SNESMonitorSet(snes, ResidualMonitor, NULL, NULL);
         }
@@ -559,45 +594,32 @@ int main(int argc, char **argv)
 	          return (int)ierr;
 	        }
 
-	        if (reason >= 0) {
-	          VecCopy(U, fem[ibi].x);
-	          /* Advance per-element thickness ONCE per converged timestep (not
-	           * per Newton iteration, unlike the C33 solve itself which runs
-	           * every residual evaluation inside FInternalPreCalc) -- see
-	           * UpdateElementThickness() for the exact update rule. */
-	          ierr = UpdateElementThickness(&fem[ibi]); CHKERRQ(ierr);
-	        } else {
-	          PetscPrintf(PETSC_COMM_WORLD,
-	                      "Skipping solution update because SNES diverged (reason=%d) for body %d at step %d\n",
-	                      (int)reason, (int)ibi, (int)ti);
-	          /* ibm->x_bp was dirtied by FormFunctionFEM during failed SNES iterations.
-	           * Restore it from fem->x so Output and xAccVel use the correct state. */
-	          {
-	            DMPlexGeomCtx *gctx_ = &fem[ibi].geom_ctx;
-	            IBMNodes      *ibm_  = fem[ibi].ibm;
-	            if (gctx_->initialized) {
-	              const PetscReal *fx;
-	              PetscMPIInt fmyrank_;
-	              MPI_Comm_rank(PETSC_COMM_WORLD, &fmyrank_);
-	              PetscMemzero(ibm_->x_bp, ibm_->n_v * sizeof(PetscReal));
-	              PetscMemzero(ibm_->y_bp, ibm_->n_v * sizeof(PetscReal));
-	              PetscMemzero(ibm_->z_bp, ibm_->n_v * sizeof(PetscReal));
-	              VecGetArrayRead(fem[ibi].x, &fx);
-	              PetscInt oi_ = 0;
-	              for (PetscInt lv = 0; lv < gctx_->nLocalVerts; ++lv) {
-	                PetscInt v = gctx_->origVert[lv];
-	                if (v < 0 || v >= ibm_->n_v || gctx_->ownerRank[v] != fmyrank_) continue;
-	                ibm_->x_bp[v] = fx[oi_*dof  ];
-	                ibm_->y_bp[v] = fx[oi_*dof+1];
-	                ibm_->z_bp[v] = fx[oi_*dof+2];
-	                oi_++;
-	              }
-	              VecRestoreArrayRead(fem[ibi].x, &fx);
-	              MPI_Allreduce(MPI_IN_PLACE, ibm_->x_bp, ibm_->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
-	              MPI_Allreduce(MPI_IN_PLACE, ibm_->y_bp, ibm_->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
-	              MPI_Allreduce(MPI_IN_PLACE, ibm_->z_bp, ibm_->n_v, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
-	            }
+	        /* FormFunctionFEM copies every trial x into fem->x / ibm->x_bp, so after SNESSolve the model
+	         * holds the LAST EVALUATED point (possibly a matrix-free probe), not necessarily U. Decide
+	         * explicitly: keep U (converged, or residual reduced enough) or roll back to Xstart; then
+	         * re-evaluate once so x_bp and the element state (C33, ...) match the kept state. */
+	        {
+	          PetscReal *hist = NULL; PetscInt nhist = 0;
+	          SNESGetConvergenceHistory(snes, &hist, NULL, &nhist);
+	          PetscReal f0 = (nhist > 0) ? hist[0] : 0.0, fend = (nhist > 0) ? hist[nhist - 1] : 0.0;
+	          PetscBool keep = (PetscBool)(reason >= 0 || (nhist > 1 && fend < accept_reduction * f0));
+	          if (reason < 0) {
+	            PetscPrintf(PETSC_COMM_WORLD, "[step] step=%d not converged (reason=%d): ||R|| %.3e -> %.3e (reduction %.2e): %s\n",
+	                        (int)ti, (int)reason, (double)f0, (double)fend, (double)(f0 > 0 ? fend / f0 : 1.0),
+	                        keep ? "last Newton iterate accepted" : "rolled back to the start of the step");
 	          }
+	          if (keep) {
+	            VecCopy(U, fem[ibi].x);
+	            ierr = FormFunctionFEM(snes, fem[ibi].x, fem[ibi].Res, (void *)&fem[ibi]); CHKERRQ(ierr);
+	            /* Advance per-element thickness ONCE per kept timestep (not per Newton iteration,
+	             * unlike the C33 solve itself which runs every residual evaluation inside
+	             * FInternalPreCalc) -- see UpdateElementThickness() for the exact update rule. */
+	            ierr = UpdateElementThickness(&fem[ibi]); CHKERRQ(ierr);
+	          } else {
+	            VecCopy(Xstart, fem[ibi].x);
+	            ierr = FormFunctionFEM(snes, fem[ibi].x, fem[ibi].Res, (void *)&fem[ibi]); CHKERRQ(ierr);
+	          }
+	          if (log_c33) { ierr = LogC33Stats(&fem[ibi], ti); CHKERRQ(ierr); }
 	        }
 
         /* Only destroy if SNESSolve didn't corrupt the object */
@@ -614,6 +636,7 @@ int main(int argc, char **argv)
         MatDestroy(&J);
 
         VecDestroy(&U);
+        VecDestroy(&Xstart);
 
       }
       VecCopy(fem[ibi].x, fem[ibi].y); //for contact energy calculations

@@ -70,6 +70,7 @@ PetscErrorCode FInternalAct(FE *fem);
 /** @brief Advance ibm->thickness[] by C33 once per CONVERGED timestep (not
  *  per Newton iteration) -- see definition for the exact update rule. */
 PetscErrorCode UpdateElementThickness(FE *fem);
+PetscErrorCode LogC33Stats(FE *fem, PetscInt step);
 
 /** @brief Current scalar gamma(t) for element ec, including its activation
  *  wavefront delay (before per-element gamma_scale taper), exposed for
