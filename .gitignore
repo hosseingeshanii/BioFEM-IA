@@ -73,3 +73,6 @@ config/site.cfg
 
 # Local pointer to private research notes
 CLAUDE.local.md
+
+# Python
+__pycache__/
