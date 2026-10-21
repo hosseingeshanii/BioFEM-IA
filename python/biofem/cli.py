@@ -169,6 +169,9 @@ Run:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_conv.add_argument("--dir", action="append", help="case directory (repeat to overlay cases; default: .)")
     p_conv.add_argument("--log", default="", help="solver log file (default: newest *.out in --dir)")
+    p_conv.add_argument("--history", action="store_true",
+                        help="also plot ||R|| at every Newton iteration (one curve per step, and all iterations in order) -> <out>_history.png")
+    p_conv.add_argument("--steps", default="", help="with --history: only these steps, e.g. 40-60 or 46,50,53 (default: all)")
     _add_common_post_args(p_conv, "convergence.png")
 
     p_lv = post_sub.add_parser(

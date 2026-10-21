@@ -38,6 +38,59 @@ def summary(d):
                 ksp_total=sum(s["ksp_its"] for s in st))
 
 
+def plot_history(plt, data, args, out):
+    """||R|| at every Newton iteration: (left) one curve per step vs Newton iteration, coloured by time,
+    non-converged steps in red; (right) all iterations back to back, step boundaries as ticks."""
+    import matplotlib
+    steps_sel = _parse_steps(args.steps)
+    fig, axs = plt.subplots(len(data), 2, figsize=(13, 3.8 * len(data)), squeeze=False,
+                            gridspec_kw=dict(width_ratios=[1, 1.6]))
+    for row, (lab, d) in enumerate(data):
+        st = [s for s in d["steps"] if len(s["fnorm"]) > 1 and (steps_sel is None or s["step"] in steps_sel)]
+        if not st:
+            continue
+        tmax = max(s["step"] for s in st) * d["dt"] or 1.0
+        cmap = matplotlib.colormaps["viridis"]
+        ax = axs[row, 0]
+        for s in st:
+            bad = s["converged"] is False
+            ax.semilogy(range(len(s["fnorm"])), s["fnorm"], lw=1.6 if bad else 0.8,
+                        color=style.FAIL if bad else cmap(s["step"] * d["dt"] / tmax), alpha=1 if bad else 0.7, zorder=3 if bad else 2)
+        if d["rtol"]:
+            ax.text(0.98, 0.97, f"-fem_snes_rtol {d['rtol']:g} (relative to iteration 0)", transform=ax.transAxes,
+                    ha="right", va="top", fontsize=7.5, color=style.INK2)
+        sm = matplotlib.cm.ScalarMappable(matplotlib.colors.Normalize(0, tmax), cmap)
+        fig.colorbar(sm, ax=ax, pad=0.01).set_label("t of the step (s)", fontsize=8)
+        ax.plot([], [], color=style.FAIL, lw=1.6, label="not converged")
+        ax.legend(frameon=False, fontsize=7.5, loc="lower left")
+        ax.set_title(f"{lab}: ||R||_2 per Newton iteration, one curve per step", fontsize=9)
+        style.finish(ax, "Newton iteration within the step")
+        ax = axs[row, 1]
+        k0 = 0
+        for s in st:
+            n = len(s["fnorm"]); bad = s["converged"] is False
+            ax.semilogy(range(k0, k0 + n), s["fnorm"], ".-", ms=1.5, lw=0.6,
+                        color=style.FAIL if bad else style.case_color(0))
+            k0 += n
+        ax.set_title(f"{lab}: all Newton iterations in order (red: steps that did not converge)", fontsize=9)
+        style.finish(ax, "Newton iteration (cumulative)")
+    fig.tight_layout()
+    hp = out.with_name(out.stem + "_history.png")
+    fig.savefig(hp, dpi=130)
+    print(f"[biofem] residual history plot saved -> {hp}")
+
+
+def _parse_steps(spec):
+    """'40-60,75' -> {40..60, 75}; '' -> None (all)."""
+    if not spec:
+        return None
+    sel = set()
+    for part in spec.split(","):
+        a, _, b = part.partition("-")
+        sel.update(range(int(a), int(b or a) + 1))
+    return sel
+
+
 def cmd_convergence(args):
     plt = style.setup(args.show)
     dirs = args.dir or ["."]
@@ -104,8 +157,8 @@ def cmd_convergence(args):
     axs[1].set_title("reduction in the step (end / start)", fontsize=9)
     axs[2].set_title("Newton iterations per step", fontsize=9)
     if has_c33:
-        sub = next(s["c33"].get("subitr") for _, d in data for s in d["steps"] if s["c33"])
-        axs[3].set_title(f"local C33 (plane-stress) solve, {sub:g} sub-iterations", fontsize=9)
+        subs = sorted({s["c33"].get("subitr") for _, d in data for s in d["steps"] if s["c33"]})
+        axs[3].set_title("local C33 (plane-stress) solve, " + "/".join(f"{x:g}" for x in subs) + " sub-iterations", fontsize=9)
     for ax in axs:
         style.finish(ax)
         ax.legend(frameon=False, fontsize=7)
@@ -119,6 +172,8 @@ def cmd_convergence(args):
     out = Path(args.out or "convergence.png")
     fig.savefig(out, dpi=130)
     print(f"[biofem] convergence plot saved -> {out}")
+    if args.history:
+        plot_history(plt, data, args, out)
 
     csv_path = out.with_suffix(".csv")
     with open(csv_path, "w", newline="") as fh:
