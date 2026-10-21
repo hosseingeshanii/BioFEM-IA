@@ -3,7 +3,7 @@
 Subcommands:
   run          run solver (submits to SLURM when on a cluster)
   sweep        generate mesh cases and submit parameter sweep jobs
-  post         post-process solver output (post field, ...)
+  post         post-process solver output (field, convergence, lv)
   postprocess  alias of `post field`
 """
 import argparse
@@ -14,6 +14,15 @@ from .config import BACKENDS
 from .commands.run import cmd_run
 from .commands.sweep import cmd_sweep
 from .post.field import cmd_postprocess
+from .post.convergence import cmd_convergence
+from .post.lv import cmd_lv
+
+
+def _add_common_post_args(p, default_out):
+    p.add_argument("--label", default="", help="comma-separated legend labels, one per --dir (default: directory names)")
+    p.add_argument("--title", default="", help="figure title")
+    p.add_argument("--out", default="", help=f"output PNG path; the CSV goes next to it (default: {default_out})")
+    p.add_argument("--show", action="store_true", help="also open an interactive window")
 
 
 def _add_field_args(p_pp):
@@ -145,11 +154,39 @@ Run:
     _add_field_args(p_pp)
 
     # post: post-processing commands (field = the same as postprocess)
-    p_post = sub.add_parser("post", help="post-process solver output (field, ...)")
+    p_post = sub.add_parser("post", help="post-process solver output (field, convergence, lv)")
     post_sub = p_post.add_subparsers(dest="post_command", metavar="POST_COMMAND")
     p_field = post_sub.add_parser("field", help="plot avg node/element field vs time from VTK output",
                                   description=p_pp.description)
     _add_field_args(p_field)
+
+    p_conv = post_sub.add_parser(
+        "convergence", help="nonlinear solver convergence per step, from the solver log",
+        description=("Parse the solver log (newest *.out in the case directory, or --log) for\n"
+                     "SNES/KSP output and plot per step: ||R|| at start and end, the reduction\n"
+                     "against -fem_snes_rtol, Newton iterations. Non-converged steps are marked.\n"
+                     "Writes <out>.png and <out>.csv."),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_conv.add_argument("--dir", action="append", help="case directory (repeat to overlay cases; default: .)")
+    p_conv.add_argument("--log", default="", help="solver log file (default: newest *.out in --dir)")
+    _add_common_post_args(p_conv, "convergence.png")
+
+    p_lv = post_sub.add_parser(
+        "lv", help="LV metrics vs time: volume/EF, |u|, wall thickening, shortening, torsion",
+        description=("Left-ventricle metrics from surface00_*.vtk, shell3d00_*.vtk (-write_3d_shell 1)\n"
+                     "and lv_volume00.dat: cavity volume, EF, SV, mean/max |u|, nodal rate, mid-axis\n"
+                     "wall thickening, apex-base shortening, torsion. Long axis = z, apex at +z.\n"
+                     "Writes <out>.png and <out>.csv and prints a cycle summary (with --ref values).\n"
+                     "--ref JSON example: {\"label\": \"Paper 2014\", \"EF\": 56, \"thickening\": 36}"),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_lv.add_argument("--dir", action="append", help="case directory (repeat to overlay cases; default: .)")
+    p_lv.add_argument("--out-dir", default="", help="output subdirectory (default: -out_dir in control.dat, else output)")
+    p_lv.add_argument("--solver-unit", default="m", choices=["m", "cm", "mm"],
+                      help="length unit of the solver output (default: m, i.e. SI); results are shown in cm and ml")
+    p_lv.add_argument("--apex", default="+z", choices=["+z", "-z"], help="apex direction along the long axis (default: +z)")
+    p_lv.add_argument("--band", type=float, default=0.4, help="half-width of the mid-axis band for thickening, in cm (default: 0.4)")
+    p_lv.add_argument("--ref", default="", help="JSON file with reference values (label, EF, SV, thickening, shortening, torsion)")
+    _add_common_post_args(p_lv, "lv_metrics.png")
 
     args = parser.parse_args()
     if args.command is None:
@@ -160,7 +197,7 @@ Run:
         if args.post_command is None:
             p_post.print_help()
             sys.exit(0)
-        {"field": cmd_postprocess}[args.post_command](args)
+        {"field": cmd_postprocess, "convergence": cmd_convergence, "lv": cmd_lv}[args.post_command](args)
         return
     {"run": cmd_run, "sweep": cmd_sweep, "postprocess": cmd_postprocess}[args.command](args)
 

@@ -74,12 +74,28 @@ biofem sweep ... --dry-run
 
 Generates one case directory per mesh size under `--output-dir`, with a separate `jobfile_np{N}.slurm` per core count. Skips combinations where elements-per-task falls below the minimum (default 100).
 
+### Post-processing
+
+```bash
+cd /path/to/case/dir
+biofem post convergence                 # ||R||, reduction and Newton its per step, from the solver log (*.out)
+biofem post lv                          # LV: volume/EF, |u|, wall thickening, shortening, torsion vs time
+biofem post lv --ref ref.json           # add reference values (label, EF, SV, thickening, shortening, torsion)
+biofem post field --dir . --field disp --out-dir output   # average of one VTK field vs time
+```
+
+Each command writes a PNG and a CSV next to it (`--out`), and takes `--dir` several times to overlay cases.
+`post lv` reads `surface00_*.vtk`, `lv_volume00.dat` and, with `-write_3d_shell 1`, `shell3d00_*.vtk`;
+lengths are shown in cm and volumes in ml (`--solver-unit` gives the solver's unit, default m).
+`biofem postprocess` is the older name of `post field`.
+
 ### All options
 
 ```bash
 biofem --help
 biofem run --help
 biofem sweep --help
+biofem post --help
 ```
 
 ## Project layout
@@ -92,7 +108,8 @@ BioFEM-IA/
 ├── examples/
 │   └── dmplex_test/    canonical single-case example
 ├── bin/
-│   └── biofem      CLI entry point (Python)
+│   └── biofem      CLI launcher (Python)
+├── python/biofem/  CLI code: run, sweep, post (field, convergence, lv)
 ├── CMakeLists.txt  CMake build definition
 └── makefile        convenience targets (make build, make install, make clean)
 ```

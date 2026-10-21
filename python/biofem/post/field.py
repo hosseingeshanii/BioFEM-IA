@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-from .io import _vtk_read_field, _field_reduce, _get_dt, _vtk_series_for_prefix
+from .io import _vtk_read_field, _field_reduce, _get_dt, _vtk_series_for_prefix, file_time
 
 
 def cmd_postprocess(args):
@@ -70,7 +70,7 @@ def cmd_postprocess(args):
             reduced = _field_reduce(parsed, component)
             if reduced is None:
                 continue
-            ts.append(ti * dt)
+            ts.append(file_time(used_prefix, ti, dt))   # surface file k = state after step k-1
             vals.append(reduced)
 
         if not ts:
