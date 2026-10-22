@@ -297,9 +297,12 @@ static PetscErrorCode DebugJacobianColumn(SNES snes, FE *fem)
   }
   /* with -fem_jac_pc: column of the assembled P at the same state vs the direct nudge dR/h */
   if (jacpc_ready) {
-    Vec e, Pe; PetscInt d0 = gctx->ibm_to_global_dof0[node] + dir;
-    PetscCall(VecDuplicate(fem->x, &e)); PetscCall(VecDuplicate(fem->x, &Pe));
-    PetscCall(MatFDColoringApply(jacpc.P, jacpc.fdc, fem->x, snes));
+    Vec e, Pe, Xc; PetscInt d0 = gctx->ibm_to_global_dof0[node] + dir;
+    PetscCall(VecDuplicate(fem->x, &e)); PetscCall(VecDuplicate(fem->x, &Pe)); PetscCall(VecDuplicate(fem->x, &Xc));
+    /* base point must be a separate Vec: FormFunctionFEM copies every trial x into fem->x */
+    PetscCall(VecCopy(fem->x, Xc));
+    PetscCall(MatFDColoringApply(jacpc.P, jacpc.fdc, Xc, snes));
+    PetscCall(VecCopy(Xc, fem->x));
     PetscCall(VecSet(e, 0.0)); PetscCall(VecSetValue(e, d0, h, INSERT_VALUES));
     PetscCall(VecAssemblyBegin(e)); PetscCall(VecAssemblyEnd(e));
     PetscCall(MatMult(jacpc.P, e, Pe));          /* ~ dR (linear part) */
@@ -307,7 +310,7 @@ static PetscErrorCode DebugJacobianColumn(SNES snes, FE *fem)
     PetscReal ndiff, nref; PetscCall(VecNorm(Pe, NORM_2, &ndiff)); PetscCall(VecNorm(R1, NORM_2, &nref));
     PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[jac] assembled P column vs direct nudge: ||P e h - dR|| / ||dR|| = %.2e\n",
                           (double)(nref > 0 ? ndiff / nref : 0.0)));
-    PetscCall(VecDestroy(&e)); PetscCall(VecDestroy(&Pe));
+    PetscCall(VecDestroy(&e)); PetscCall(VecDestroy(&Pe)); PetscCall(VecDestroy(&Xc));
   }
   /* restore the state */
   PetscCall(FormFunctionFEM(snes, fem->x, R0, (void *)fem));
