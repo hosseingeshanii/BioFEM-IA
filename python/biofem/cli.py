@@ -3,7 +3,7 @@
 Subcommands:
   run          run solver (submits to SLURM when on a cluster)
   sweep        generate mesh cases and submit parameter sweep jobs
-  post         post-process solver output (field, convergence, lv)
+  post         post-process solver output (field, convergence, lv, animate)
   postprocess  alias of `post field`
 """
 import argparse
@@ -16,6 +16,7 @@ from .commands.sweep import cmd_sweep
 from .post.field import cmd_postprocess
 from .post.convergence import cmd_convergence
 from .post.lv import cmd_lv
+from .post.animate import cmd_animate
 
 
 def _add_common_post_args(p, default_out):
@@ -154,7 +155,7 @@ Run:
     _add_field_args(p_pp)
 
     # post: post-processing commands (field = the same as postprocess)
-    p_post = sub.add_parser("post", help="post-process solver output (field, convergence, lv)")
+    p_post = sub.add_parser("post", help="post-process solver output (field, convergence, lv, animate)")
     post_sub = p_post.add_subparsers(dest="post_command", metavar="POST_COMMAND")
     p_field = post_sub.add_parser("field", help="plot avg node/element field vs time from VTK output",
                                   description=p_pp.description)
@@ -191,6 +192,25 @@ Run:
     p_lv.add_argument("--ref", default="", help="JSON file with reference values (label, EF, SV, thickening, shortening, torsion)")
     _add_common_post_args(p_lv, "lv_metrics.png")
 
+    p_an = post_sub.add_parser(
+        "animate", help="animation of one case (side view + view into the cavity), via pvpython",
+        description=("Render every output frame (shell3d00_*.vtk if present, else surface00_*.vtk) from\n"
+                     "fixed cameras, with the reference shape as a wireframe, coloured by |u| or h/h0, and\n"
+                     "compose a GIF + full-colour animated PNG. Title: t, gamma, V_endo, h/h0; steps whose\n"
+                     "nonlinear solve did not converge are marked. Needs pvpython (ParaView) on PATH."),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_an.add_argument("--dir", default=".", help="case directory (default: .)")
+    p_an.add_argument("--out-dir", default="", help="output subdirectory (default: -out_dir in control.dat, else output)")
+    p_an.add_argument("--source", default="auto", choices=["auto", "shell3d", "surface"], help="frame files (default: shell3d if present)")
+    p_an.add_argument("--field", default="u", choices=["u", "h_ratio"], help="colour: |u| in cm, or wall thickness ratio h/h0 (shell3d)")
+    p_an.add_argument("--range", default="0,1.5", help="colour range vmin,vmax (default: 0,1.5)")
+    p_an.add_argument("--views", default="side,base", help="comma list of side, base (default: both)")
+    p_an.add_argument("--solver-unit", default="m", choices=["m", "cm", "mm"], help="solver length unit (default: m)")
+    p_an.add_argument("--every", type=int, default=1, help="use every N-th frame (default: 1)")
+    p_an.add_argument("--fps", type=float, default=10.0, help="frames per second (default: 10)")
+    p_an.add_argument("--label", default="", help="case label in the title (default: directory name)")
+    p_an.add_argument("--out", default="", help="output path (default: <label>_animation.gif)")
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -200,7 +220,7 @@ Run:
         if args.post_command is None:
             p_post.print_help()
             sys.exit(0)
-        {"field": cmd_postprocess, "convergence": cmd_convergence, "lv": cmd_lv}[args.post_command](args)
+        {"field": cmd_postprocess, "convergence": cmd_convergence, "lv": cmd_lv, "animate": cmd_animate}[args.post_command](args)
         return
     {"run": cmd_run, "sweep": cmd_sweep, "postprocess": cmd_postprocess}[args.command](args)
 
