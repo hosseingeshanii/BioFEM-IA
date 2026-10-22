@@ -18,6 +18,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include "manufactured_active_strain.h"
 #include "dmplex_geom.h"
 #include "lv_geometry.h"
+#include "jacobian_pc.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
@@ -45,6 +46,9 @@ PetscReal  newmark_gamma=0.5; /* Newmark-beta gamma. 0.5 = average-acceleration,
                                   FDynamic() (residual) and xAccVel() (post-step state update) --
                                   both read this global rather than hardcoding their own. */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
+PetscInt   fem_jac_pc=0;         /* -fem_jac_pc 1: assembled colored-FD Jacobian as the preconditioner (jacobian_pc.c) */
+static FEJacPC   jacpc;
+static PetscBool jacpc_ready = PETSC_FALSE;
 PetscInt   log_c33=0;            /* -log_c33 1: one [C33] line per step on the local plane-stress solve (LogC33Stats) */
 PetscInt   snes_stagnation_its=0;/* -snes_stagnation_its N: stop Newton when ||R|| fell < 1% over the last N iterations */
 PetscReal  accept_reduction=1.0; /* -accept_reduction r: a step whose SNES did not converge keeps its last Newton iterate
@@ -196,6 +200,122 @@ static PetscErrorCode SNESConvergedStagnation(SNES snes, PetscInt it, PetscReal 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* -debug_jac_node N [-debug_jac_dir d] [-debug_jac_h h]: sparsity check of K = dR/dx. At the state in
+ * fem->x, nudge DOF (N, d) by h, re-evaluate R and print every node whose residual changed, against the
+ * prediction "nodes that share an element patch with N" (ghost patch nodes replaced by their 3 source
+ * nodes, g = x1 + x2 - x3). Restores the state afterwards. Prints [jac] lines. */
+static PetscErrorCode DebugJacobianColumn(SNES snes, FE *fem)
+{
+  PetscFunctionBeginUser;
+  PetscInt  node = -1, dir = 0;
+  PetscReal h = 1e-7;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-debug_jac_node", &node, NULL));
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-debug_jac_dir", &dir, NULL));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-debug_jac_h", &h, NULL));
+  if (node < 0) PetscFunctionReturn(PETSC_SUCCESS);
+  IBMNodes *ibm = fem->ibm;
+  DMPlexGeomCtx *gctx = &fem->geom_ctx;
+  PetscMPIInt rank_; MPI_Comm_rank(PETSC_COMM_WORLD, &rank_);
+  const PetscInt nv = ibm->n_v;
+
+  Vec X1, R0, R1;
+  PetscCall(VecDuplicate(fem->x, &X1)); PetscCall(VecDuplicate(fem->x, &R0)); PetscCall(VecDuplicate(fem->x, &R1));
+  PetscCall(VecCopy(fem->x, X1));
+  PetscCall(FormFunctionFEM(snes, X1, R0, (void *)fem));
+  /* nudge (node, dir) on its owner */
+  {
+    PetscReal *xa; PetscInt oi = 0;
+    PetscCall(VecGetArray(X1, &xa));
+    for (PetscInt lv = 0; lv < gctx->nLocalVerts; ++lv) {
+      PetscInt v = gctx->origVert[lv];
+      if (v < 0 || v >= nv || gctx->ownerRank[v] != rank_) continue;
+      if (v == node) xa[oi*dof + dir] += h;
+      oi++;
+    }
+    PetscCall(VecRestoreArray(X1, &xa));
+  }
+  PetscCall(FormFunctionFEM(snes, X1, R1, (void *)fem));
+  PetscCall(VecAXPY(R1, -1.0, R0));                       /* dR */
+  PetscReal *dn; PetscCall(PetscCalloc1(nv, &dn));
+  {
+    const PetscReal *ra; PetscInt oi = 0;
+    PetscCall(VecGetArrayRead(R1, &ra));
+    for (PetscInt lv = 0; lv < gctx->nLocalVerts; ++lv) {
+      PetscInt v = gctx->origVert[lv];
+      if (v < 0 || v >= nv || gctx->ownerRank[v] != rank_) continue;
+      dn[v] = PetscSqrtReal(ra[oi*dof]*ra[oi*dof] + ra[oi*dof+1]*ra[oi*dof+1] + ra[oi*dof+2]*ra[oi*dof+2]);
+      oi++;
+    }
+    PetscCall(VecRestoreArrayRead(R1, &ra));
+  }
+  MPI_Allreduce(MPI_IN_PLACE, dn, nv, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD);
+
+  /* prediction from the patch lists (all elements are known on every rank) */
+  PetscBool *pred; PetscCall(PetscCalloc1(nv, &pred));
+  for (PetscInt ec = 0; ec < ibm->n_elmt; ec++) {
+    PetscInt list[48], n = 0; PetscBool has = PETSC_FALSE;
+    for (PetscInt i = 0; i < 16; i++) {
+      PetscInt q = ibm->patch[16*ec + i];
+      if (q == 1000000 || q < 0) continue;
+      if (q < nv) list[n++] = q;
+      else if (ibm->ghost_src && q < nv + ibm->n_ghosts)
+        for (PetscInt k = 0; k < 3; k++) list[n++] = ibm->ghost_src[3*(q - nv) + k];
+    }
+    for (PetscInt i = 0; i < n; i++) if (list[i] == node) has = PETSC_TRUE;
+    if (has) for (PetscInt i = 0; i < n; i++) pred[list[i]] = PETSC_TRUE;
+  }
+  PetscReal dmax = 0.0; for (PetscInt v = 0; v < nv; v++) dmax = PetscMax(dmax, dn[v]);
+  const PetscReal tol = 1e-10 * dmax;
+  PetscInt n_ch = 0, n_pred = 0, ch_not_pred = 0, pred_not_ch = 0;
+  PetscReal max_outside = 0.0;
+  for (PetscInt v = 0; v < nv; v++) {
+    PetscBool ch = (PetscBool)(dn[v] > tol);
+    n_ch += ch; n_pred += pred[v];
+    if (ch && !pred[v]) { ch_not_pred++; max_outside = PetscMax(max_outside, dn[v]); }
+    if (!ch && pred[v]) pred_not_ch++;
+  }
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[jac] node %d dir %d h %.1e: |dR| max %.3e; nodes changed (>1e-10 max): %d of %d; predicted by patches: %d; "
+                        "changed but not predicted: %d (largest %.2e of max); predicted but unchanged: %d\n",
+                        (int)node, (int)dir, (double)h, (double)dmax, (int)n_ch, (int)nv, (int)n_pred, (int)ch_not_pred,
+                        (double)(dmax > 0 ? max_outside / dmax : 0.0), (int)pred_not_ch));
+  /* decay away from the nudged node: largest |dR| per distance shell (reference geometry) */
+  {
+    const PetscReal x0 = ibm->x_bp0[node], y0 = ibm->y_bp0[node], z0 = ibm->z_bp0[node];
+    PetscReal shell[8] = {0}; PetscReal rmax = 0.0;
+    for (PetscInt v = 0; v < nv; v++) {
+      PetscReal r = PetscSqrtReal(PetscSqr(ibm->x_bp0[v]-x0) + PetscSqr(ibm->y_bp0[v]-y0) + PetscSqr(ibm->z_bp0[v]-z0));
+      rmax = PetscMax(rmax, r);
+    }
+    for (PetscInt v = 0; v < nv; v++) {
+      PetscReal r = PetscSqrtReal(PetscSqr(ibm->x_bp0[v]-x0) + PetscSqr(ibm->y_bp0[v]-y0) + PetscSqr(ibm->z_bp0[v]-z0));
+      PetscInt b = (PetscInt)(8.0 * r / (rmax * 1.0000001));
+      shell[b] = PetscMax(shell[b], dn[v]);
+    }
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[jac] largest |dR| by distance from the node (8 shells out to %.3g):", (double)rmax));
+    for (PetscInt b = 0; b < 8; b++) PetscCall(PetscPrintf(PETSC_COMM_WORLD, " %.1e", (double)shell[b]));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "\n"));
+  }
+  /* with -fem_jac_pc: column of the assembled P at the same state vs the direct nudge dR/h */
+  if (jacpc_ready) {
+    Vec e, Pe; PetscInt d0 = gctx->ibm_to_global_dof0[node] + dir;
+    PetscCall(VecDuplicate(fem->x, &e)); PetscCall(VecDuplicate(fem->x, &Pe));
+    PetscCall(MatFDColoringApply(jacpc.P, jacpc.fdc, fem->x, snes));
+    PetscCall(VecSet(e, 0.0)); PetscCall(VecSetValue(e, d0, h, INSERT_VALUES));
+    PetscCall(VecAssemblyBegin(e)); PetscCall(VecAssemblyEnd(e));
+    PetscCall(MatMult(jacpc.P, e, Pe));          /* ~ dR (linear part) */
+    PetscCall(VecAXPY(Pe, -1.0, R1));            /* R1 holds dR here */
+    PetscReal ndiff, nref; PetscCall(VecNorm(Pe, NORM_2, &ndiff)); PetscCall(VecNorm(R1, NORM_2, &nref));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[jac] assembled P column vs direct nudge: ||P e h - dR|| / ||dR|| = %.2e\n",
+                          (double)(nref > 0 ? ndiff / nref : 0.0)));
+    PetscCall(VecDestroy(&e)); PetscCall(VecDestroy(&Pe));
+  }
+  /* restore the state */
+  PetscCall(FormFunctionFEM(snes, fem->x, R0, (void *)fem));
+  PetscCall(PetscFree(dn)); PetscCall(PetscFree(pred));
+  PetscCall(VecDestroy(&X1)); PetscCall(VecDestroy(&R0)); PetscCall(VecDestroy(&R1));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 int main(int argc, char **argv)
 {
   /* Pass "control.dat" as the options file so PETSc loads it BEFORE argv.
@@ -241,6 +361,13 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-write_3d_shell", &write_3d_shell, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-disable_fdyn", &disable_fdyn, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-log_c33", &log_c33, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-fem_jac_pc", &fem_jac_pc, PETSC_NULL);
+  if (fem_jac_pc) {
+    PetscBool has_mf = PETSC_FALSE;
+    PetscOptionsHasName(PETSC_NULL, PETSC_NULL, "-fem_snes_mf", &has_mf);
+    PetscCheck(!has_mf, PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP,
+               "-fem_jac_pc 1 needs -fem_snes_mf removed (it forces 'no preconditioner'); the operator is matrix-free anyway");
+  }
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-snes_stagnation_its", &snes_stagnation_its, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-accept_reduction", &accept_reduction, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-newmark_gamma", &newmark_gamma, PETSC_NULL);
@@ -544,6 +671,10 @@ int main(int argc, char **argv)
         MatCreateSNESMF(snes, &J);  //MatrixFree
         // SNESSetJacobian(snes, J, J, MatMFFDComputeJacobian, (void *)&fem[ibi]);
         SNESSetJacobian(snes, J, J, NULL, (void *)&fem[ibi]);
+        if (fem_jac_pc) {
+          if (!jacpc_ready) { ierr = FEM_JacPCCreate(&fem[ibi], &jacpc); CHKERRQ(ierr); jacpc_ready = PETSC_TRUE; }
+          ierr = FEM_JacPCAttach(snes, J, &jacpc); CHKERRQ(ierr);
+        }
         SNESSetFromOptions(snes);
         SNESSetConvergenceHistory(snes, snes_hist, NULL, SNES_HIST_MAX, PETSC_TRUE);
         if (snes_stagnation_its > 0) SNESSetConvergenceTest(snes, SNESConvergedStagnation, NULL, NULL);
@@ -620,6 +751,11 @@ int main(int argc, char **argv)
 	            ierr = FormFunctionFEM(snes, fem[ibi].x, fem[ibi].Res, (void *)&fem[ibi]); CHKERRQ(ierr);
 	          }
 	          if (log_c33) { ierr = LogC33Stats(&fem[ibi], ti); CHKERRQ(ierr); }
+	          if (jacpc_ready) {
+	            PetscPrintf(PETSC_COMM_WORLD, "[jacpc] step=%d Jacobians built so far %d, %.1f s total (%d colors)\n",
+	                        (int)ti, (int)jacpc.n_builds, (double)jacpc.t_build, (int)jacpc.ncolors);
+	          }
+	          if (ti == 1) { ierr = DebugJacobianColumn(snes, &fem[ibi]); CHKERRQ(ierr); }
 	        }
 
         /* Only destroy if SNESSolve didn't corrupt the object */

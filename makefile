@@ -87,6 +87,7 @@ SOURCEC = \
 	${SRCDIR}/inverse.c \
 	${SRCDIR}/active_strain.c \
 	${SRCDIR}/dmplex_geom.c \
+	${SRCDIR}/jacobian_pc.c \
 	${SRCDIR}/lv_geometry.c \
 	${SRCDIR}/lv_geometry_unstructured.c \
 	${SRCDIR}/manufactured_active_strain.c \

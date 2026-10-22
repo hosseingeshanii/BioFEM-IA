@@ -65,6 +65,7 @@ set(BIOFEM_COMMON
   src/inverse.c
   src/active_strain.c
   src/dmplex_geom.c
+  src/jacobian_pc.c
   src/lv_geometry.c
   src/lv_geometry_unstructured.c
   src/manufactured_active_strain.c

@@ -248,7 +248,7 @@ _SNES_RE = re.compile(r"^\s*(\d+) SNES Function norm (\S+)")
 _KSP_RE  = re.compile(r"Linear fem_ solve .* iterations (\d+)")
 _NL_RE   = re.compile(r"Nonlinear fem_ solve (converged|did not converge) due to (\S+) iterations (\d+)")
 _KSPN_RE = re.compile(r"^\s*(\d+) KSP Residual norm (\S+)")
-_LAM_RE  = re.compile(r"Line search: .*lambda=(\S+)")
+_LAM_RE  = re.compile(r"Line search: .*lambda=([0-9.eE+-]+)")
 _C33_RE  = re.compile(r"\[C33\] step=(\d+) (.*)")
 _KEEP_RE = re.compile(r"\[step\] step=(\d+) not converged .*: (last Newton iterate accepted|rolled back)")
 
