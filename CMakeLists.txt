@@ -77,6 +77,12 @@ set(BIOFEM_COMMON
 function(biofem_common_setup target)
   target_include_directories(${target} PRIVATE include)
   target_compile_options(${target} PRIVATE -fopenmp -g)
+  # GCC >= 14 (FASTER) turns these old C leniencies into errors; GCC 13 (Grace) only warns.
+  # Keep them as warnings until every cross-file call has a prototype (see include/biofem_proto.h).
+  if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 14)
+    target_compile_options(${target} PRIVATE -Wno-error=implicit-function-declaration
+                                             -Wno-error=incompatible-pointer-types -Wno-error=int-conversion)
+  endif()
   target_link_libraries(${target} PRIVATE MPI::MPI_C PETSc::PETSc -fopenmp m)
 endfunction()
 

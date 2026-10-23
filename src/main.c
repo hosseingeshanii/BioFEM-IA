@@ -19,6 +19,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include "dmplex_geom.h"
 #include "lv_geometry.h"
 #include "jacobian_pc.h"
+#include "biofem_proto.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
