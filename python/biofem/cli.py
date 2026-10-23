@@ -189,6 +189,8 @@ Run:
                       help="length unit of the solver output (default: m, i.e. SI); results are shown in cm and ml")
     p_lv.add_argument("--apex", default="+z", choices=["+z", "-z"], help="apex direction along the long axis (default: +z)")
     p_lv.add_argument("--band", type=float, default=0.4, help="half-width of the mid-axis band for thickening, in cm (default: 0.4)")
+    p_lv.add_argument("--torsion-sections", default="0.10,0.85",
+                      help="base and apex sections for torsion, as fractions of the base-apex height (default: 0.10,0.85)")
     p_lv.add_argument("--ref", default="", help="JSON file with reference values (label, EF, SV, thickening, shortening, torsion)")
     _add_common_post_args(p_lv, "lv_metrics.png")
 

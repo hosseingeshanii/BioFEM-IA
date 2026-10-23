@@ -6,8 +6,11 @@ From the output series (surface00_*.vtk, shell3d00_*.vtk if -write_3d_shell 1, l
   - wall thickening in a mid-axis band: radial (epi minus endo radius, shell3d) and normal
     (h/h0 from shell3d thickness, or the lambda3 cell field without shell3d)
   - apex-base length change (shortening > 0), base plane = reference rim
-  - torsion: mean rotation about the long axis of an apical band minus a basal band (epicardium
-    with shell3d, mid-surface otherwise)
+  - torsion as in Pezzuto & Ambrosi 2014 (p. 1587): rotation theta of a point about the long axis e3,
+    sin(theta) = ((x ^ X) . e3) / (r R), with e3 pointing from apex to base and R, r the distances from
+    the axis; torsion = theta(section just above the apex) - theta(section near the base). Here every
+    epicardial point in each section is used (mean), not one point, so mesh asymmetry averages out
+    (mid-surface without shell3d). Sections at --torsion-sections (fractions of base-apex height).
 Geometry convention: long axis along z, apex at +z (or -z with --apex -z), base = the other end.
 Lengths are reported in cm and volumes in ml; --solver-unit gives the solver's length unit.
 Reference values (e.g. from a paper) come from --ref <json>, never from this code:
@@ -25,15 +28,23 @@ from .io import (VTK, read_control, control_float, output_dir, output_files, fil
                  read_lv_volume, find_solver_log, parse_solver_log)
 
 TO_CM = {"m": 100.0, "cm": 1.0, "mm": 0.1}
-APICAL_BAND = (0.75, 0.90)    # fraction of the base-apex height
-BASAL_BAND = (0.0, 0.15)
+TORSION_SECTIONS = (0.10, 0.85)   # base section, apex section: fractions of the base-apex height
+SECTION_HALFWIDTH = 0.04          # slab half-width, same units
 
 
 def _unwrap_deg(a):
     return (a + 180.0) % 360.0 - 180.0
 
 
-def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4):
+def _theta_pezzuto(P, P0, e3, axis_xy):
+    """Rotation (deg) of each point about the long axis, Pezzuto's sign: sin(theta) = ((x ^ X).e3)/(r R).
+    P, P0: (n,3) current/reference positions; e3 = +-z unit vector (apex -> base); axis through axis_xy."""
+    x = P[:, :2] - axis_xy; X = P0[:, :2] - axis_xy
+    cross_z = x[:, 0] * X[:, 1] - x[:, 1] * X[:, 0]          # (x ^ X) . z
+    return np.degrees(np.arctan2(cross_z * e3[2], np.sum(x * X, axis=1)))
+
+
+def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4, sections=TORSION_SECTIONS):
     ctrl = read_control(case_dir)
     out = output_dir(case_dir, ctrl, out_override)
     dt = control_float(ctrl, "-dt")
@@ -72,8 +83,10 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
     s3 = dict(output_files(out, "shell3d"))
     band_nodes = np.abs(z - zmid) < band_cm
     frac = (z - zb) / H
-    apic = (frac > APICAL_BAND[0]) & (frac < APICAL_BAND[1])
-    basal = (frac >= BASAL_BAND[0]) & (frac < BASAL_BAND[1])
+    sec_base = np.abs(frac - sections[0]) < SECTION_HALFWIDTH
+    sec_apex = np.abs(frac - sections[1]) < SECTION_HALFWIDTH
+    e3 = np.array([0.0, 0.0, -sgn])                       # apex -> base
+    axis_xy = X[0][:, :2].mean(0)
     if all(k in s3 for k in ks):
         n = X.shape[1]
         thick_r, thick_n, tors = [], [], []
@@ -90,15 +103,15 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
             w0 = np.hypot(ref[1][:, 0], ref[1][:, 1]) - np.hypot(ref[0][:, 0], ref[0][:, 1])
             thick_r.append(100 * (w[band_nodes].mean() / w0[band_nodes].mean() - 1))
             thick_n.append(100 * (h[:n][band_nodes].mean() / h0[band_nodes].mean() - 1))
-            ang = _unwrap_deg(np.degrees(np.arctan2(epi[:, 1], epi[:, 0]) - np.arctan2(ref[1][:, 1], ref[1][:, 0])))
-            tors.append(sgn * (ang[apic].mean() - ang[basal].mean()))
+            th = _theta_pezzuto(epi, ref[1], e3, axis_xy)
+            tors.append(th[sec_apex].mean() - th[sec_base].mean())
         res.update(thick_radial=np.array(thick_r), thick_normal=np.array(thick_n), torsion=np.array(tors), torsion_surface="epicardium")
     else:
         if lam3[0] is not None and cells:
             cz = np.array([z[c].mean() for c in cells]); cb = np.abs(cz - zmid) < band_cm
             res["thick_normal"] = np.array([100 * (l3[cb].mean() - 1) for l3 in lam3])
-        ang = _unwrap_deg(np.degrees(np.arctan2(X[:, :, 1], X[:, :, 0]) - np.arctan2(X[0][:, 1], X[0][:, 0])))
-        res.update(torsion=sgn * (ang[:, apic].mean(1) - ang[:, basal].mean(1)), torsion_surface="mid-surface")
+        tors = [(lambda th: th[sec_apex].mean() - th[sec_base].mean())(_theta_pezzuto(Xk, X[0], e3, axis_xy)) for Xk in X]
+        res.update(torsion=np.array(tors), torsion_surface="mid-surface")
 
     vol = read_lv_volume(out)
     if vol:
@@ -137,7 +150,7 @@ PANELS = [  # key, title, ref key
     ("rate", "mean nodal rate |dx|/dt (cm/s)", None),
     ("thick", "wall thickening, mid-axis band (%)", "thickening"),
     ("shortening", "apex-base shortening (%)  (<0: elongation)", "shortening"),
-    ("torsion", "torsion, apical vs basal band (deg)", "torsion"),
+    ("torsion", "torsion, apex vs base section (deg, Pezzuto def.)", "torsion"),
     ("V_mid", "mid-surface volume (ml)", None),
 ]
 
@@ -151,7 +164,8 @@ def cmd_lv(args):
     data = []
     for d, lab in zip(dirs, labels):
         try:
-            data.append((lab, compute(d, args.out_dir, args.solver_unit, args.apex, args.band)))
+            data.append((lab, compute(d, args.out_dir, args.solver_unit, args.apex, args.band,
+                                      tuple(float(v) for v in args.torsion_sections.split(",")))))
         except (FileNotFoundError, ValueError) as e:
             print(f"warning: {e}; skipping", file=sys.stderr)
     if not data:
