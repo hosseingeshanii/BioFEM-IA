@@ -46,6 +46,9 @@ PetscReal  newmark_gamma=0.5; /* Newmark-beta gamma. 0.5 = average-acceleration,
                                   FDynamic() (residual) and xAccVel() (post-step state update) --
                                   both read this global rather than hardcoding their own. */
 PetscInt   lv_fix_apex=1;     /* apply the apex single-node pin BC (unstructured LV mesh) */
+PetscInt   lv_mean_bc=0;         /* -lv_mean_bc 1: Pezzuto & Ambrosi 2014 null average displacement + rotation (see FormFunctionFEM) */
+PetscReal  lv_mean_bc_k=-1.0;    /* -lv_mean_bc_k: penalty stiffness [force/length]; default mu*h0 */
+PetscInt   mean_bc_skip=0;       /* set while the colored-FD preconditioner is built (dense term left out of P) */
 PetscInt   fem_jac_pc=0;         /* -fem_jac_pc 1: assembled colored-FD Jacobian as the preconditioner (jacobian_pc.c) */
 static FEJacPC   jacpc;
 static PetscBool jacpc_ready = PETSC_FALSE;
@@ -365,6 +368,9 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-disable_fdyn", &disable_fdyn, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-log_c33", &log_c33, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-fem_jac_pc", &fem_jac_pc, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_mean_bc", &lv_mean_bc, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_mean_bc_k", &lv_mean_bc_k, PETSC_NULL);
+
   if (fem_jac_pc) {
     PetscBool has_mf = PETSC_FALSE;
     PetscOptionsHasName(PETSC_NULL, PETSC_NULL, "-fem_snes_mf", &has_mf);
@@ -754,6 +760,17 @@ int main(int argc, char **argv)
 	            ierr = FormFunctionFEM(snes, fem[ibi].x, fem[ibi].Res, (void *)&fem[ibi]); CHKERRQ(ierr);
 	          }
 	          if (log_c33) { ierr = LogC33Stats(&fem[ibi], ti); CHKERRQ(ierr); }
+	          if (lv_mean_bc) {
+	            IBMNodes *ib = fem[ibi].ibm; PetscReal cx = 0, cy = 0, ux = 0, uy = 0, mom = 0, S = 0;
+	            for (PetscInt v = 0; v < ib->n_v; v++) { cx += ib->x_bp0[v]; cy += ib->y_bp0[v]; }
+	            cx /= ib->n_v; cy /= ib->n_v;
+	            for (PetscInt v = 0; v < ib->n_v; v++) {
+	              PetscReal dx = ib->x_bp[v] - ib->x_bp0[v], dy = ib->y_bp[v] - ib->y_bp0[v], rx = ib->x_bp0[v] - cx, ry = ib->y_bp0[v] - cy;
+	              ux += dx; uy += dy; mom += rx * dy - ry * dx; S += rx * rx + ry * ry;
+	            }
+	            PetscPrintf(PETSC_COMM_WORLD, "[meanbc] step=%d mean u_x=%.3e mean u_y=%.3e mean rotation=%.3e rad (k=%.3g)\n",
+	                        (int)ti, (double)(ux / ib->n_v), (double)(uy / ib->n_v), (double)(mom / S), (double)lv_mean_bc_k);
+	          }
 	          if (jacpc_ready) {
 	            PetscPrintf(PETSC_COMM_WORLD, "[jacpc] step=%d Jacobians built so far %d, %.1f s total (%d colors)\n",
 	                        (int)ti, (int)jacpc.n_builds, (double)jacpc.t_build, (int)jacpc.ncolors);
@@ -1091,6 +1108,45 @@ PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx) {
   } else if (rect_plate_nitti) {
     ierr = EdgeDirectionalFix(0, 1, fem, R); CHKERRQ(ierr);
     ierr = EdgeDirectionalFix(3, 0, fem, R); CHKERRQ(ierr);
+  }
+  /* -lv_mean_bc 1: null AVERAGE displacement (x, y) and null average rotation about the long axis z,
+   * as in Pezzuto & Ambrosi 2014 (base u_z = 0 is applied separately), instead of point pins.
+   * Penalty on the means, E = k/2 [N (ubar_x^2 + ubar_y^2) + S omega^2], with
+   *   ubar = (1/N) sum_i u_i,  omega = sum_i (r_ix u_iy - r_iy u_ix) / S,  S = sum_i |r_i|^2,
+   *   r_i = X_i - c (reference, in-plane, c = reference centroid), so that
+   *   R_i += k (ubar_x - omega r_iy, ubar_y + omega r_ix, 0).
+   * The internal forces have zero net force in x, y and zero net moment about z (translation and
+   * rotation invariance; the ghost-force map is affine), and the only BC rows are base z rows, so summing
+   * the residual at a converged state gives N k ubar = 0 and S k omega = 0: the means are exactly zero and
+   * the penalty force vanishes. k only affects conditioning. Left out of the colored-FD preconditioner
+   * (mean_bc_skip), since it couples every DOF to every other. */
+  if (lv_mean_bc && !mean_bc_skip) {
+    PetscCheck(!lv_base_tangent_pins, PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP,
+               "-lv_mean_bc replaces -lv_base_tangent_pins; set -lv_base_tangent_pins 0");
+    if (lv_mean_bc_k <= 0.0) lv_mean_bc_k = mu * h0;    /* default, once mu and h0 are known */
+    const PetscInt nv = ibm->n_v;
+    PetscReal cx = 0.0, cy = 0.0;
+    for (PetscInt v = 0; v < nv; v++) { cx += ibm->x_bp0[v]; cy += ibm->y_bp0[v]; }
+    cx /= nv; cy /= nv;
+    PetscReal ux = 0.0, uy = 0.0, mom = 0.0, S = 0.0;
+    for (PetscInt v = 0; v < nv; v++) {                   /* x_bp is replicated on every rank */
+      const PetscReal dx = ibm->x_bp[v] - ibm->x_bp0[v], dy = ibm->y_bp[v] - ibm->y_bp0[v];
+      const PetscReal rx = ibm->x_bp0[v] - cx, ry = ibm->y_bp0[v] - cy;
+      ux += dx; uy += dy; mom += rx * dy - ry * dx; S += rx * rx + ry * ry;
+    }
+    ux /= nv; uy /= nv;
+    const PetscReal om = mom / S, k = lv_mean_bc_k;
+    DMPlexGeomCtx *gctx_ = &fem->geom_ctx;
+    PetscReal *RR;
+    ierr = VecGetArray(R, &RR); CHKERRQ(ierr);
+    for (PetscInt v = 0; v < nv; v++) {
+      const PetscInt li = gctx_->initialized ? gctx_->ibm_to_local_idx[v] : v;
+      if (li < 0) continue;
+      const PetscReal rx = ibm->x_bp0[v] - cx, ry = ibm->y_bp0[v] - cy;
+      RR[li*dof  ] += k * (ux - om * ry);
+      RR[li*dof+1] += k * (uy + om * rx);
+    }
+    ierr = VecRestoreArray(R, &RR); CHKERRQ(ierr);
   }
   /* -lv_base_tangent_pins 1: remove the in-plane rigid modes of an LV whose base
    * is fixed axially (x,y translation + rotation about the long axis z) without

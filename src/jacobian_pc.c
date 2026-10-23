@@ -23,6 +23,7 @@
 #include <petsc/private/hashseti.h>
 
 extern PetscInt dof;
+extern PetscInt mean_bc_skip;
 extern PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx);
 
 /* Real nodes an element's residual contribution depends on (its "virtual" patch list). */
@@ -153,7 +154,9 @@ static PetscErrorCode FEM_JacPCCompute_(SNES snes, Vec x, Mat J, Mat P, void *ct
   FEJacPC *jp = (FEJacPC *)ctx;
   PetscLogDouble t0, t1;
   PetscCall(PetscTime(&t0));
+  mean_bc_skip = 1;      /* the mean-BC penalty couples all DOFs: keep it out of the colored P */
   PetscCall(SNESComputeJacobianDefaultColor(snes, x, J, P, jp->fdc));
+  mean_bc_skip = 0;
   PetscCall(MatSetOption(P, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE));
   for (PetscInt i = 0; i < jp->n_ghost_rows; i++) PetscCall(MatSetValue(P, jp->ghost_rows[i], jp->ghost_rows[i], 1.0, INSERT_VALUES));
   PetscCall(MatAssemblyBegin(P, MAT_FINAL_ASSEMBLY));
