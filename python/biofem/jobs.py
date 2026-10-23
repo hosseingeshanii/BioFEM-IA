@@ -1,5 +1,19 @@
 """SLURM jobfile builders for run and sweep."""
 
+
+def _timed(cmd: str) -> str:
+    """Shell snippet that runs cmd and prints BENCH_WALL_SECONDS=<s> afterwards (also on failure).
+    Plain bash + date + awk: /usr/bin/time is missing on some clusters (TAMU FASTER compute nodes)."""
+    return (
+        '_t0=$(date +%s.%N)\n'
+        'set +e\n'
+        f'{cmd}\n'
+        '_rc=$?\n'
+        'set -e\n'
+        'awk -v a="$_t0" -v b="$(date +%s.%N)" \'BEGIN{printf "BENCH_WALL_SECONDS=%.2f\\n", b-a}\'\n'
+        'exit $_rc'
+    )
+
 # ---------------------------------------------------------------------------
 # Jobfile builders
 # ---------------------------------------------------------------------------
@@ -15,13 +29,10 @@ def _run_jobfile(
     env_block   = load_env if load_env else "# no load-env.sh found"
     exe_str     = f"{executable}{(' ' + petsc_opts) if petsc_opts else ''}"
     if gpu:
-        mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {exe_str}'
+        mpi_cmd = _timed(exe_str)
     else:
         mpi_extra = f" {mpi_flags}" if mpi_flags.strip() else ""
-        mpi_cmd = (
-            f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n'
-            f'  mpirun -np "${{SLURM_NTASKS:-{np}}}"{mpi_extra} {exe_str}'
-        )
+        mpi_cmd = _timed(f'mpirun -np "${{SLURM_NTASKS:-{np}}}"{mpi_extra} {exe_str}')
     return (
         f"#!/bin/bash\n"
         f"#SBATCH --job-name=biofem-{backend}\n"
@@ -50,13 +61,10 @@ def _sweep_jobfile(
     gpu_line  = "#SBATCH --gpus=1" if gpu else ""
     env_block = load_env if load_env else "# no load-env.sh found"
     if gpu:
-        mpi_cmd = f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n  {executable}'
+        mpi_cmd = _timed(str(executable))
     else:
         mpi_extra = f" {mpi_flags}" if mpi_flags.strip() else ""
-        mpi_cmd = (
-            f'/usr/bin/time -f "BENCH_WALL_SECONDS=%e" \\\n'
-            f'  mpirun -np "${{SLURM_NTASKS:-{ntasks}}}"{mpi_extra} {executable}'
-        )
+        mpi_cmd = _timed(f'mpirun -np "${{SLURM_NTASKS:-{ntasks}}}"{mpi_extra} {executable}')
     return (
         f"#!/bin/bash\n"
         f"#SBATCH --job-name={backend}_mesh_nx{nx}_ny{ny}_np{ntasks}\n"
