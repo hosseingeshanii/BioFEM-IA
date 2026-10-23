@@ -1,0 +1,13 @@
+<map id="GammaOfTimeCurrent" name="GammaOfTimeCurrent">
+<area shape="rect" id="Node000001" title="Current scalar gamma(t) for element ec, including its activation wavefront delay (before per&#45;element ..." alt="" coords="353,56,524,81"/>
+<area shape="rect" id="Node000002" href="$io_8c.html#a6ef830a0883e3f31ad5b52a2b20bdbb2" title=" " alt="" coords="239,56,305,81"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="340,71,305,71,305,66,340,66"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a636a8f7f82b7bc4dabb749e9c7fe75a9" title=" " alt="" coords="128,5,171,31"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="227,53,170,29,172,24,229,48"/>
+<area shape="rect" id="Node000004" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,56,60,81"/>
+<area shape="poly" id="edge6_Node000002_Node000004" title=" " alt="" coords="225,71,60,71,60,66,225,66"/>
+<area shape="rect" id="Node000005" href="$inverse_8c.html#a63c0a7ac76584f0dab82764698b5d878" title=" " alt="" coords="108,107,191,132"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="229,89,182,109,180,104,227,84"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="116,35,61,59,59,55,114,30"/>
+<area shape="poly" id="edge5_Node000005_Node000004" title=" " alt="" coords="106,103,59,83,61,78,108,99"/>
+</map>

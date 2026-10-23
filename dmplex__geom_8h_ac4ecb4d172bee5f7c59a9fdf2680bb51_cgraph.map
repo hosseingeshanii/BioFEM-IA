@@ -1,0 +1,62 @@
+<map id="RunDMPlexGeomProcesses" name="RunDMPlexGeomProcesses">
+<area shape="rect" id="Node000001" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="5,194,207,219"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#a25a289b6847656028b83d98388767fc5" title="Build a global table mapping each original vertex index to its owning MPI rank." alt="" coords="275,5,465,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="114,192,168,127,208,88,253,55,266,48,268,53,256,60,211,92,172,130,118,195"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#a661af262a984dd056c4489c06984eac8" title="Build the DMPlexPatchExchange SF for cross&#45;rank coordinate fetching." alt="" coords="255,70,485,95"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="120,192,176,148,214,124,254,104,275,97,276,102,256,109,216,129,179,153,124,196"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#ab02736f3446add6db615133986b8a51c" title="Distribute the serial DMPlex and return per&#45;rank original&#45;index arrays." alt="" coords="273,119,467,145"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="140,191,254,153,288,145,289,150,255,159,142,196"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#a7e60d333a6f6667a8a2f4fdb3651a3f4" title="Free all heap memory owned by a DMPlexPatchExchange and zero the struct." alt="" coords="256,169,484,194"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="207,194,242,191,243,196,207,200"/>
+<area shape="rect" id="Node000007" href="$dmplex__geom_8c.html#aa4423d1b5775f32ebd063753442784a2" title="Copy Loop subdivision patch stencil data from IBMNodes to a local layout." alt="" coords="269,218,471,243"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="207,213,256,218,255,223,207,218"/>
+<area shape="rect" id="Node000008" href="$dmplex__geom_8c.html#a8661deca8813ac6ed08fa660b602fefe" title="Free all heap memory owned by a DMPlexPatchLayout and zero the struct." alt="" coords="265,267,475,293"/>
+<area shape="poly" id="edge7_Node000001_Node000008" title=" " alt="" coords="144,217,255,252,294,262,292,267,254,257,143,222"/>
+<area shape="rect" id="Node000009" href="$dmplex__geom_8c.html#afe00d2040539df5cdad90ec9810c5bc0" title="Diagnostic: count and report cells whose patch stencils are fully local." alt="" coords="301,317,439,342"/>
+<area shape="poly" id="edge8_Node000001_Node000009" title=" " alt="" coords="124,217,180,259,217,282,256,302,289,313,287,318,254,306,214,287,177,263,121,222"/>
+<area shape="rect" id="Node000010" href="$dmplex__geom_8c.html#a14490a5ebe1fce84a8ad0654ef0e798b" title="Synchronise remote coordinates and evaluate the geometry kernel for all local cells." alt="" coords="293,366,447,391"/>
+<area shape="poly" id="edge9_Node000001_Node000010" title=" " alt="" coords="118,218,171,283,211,320,256,351,281,362,279,367,253,356,208,324,168,286,114,221"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#a7888018139fb6d8231505d5c8d4abbf9" title="Construct a serial DMPlex from the IBMNodes connectivity on rank 0." alt="" coords="579,119,728,145"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="468,129,565,129,565,135,468,135"/>
+<area shape="rect" id="Node000011" href="$active__strain_8c.html#a993ef27fda81bb402cba4aa14fa9b51a" title="Build current covariant/contravariant basis vectors for one element." alt="" coords="597,267,709,293"/>
+<area shape="poly" id="edge10_Node000010_Node000011" title=" " alt="" coords="446,366,484,351,498,340,507,327,516,314,532,302,557,291,583,284,584,289,559,296,535,306,520,318,511,330,502,343,487,356,448,371"/>
+<area shape="rect" id="Node000021" href="$active__strain_8c.html#ac93e65e44aa9af3d11c2165016210d87" title="Update reference midsurface geometry cache for one element." alt="" coords="557,415,750,441"/>
+<area shape="poly" id="edge23_Node000010_Node000021" title=" " alt="" coords="444,389,566,410,565,415,443,394"/>
+<area shape="rect" id="Node000025" href="$active__strain_8c.html#a04fa5da4f55d0663ad5ec7a3534de0af" title="Update current midsurface geometry cache for one element." alt="" coords="561,465,746,490"/>
+<area shape="poly" id="edge30_Node000010_Node000025" title=" " alt="" coords="397,389,458,419,534,449,568,459,567,464,532,455,456,424,394,394"/>
+<area shape="rect" id="Node000026" href="$dmplex__geom_8c.html#aa8f242260c80f04e57bb298c97a87fac" title=" " alt="" coords="539,317,768,342"/>
+<area shape="poly" id="edge32_Node000010_Node000026" title=" " alt="" coords="443,363,565,342,566,347,444,369"/>
+<area shape="rect" id="Node000027" href="$dmplex__geom_8c.html#a0e285c5152466ed0d16f3ccb265e2c99" title="Broadcast updated vertex coordinates from owning ranks to all ranks that need them." alt="" coords="533,366,773,391"/>
+<area shape="poly" id="edge33_Node000010_Node000027" title=" " alt="" coords="447,376,520,376,520,381,447,381"/>
+<area shape="rect" id="Node000012" href="$math_8c.html#a7ef9263b0a3a10c2cd00bb4dc0059d70" title=" " alt="" coords="1157,289,1223,314"/>
+<area shape="poly" id="edge11_Node000011_Node000012" title=" " alt="" coords="684,265,746,242,821,224,882,215,931,210,980,212,1041,224,1074,234,1106,249,1160,279,1157,283,1104,253,1072,239,1039,229,979,218,931,215,883,220,822,229,748,247,686,270"/>
+<area shape="rect" id="Node000013" href="$active__strain_8c.html#a8ffbd5ab9cf4de7388a8a1b66bf48821" title=" " alt="" coords="853,338,1008,363"/>
+<area shape="poly" id="edge12_Node000011_Node000013" title=" " alt="" coords="710,286,774,301,822,323,854,332,852,337,820,328,772,307,709,291"/>
+<area shape="rect" id="Node000016" href="$math_8c.html#ae18926821a703a2c5b281bd890b7e6a0" title=" " alt="" coords="1163,189,1217,214"/>
+<area shape="poly" id="edge22_Node000011_Node000016" title=" " alt="" coords="673,265,737,230,778,212,821,199,912,186,1004,183,1086,187,1149,193,1149,198,1085,192,1003,188,912,191,822,204,780,217,739,234,675,270"/>
+<area shape="rect" id="Node000018" href="$active__strain_8c.html#a798e3f12cc0e3f71dbc664e886f8893a" title=" " alt="" coords="828,239,1033,265"/>
+<area shape="poly" id="edge18_Node000011_Node000018" title=" " alt="" coords="709,272,814,261,815,266,710,277"/>
+<area shape="rect" id="Node000019" href="$active__strain_8c.html#af6f59806c4a71e53ae3ffb4ed5ac56ec" title=" " alt="" coords="849,387,1013,413"/>
+<area shape="poly" id="edge19_Node000011_Node000019" title=" " alt="" coords="710,280,743,287,775,302,792,319,800,338,807,356,823,373,837,381,835,385,820,377,803,359,795,340,788,322,772,306,742,292,709,285"/>
+<area shape="rect" id="Node000020" href="$math_8c.html#a3f73e4cd9eab76eeee084eabf2b98ec9" title=" " alt="" coords="908,289,953,314"/>
+<area shape="poly" id="edge21_Node000011_Node000020" title=" " alt="" coords="710,282,894,296,894,301,709,287"/>
+<area shape="poly" id="edge13_Node000013_Node000012" title=" " alt="" coords="998,335,1142,307,1143,313,999,341"/>
+<area shape="rect" id="Node000014" href="$math_8c.html#a9d60990d26296194c921d537ea26f3c7" title=" " alt="" coords="1157,437,1223,462"/>
+<area shape="poly" id="edge14_Node000013_Node000014" title=" " alt="" coords="1009,359,1041,372,1057,385,1066,398,1075,410,1089,422,1116,433,1144,441,1143,446,1114,438,1087,426,1071,414,1062,401,1053,388,1039,377,1007,364"/>
+<area shape="rect" id="Node000015" href="$math_8c.html#a870a70f4845a041458d9bdb0dd7aabd3" title=" " alt="" coords="1165,387,1215,413"/>
+<area shape="poly" id="edge15_Node000013_Node000015" title=" " alt="" coords="999,361,1152,390,1151,395,998,366"/>
+<area shape="poly" id="edge16_Node000013_Node000016" title=" " alt="" coords="1007,336,1039,323,1054,312,1063,301,1086,274,1157,220,1160,224,1090,278,1067,304,1057,316,1041,328,1009,341"/>
+<area shape="rect" id="Node000017" href="$math_8c.html#aa52f6593cf3e5453c8c6c94343d3fb37" title=" " alt="" coords="1165,338,1215,363"/>
+<area shape="poly" id="edge17_Node000013_Node000017" title=" " alt="" coords="1008,348,1151,348,1151,353,1008,353"/>
+<area shape="poly" id="edge20_Node000019_Node000015" title=" " alt="" coords="1013,397,1150,397,1150,403,1013,403"/>
+<area shape="rect" id="Node000022" href="$active__strain_8c.html#a9ef026a24ded6fec7243fd82f49394c3" title=" " alt="" coords="821,437,1040,477"/>
+<area shape="poly" id="edge24_Node000021_Node000022" title=" " alt="" coords="751,436,808,442,808,447,750,441"/>
+<area shape="poly" id="edge25_Node000022_Node000012" title=" " alt="" coords="1019,435,1038,422,1049,410,1055,399,1061,374,1067,348,1074,335,1086,323,1113,309,1142,301,1143,306,1115,314,1090,327,1079,339,1072,350,1066,375,1060,400,1053,413,1042,426,1022,439"/>
+<area shape="poly" id="edge26_Node000022_Node000014" title=" " alt="" coords="1040,451,1143,448,1143,453,1040,457"/>
+<area shape="poly" id="edge27_Node000022_Node000015" title=" " alt="" coords="1021,435,1150,406,1152,411,1022,440"/>
+<area shape="rect" id="Node000023" href="$active__strain_8c.html#af8eb71852e7e9e1290f27656e66736fe" title=" " alt="" coords="1088,487,1292,527"/>
+<area shape="poly" id="edge28_Node000022_Node000023" title=" " alt="" coords="1037,475,1075,482,1074,487,1036,480"/>
+<area shape="rect" id="Node000024" href="$math_8c.html#ac616709995f2ae60c4308ffa328337d7" title=" " alt="" coords="1163,551,1217,577"/>
+<area shape="poly" id="edge29_Node000022_Node000024" title=" " alt="" coords="966,475,1023,506,1089,536,1150,554,1148,559,1087,541,1020,511,964,480"/>
+<area shape="poly" id="edge31_Node000025_Node000022" title=" " alt="" coords="746,468,807,464,808,469,746,473"/>
+</map>

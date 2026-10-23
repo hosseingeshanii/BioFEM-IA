@@ -1,0 +1,10 @@
+<map id="ReportPatchHalo_" name="ReportPatchHalo_">
+<area shape="rect" id="Node000001" title="Diagnostic: count and report cells whose patch stencils are fully local." alt="" coords="391,31,528,56"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="125,5,326,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="377,37,326,32,326,26,377,32"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="108,55,343,80"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="377,54,343,58,343,53,377,49"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,31,60,56"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="115,35,61,42,60,37,115,30"/>
+<area shape="poly" id="edge4_Node000004_Node000003" title=" " alt="" coords="109,56,60,49,60,44,110,50"/>
+</map>
