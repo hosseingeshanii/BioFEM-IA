@@ -51,6 +51,15 @@ PetscInt cart_fib_act;
 PetscInt  fa_pezzuto = 0;      /* -fa_pezzuto 1: isochoric Fa of Pezzuto & Ambrosi 2014 eq. 11 (with -cart_fib_act 1) */
 PetscInt  fa_nitti_plate = 0;  /* -fa_nitti_plate 1: Nitti eq. 44-47 Fa on a flat Lx x Ly patch */
 PetscReal fa_nitti_a1 = 1.0, fa_nitti_a2 = 1.0, fa_nitti_Lx = 1.0, fa_nitti_Ly = 1.0;
+/* -material_model 1: Holzapfel-Ogden (Wang et al. 2013, IJNMBE 29:83, eq. 3 / Table I, Pa), evaluated at Ce,
+ * with s0 = a3 (sheet through the wall). -ho_incompressible 0: exactly incompressible shell, p eliminated
+ * point by point (option iii; Kiendl et al. 2015 sec. 5.1 extended to active strain). See ElemHOStress_. */
+PetscInt  material_model = 0;      /* 0 = neo-Hookean (default), 1 = Holzapfel-Ogden */
+PetscInt  ho_incompressible = 0;   /* 0 = option (iii); (i)/(ii) not implemented */
+PetscInt  ho_tension_only = 1;     /* fiber/sheet terms only for I4 > 1 */
+PetscInt  ho_sheet = 1;            /* sheet (I4s) and fiber-sheet (I8fs) terms */
+PetscReal ho_a = 236.2, ho_b = 10.810, ho_af = 20037.0, ho_bf = 14.154,
+          ho_as = 3724.5, ho_bs = 5.1645, ho_afs = 410.8, ho_bfs = 11.300;
 PetscInt ghost_force_map = 1; /* -ghost_force_map 0 disables mapping Fint on ghost nodes back to real nodes (old behaviour) */
 static PetscInt cuda_metric_tensor = 0;
 
@@ -117,6 +126,26 @@ PetscErrorCode GetUserActParams(FE *fem){
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-manufactured_T", &manufactured_T, PETSC_NULL);
     PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-bulk_modulus", &(fem->act_data.K), PETSC_NULL);
     PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-cuda_metric_tensor", &cuda_metric_tensor, PETSC_NULL);
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-material_model", &material_model, PETSC_NULL);
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-ho_incompressible", &ho_incompressible, PETSC_NULL);
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-ho_tension_only", &ho_tension_only, PETSC_NULL);
+    PetscOptionsGetInt (PETSC_NULL, PETSC_NULL, "-ho_sheet", &ho_sheet, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_a",   &ho_a,   PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_b",   &ho_b,   PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_af",  &ho_af,  PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_bf",  &ho_bf,  PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_as",  &ho_as,  PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_bs",  &ho_bs,  PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_afs", &ho_afs, PETSC_NULL);
+    PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-ho_bfs", &ho_bfs, PETSC_NULL);
+    if (material_model == 1) {
+        PetscCheck(cart_fib_act, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "-material_model 1 (Holzapfel-Ogden) needs fibers: -cart_fib_act 1");
+        PetscCheck(ho_incompressible == 0, PETSC_COMM_WORLD, PETSC_ERR_SUP, "-ho_incompressible %d not implemented; only 0 (exactly incompressible, option iii)", (int)ho_incompressible);
+        PetscPrintf(PETSC_COMM_WORLD, "[material] Holzapfel-Ogden, exactly incompressible (C33 from J=1, p from S33=0): "
+                    "a=%g b=%g af=%g bf=%g as=%g bs=%g afs=%g bfs=%g tension_only=%d sheet=%d (-mu, -bulk_modulus, -C33_subitr_nums unused)\n",
+                    (double)ho_a, (double)ho_b, (double)ho_af, (double)ho_bf, (double)ho_as, (double)ho_bs, (double)ho_afs, (double)ho_bfs,
+                    (int)ho_tension_only, (int)ho_sheet);
+    }
 
     fem->act_data.mu = mu;
     PetscFunctionReturn(0);
@@ -2248,8 +2277,108 @@ PetscErrorCode InitActStrainProblem(FE *fem, PetscInt ibi){
   PetscFunctionReturn(0);
 }
 
+/* Holzapfel-Ogden, exactly incompressible shell (option iii), all thickness qp of element ec.
+ * Needs C_ab (ElemCGDefTens) and Fa (ElemActDefGrad). Components are on the reference basis g0_i (g0_3 = a3).
+ *  1. Thickness from J = 1 (Kiendl 2015 eqs. 22-24; det Fa = 1 so also Je = 1):
+ *        C_33 = det(G_ab)/det(g_ab),  C_a3 = 0.
+ *  2. Base elastic stress S_W = 2 dW/dCe (Wang 2013 eq. 3), f^i = g0^i . f (tangent part), s^i = delta^i_3, H = (f x s + s x f)/2:
+ *        S_W^ij = a E1 G^ij + 2 af <I4f-1> Ef f^i f^j + 2 as <I4s-1> Es s^i s^j + 2 afs I8 Efs H^ij,
+ *        E1 = exp(b(I1-3)), Ef = exp(bf(I4f-1)^2), Es = exp(bs(I4s-1)^2), Efs = exp(bfs I8^2).
+ *  3. Push-back, then p from plane stress on the total stress (Psi_e = W(Ce) - p(Je-1)):
+ *        Sbar^ij = A^i_p S_W^pq A^j_q,  p = Sbar^33 / Cbar^33,  S^ij = Sbar^ij - p Cbar^ij  (Cbar = C^-1),
+ *     so S^33 = 0 exactly; Se^ij = S_W^ij - p Je Ce^-1,ij is stored for output. */
+static PetscErrorCode ElemHOStress_(FE *fem, PetscInt ec)
+{
+  PetscFunctionBeginUser;
+  ElemActData *ead = &fem->act_data.elem_act_data[ec];
+  const PetscInt n_qp = fem->act_data.n_qp;
+
+  for (PetscInt qp = 0; qp < n_qp; qp++) {
+    const PetscReal detg = ead->gm[qp].Cov[0][0]*ead->gm[qp].Cov[1][1] - ead->gm[qp].Cov[0][1]*ead->gm[qp].Cov[1][0];
+    const PetscReal detG = ead->gm0[qp].Cov[0][0]*ead->gm0[qp].Cov[1][1] - ead->gm0[qp].Cov[0][1]*ead->gm0[qp].Cov[1][0];
+    PetscCheck(detg > 0.0 && detG > 0.0, PETSC_COMM_SELF, PETSC_ERR_FP, "non-positive area metric at element %d qp %d", (int)ec, (int)qp);
+    for (PetscInt a = 0; a < 2; a++) { ead->C[qp].Cov[a][2] = 0.0; ead->C[qp].Cov[2][a] = 0.0; }
+    ead->C[qp].Cov[2][2] = detG / detg;
+    PetscCall(RaiseIndices2(ead->gm0[qp].Cont, ead->C[qp].Cov, ead->C[qp].Cont));
+    PetscCall(INV(ead->C[qp].Cov, ead->C_inv[qp].Cont));
+    PetscCall(LowerIndices2(ead->gm0[qp].Cov, ead->C_inv[qp].Cont, ead->C_inv[qp].Cov));
+  }
+  PetscCall(ElemElasCGDefTens(fem, ec));
+
+  for (PetscInt qp = 0; qp < n_qp; qp++) {
+    PetscReal (*Ce)[3] = ead->Ce[qp].Cov, (*G)[3] = ead->gm0[qp].Cont;
+    const PetscReal *fc = ead->fib[qp];
+    PetscReal f[3], sv[3] = {0.0, 0.0, 1.0};
+    for (PetscInt i = 0; i < 3; i++)
+      f[i] = ead->g0[qp].Cont[i].x*fc[0] + ead->g0[qp].Cont[i].y*fc[1] + ead->g0[qp].Cont[i].z*fc[2];
+    /* Mesh fibers can have a small normal component (~0.5 deg on the LV); keep f tangent so f . s = 0 and
+     * I8 = 0 in the reference state (else the fs term prestresses it), and unit: G_ab f^a f^b = 1. */
+    f[2] = 0.0;
+    {
+      const PetscReal nf = PetscSqrtReal(ead->gm0[qp].Cov[0][0]*f[0]*f[0] + 2.0*ead->gm0[qp].Cov[0][1]*f[0]*f[1] + ead->gm0[qp].Cov[1][1]*f[1]*f[1]);
+      f[0] /= nf; f[1] /= nf;
+    }
+
+    PetscReal I1 = 0.0, I4f = 0.0, I4s = Ce[2][2], I8 = 0.0;
+    for (PetscInt i = 0; i < 3; i++)
+      for (PetscInt j = 0; j < 3; j++) { I1 += Ce[i][j]*G[i][j]; I4f += Ce[i][j]*f[i]*f[j]; I8 += Ce[i][j]*f[i]*sv[j]; }
+
+    const PetscReal c1  = ho_a * PetscExpReal(ho_b * (I1 - 3.0));
+    const PetscReal ef  = (ho_tension_only && I4f < 1.0) ? 0.0 : I4f - 1.0;
+    const PetscReal cf  = 2.0 * ho_af * ef * PetscExpReal(ho_bf * ef * ef);
+    const PetscReal es  = (ho_tension_only && I4s < 1.0) ? 0.0 : I4s - 1.0;
+    const PetscReal cs  = ho_sheet ? 2.0 * ho_as * es * PetscExpReal(ho_bs * es * es) : 0.0;
+    const PetscReal cfs = ho_sheet ? 2.0 * ho_afs * I8 * PetscExpReal(ho_bfs * I8 * I8) : 0.0;
+
+    PetscReal SW[3][3];
+    for (PetscInt i = 0; i < 3; i++)
+      for (PetscInt j = 0; j < 3; j++)
+        SW[i][j] = c1*G[i][j] + cf*f[i]*f[j] + cs*sv[i]*sv[j] + 0.5*cfs*(f[i]*sv[j] + sv[i]*f[j]);
+
+    /* A^i_p = g0^{iw} Fbar_wp (mixed comps of Fa^-1), as in ElemTotStress */
+    PetscReal A[3][3], Sb[3][3];
+    for (PetscInt i = 0; i < 3; i++)
+      for (PetscInt p = 0; p < 3; p++) {
+        A[i][p] = 0.0;
+        for (PetscInt w = 0; w < 3; w++) A[i][p] += G[i][w] * ead->Fa_inv[qp].Cov[w][p];
+      }
+    for (PetscInt i = 0; i < 3; i++)
+      for (PetscInt j = 0; j < 3; j++) {
+        Sb[i][j] = 0.0;
+        for (PetscInt p = 0; p < 3; p++)
+          for (PetscInt q = 0; q < 3; q++) Sb[i][j] += A[i][p] * SW[p][q] * A[j][q];
+      }
+
+    const PetscReal pr = Sb[2][2] / ead->C_inv[qp].Cont[2][2];
+    const PetscReal Je = PetscSqrtReal(DET3x3(ead->Ce[qp].Cov) / DET3x3(ead->gm0[qp].Cov));
+    for (PetscInt i = 0; i < 3; i++)
+      for (PetscInt j = 0; j < 3; j++) {
+        ead->S[qp].Cont[i][j]  = Sb[i][j] - pr * ead->C_inv[qp].Cont[i][j];
+        ead->Se[qp].Cont[i][j] = SW[i][j] - pr * Je * ead->Ce_inv[qp].Cont[i][j];
+      }
+
+    if (ec == 0 && qp == 0) {
+      static PetscInt last_ti = -1;
+      if (ti != last_ti) {
+        last_ti = ti;
+        PetscPrintf(PETSC_COMM_SELF, "[HO] ti=%d elem 0 qp 0: C33=%.6f Je=%.3e I1=%.6f I4f=%.6f I4s=%.6f I8=%.2e p=%.4e S11=%.4e S22=%.4e S33=%.1e\n",
+                    (int)ti, (double)ead->C[qp].Cov[2][2], (double)(Je - 1.0), (double)I1, (double)I4f, (double)I4s, (double)I8, (double)pr,
+                    (double)ead->S[qp].Cont[0][0], (double)ead->S[qp].Cont[1][1], (double)ead->S[qp].Cont[2][2]);
+      }
+    }
+  }
+  PetscFunctionReturn(0);
+}
+
 PetscErrorCode ElemC33Solve(FE *fem, PetscInt ec) {
   PetscFunctionBeginUser;
+
+  if (material_model == 1) {   /* closed form, no local Newton */
+    fem->act_data.elem_act_data[ec].c33_clamped = 0;
+    fem->act_data.elem_act_data[ec].c33_last_delta = 0.0;
+    PetscCall(ElemHOStress_(fem, ec));
+    PetscFunctionReturn(0);
+  }
 
   ElemActData *ead = NULL;
 
