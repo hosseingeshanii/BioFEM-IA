@@ -60,6 +60,7 @@ PetscInt  ho_tension_only = 1;     /* fiber/sheet terms only for I4 > 1 */
 PetscInt  ho_sheet = 1;            /* sheet (I4s) and fiber-sheet (I8fs) terms */
 PetscReal ho_a = 236.2, ho_b = 10.810, ho_af = 20037.0, ho_bf = 14.154,
           ho_as = 3724.5, ho_bs = 5.1645, ho_afs = 410.8, ho_bfs = 11.300;
+PetscReal t_solve = -1.0;   /* >= 0: the time used for gamma(t) instead of ti*dt (main.c -adaptive_substeps) */
 PetscInt ghost_force_map = 1; /* -ghost_force_map 0 disables mapping Fint on ghost nodes back to real nodes (old behaviour) */
 static PetscInt cuda_metric_tensor = 0;
 
@@ -1228,7 +1229,7 @@ static PetscErrorCode PrintElemCC(FE *fem, PetscInt ec)
 static PetscReal GammaOfTimeDelayed(const MuscleActParams *p, PetscReal delay)
 {
     if (p->gamma_ramp_type == 0) return p->gamma;
-    PetscReal t = (PetscReal)ti * dt - delay;
+    PetscReal t = ((t_solve >= 0.0) ? t_solve : (PetscReal)ti * dt) - delay;
     if (p->gamma_ramp_type == 3) {
         PetscReal tau_up   = (p->gamma_tau_up   > 0.0) ? p->gamma_tau_up   : 0.02;
         PetscReal tau_down = (p->gamma_tau_down > 0.0) ? p->gamma_tau_down : 0.08;

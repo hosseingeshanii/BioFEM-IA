@@ -58,6 +58,11 @@ PetscInt   snes_stagnation_its=0;/* -snes_stagnation_its N: stop Newton when ||R
 PetscReal  accept_reduction=1.0; /* -accept_reduction r: a step whose SNES did not converge keeps its last Newton iterate
                                     if ||R_end|| < r*||R_start|| (default 1: any decrease); otherwise the step is
                                     rolled back to its start state. 0 = always roll back. */
+PetscInt   adaptive_substeps=0;  /* -adaptive_substeps L (quasi-static, -disable_fdyn 1): a step whose SNES did not converge
+                                    is redone from its start state in substeps of the time (hence gamma) increment, first
+                                    dt/2, halved on failure down to dt/2^L, doubled again after a success. If the smallest
+                                    substep fails, the original attempt is kept or rolled back as before. */
+extern PetscReal t_solve;        /* active_strain.c: >= 0 overrides ti*dt in gamma(t) (set during substeps) */
 PetscInt   rect_plate_nitti=0, rect_plate_fix_z=0, rect_plate_pins=0, lv_base_tangent_pins=0; /* Nitti et al. 2021 Sec 5.1 flat plate: edge 0 fixed in y, edge 3 fixed in x (load in bcs.c) */
 PetscInt   lv_fix_base=0;     /* apply the base-rim full clamp BC (Goktepe et al. 2014 convention) */
 PetscInt   lv_rigid_min=0;    /* apply the minimal 3-2-1 rigid-body scheme (6 DOFs across the 3
@@ -323,6 +328,33 @@ static PetscErrorCode DebugJacobianColumn(SNES snes, FE *fem)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* -adaptive_substeps: one solve from the initial guess U (overwritten with the last Newton iterate), with the
+ * same SNES setup as the time loop. Returns the converged reason and ||R|| at the first and last iterate. */
+static PetscErrorCode SolveSubstep_(FE *fem, Vec U, SNESConvergedReason *reason, PetscReal *f0, PetscReal *fend)
+{
+  SNES snes; Mat J; PetscReal *hist = NULL; PetscInt nh = 0;
+  PetscFunctionBeginUser;
+  PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
+  PetscCall(SNESSetFunction(snes, fem->Res, FormFunctionFEM, (void *)fem));
+  PetscCall(SNESAppendOptionsPrefix(snes, "fem_"));
+  PetscCall(MatCreateSNESMF(snes, &J));
+  PetscCall(SNESSetJacobian(snes, J, J, NULL, (void *)fem));
+  if (fem_jac_pc) {
+    if (!jacpc_ready) { PetscCall(FEM_JacPCCreate(fem, &jacpc)); jacpc_ready = PETSC_TRUE; }
+    PetscCall(FEM_JacPCAttach(snes, J, &jacpc));
+  }
+  PetscCall(SNESSetFromOptions(snes));
+  PetscCall(SNESSetConvergenceHistory(snes, snes_hist, NULL, SNES_HIST_MAX, PETSC_TRUE));
+  if (snes_stagnation_its > 0) PetscCall(SNESSetConvergenceTest(snes, SNESConvergedStagnation, NULL, NULL));
+  if (monitor_residual && res_log_fp) PetscCall(SNESMonitorSet(snes, ResidualMonitor, NULL, NULL));
+  PetscCall(SNESSolve(snes, NULL, U));
+  PetscCall(SNESGetConvergedReason(snes, reason));
+  PetscCall(SNESGetConvergenceHistory(snes, &hist, NULL, &nh));
+  *f0 = (nh > 0) ? hist[0] : 0.0; *fend = (nh > 0) ? hist[nh - 1] : 0.0;
+  PetscCall(SNESDestroy(&snes)); PetscCall(MatDestroy(&J));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 int main(int argc, char **argv)
 {
   /* Pass "control.dat" as the options file so PETSc loads it BEFORE argv.
@@ -380,6 +412,7 @@ int main(int argc, char **argv)
   }
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-snes_stagnation_its", &snes_stagnation_its, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-accept_reduction", &accept_reduction, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-adaptive_substeps", &adaptive_substeps, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-newmark_gamma", &newmark_gamma, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &rect_plate_nitti, PETSC_NULL);
@@ -743,6 +776,40 @@ int main(int argc, char **argv)
 	          PetscReal *hist = NULL; PetscInt nhist = 0;
 	          SNESGetConvergenceHistory(snes, &hist, NULL, &nhist);
 	          PetscReal f0 = (nhist > 0) ? hist[0] : 0.0, fend = (nhist > 0) ? hist[nhist - 1] : 0.0;
+	          /* -adaptive_substeps: redo a failed step in smaller time increments from its start state */
+	          if (reason < 0 && adaptive_substeps > 0) {
+	            PetscCheck(disable_fdyn, PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP, "-adaptive_substeps is quasi-static only: needs -disable_fdyn 1");
+	            Vec Ufirst, Xs;                  /* the original attempt (fallback) and the state at the substep start */
+	            VecDuplicate(U, &Ufirst); VecCopy(U, Ufirst);
+	            VecDuplicate(U, &Xs); VecCopy(Xstart, Xs);
+	            const PetscReal t1 = ti * dt, hmin = dt / PetscPowInt(2, adaptive_substeps);
+	            PetscReal t = (ti - 1) * dt, h = 0.5 * dt, a0, a1;
+	            PetscInt nsub = 0, nfail = 0;
+	            SNESConvergedReason r;
+	            while (t < t1 - 1e-9 * dt) {
+	              h = PetscMin(h, t1 - t);
+	              t_solve = t + h;
+	              VecCopy(Xs, U);
+	              ierr = SolveSubstep_(&fem[ibi], U, &r, &a0, &a1); CHKERRQ(ierr);
+	              nsub++;
+	              PetscPrintf(PETSC_COMM_WORLD, "[substep] step=%d t=%.6g h=dt/%.4g: %s (reason=%d) ||R|| %.3e -> %.3e\n",
+	                          (int)ti, (double)t_solve, (double)(dt / h), r >= 0 ? "converged" : "FAILED", (int)r, (double)a0, (double)a1);
+	              if (r >= 0) { VecCopy(U, Xs); t += h; h *= 2.0; }
+	              else if (h > hmin * (1.0 + 1e-9)) { nfail++; h *= 0.5; }
+	              else { nfail++; break; }
+	            }
+	            t_solve = -1.0;
+	            if (t >= t1 - 1e-9 * dt) {
+	              VecCopy(Xs, U); reason = SNES_CONVERGED_FNORM_RELATIVE;
+	              PetscPrintf(PETSC_COMM_WORLD, "[step] step=%d converged by adaptive substeps: %d solves (%d failed)\n",
+	                          (int)ti, (int)nsub, (int)nfail);
+	            } else {
+	              VecCopy(Ufirst, U);
+	              PetscPrintf(PETSC_COMM_WORLD, "[step] step=%d adaptive substeps gave up at t=%.6g (h = dt/%.4g failed): original attempt used\n",
+	                          (int)ti, (double)t, (double)(dt / h));
+	            }
+	            VecDestroy(&Ufirst); VecDestroy(&Xs);
+	          }
 	          PetscBool keep = (PetscBool)(reason >= 0 || (nhist > 1 && fend < accept_reduction * f0));
 	          if (reason < 0) {
 	            PetscPrintf(PETSC_COMM_WORLD, "[step] step=%d not converged (reason=%d): ||R|| %.3e -> %.3e (reduction %.2e): %s\n",
