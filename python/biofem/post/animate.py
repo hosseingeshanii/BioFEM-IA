@@ -7,6 +7,7 @@ with the reference shape as a grey wireframe, coloured by |u| (cm) or the wall t
 nonlinear solve did not converge are marked. Rendering uses pvpython (ParaView).
 Writes <out>.gif, <out>.png (APNG) and <out>_peak.png (frame with the largest mean gamma).
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -110,7 +111,9 @@ def cmd_animate(args):
 
         # 2. render with ParaView
         field = "u" if args.field == "u" else "h_ratio"
-        r = subprocess.run([_pvpython(), str(RENDER_SCRIPT), str(work), str(work / "png"), field,
+        # no X display (ssh / batch node): render offscreen, else VTK's X interactor segfaults
+        pv = [_pvpython()] + ([] if os.environ.get("DISPLAY") else ["--force-offscreen-rendering"])
+        r = subprocess.run(pv + [str(RENDER_SCRIPT), str(work), str(work / "png"), field,
                             str(vmin), str(vmax), ",".join(views)], capture_output=True, text=True)
         if r.returncode != 0:
             sys.exit("error: pvpython failed:\n" + r.stderr[-2000:])
