@@ -79,7 +79,10 @@ def cmd_animate(args):
         bad_steps = {st["step"] for st in parse_solver_log(log) if st["converged"] is False}
     vol = read_lv_volume(out_path)
 
-    vmin, vmax = (float(x) for x in args.range.split(","))
+    auto_range = args.range.strip().lower() == "auto"
+    if not auto_range:
+        vmin, vmax = (float(x) for x in args.range.split(","))
+    fmin, fmax = np.inf, -np.inf     # range of the coloured field over all frames (for --range auto)
     views = [v.strip() for v in args.views.split(",") if v.strip()]
     for v in views:
         if v not in ("side", "base"):
@@ -101,6 +104,9 @@ def cmd_animate(args):
                 fields["h_ratio"] = v.point_data["thickness"] / h0
                 hr = float(fields["h_ratio"].mean())
             _write_vtk(work / f"in_{k:06d}.vtk", X, v.cells, fields)
+            fld = fields.get("u" if args.field == "u" else "h_ratio")
+            if fld is not None:
+                fmin, fmax = min(fmin, float(fld.min())), max(fmax, float(fld.max()))
             g = None
             if k in surf:
                 gv = VTK(surf[k]).cell_data.get("gamma")
@@ -108,6 +114,18 @@ def cmd_animate(args):
             ti = file_step(source, k)
             info[k] = dict(t=max(ti, 0) * dt, step=ti, gamma=g, h=hr,
                            V=vol[k][1] * s ** 3 if k in vol else None)
+
+        if auto_range:   # 0..max |u| (or min..max h/h0) over all frames, rounded outward to 2 significant digits
+            def _nice(x, up):
+                if x == 0 or not np.isfinite(x):
+                    return 0.0
+                e = 10.0 ** (np.floor(np.log10(abs(x))) - 1)
+                return (np.ceil(x / e) if up else np.floor(x / e)) * e
+            vmin = 0.0 if args.field == "u" else _nice(fmin, False)
+            vmax = _nice(fmax, True)
+            if vmax <= vmin:
+                vmax = vmin + 1e-6
+            print(f"[biofem] --range auto -> {vmin:g},{vmax:g}")
 
         # 2. render with ParaView
         field = "u" if args.field == "u" else "h_ratio"

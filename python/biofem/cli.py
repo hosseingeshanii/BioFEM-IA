@@ -205,7 +205,8 @@ Run:
     p_an.add_argument("--out-dir", default="", help="output subdirectory (default: -out_dir in control.dat, else output)")
     p_an.add_argument("--source", default="auto", choices=["auto", "shell3d", "surface"], help="frame files (default: shell3d if present)")
     p_an.add_argument("--field", default="u", choices=["u", "h_ratio"], help="colour: |u| in cm, or wall thickness ratio h/h0 (shell3d)")
-    p_an.add_argument("--range", default="0,1.5", help="colour range vmin,vmax (default: 0,1.5)")
+    p_an.add_argument("--range", default="0,1.5",
+                      help="colour range vmin,vmax, or 'auto' (0..max |u| / min..max h/h0 over all frames) (default: 0,1.5)")
     p_an.add_argument("--views", default="side,base", help="comma list of side, base (default: both)")
     p_an.add_argument("--solver-unit", default="m", choices=["m", "cm", "mm"], help="solver length unit (default: m)")
     p_an.add_argument("--every", type=int, default=1, help="use every N-th frame (default: 1)")
