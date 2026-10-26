@@ -2357,6 +2357,23 @@ static PetscErrorCode ElemHOStress_(FE *fem, PetscInt ec)
         ead->Se[qp].Cont[i][j] = SW[i][j] - pr * Je * ead->Ce_inv[qp].Cont[i][j];
       }
 
+    /* -debug_ho_elem <ec>: full state of this qp for an outside check (pezzuto_lv/checks/ho_code_check.py) */
+    {
+      PetscInt dbg = -1;
+      PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-debug_ho_elem", &dbg, PETSC_NULL);
+      if (dbg == ec) {
+        const PetscReal delay = fem->ibm->activation_delay ? fem->ibm->activation_delay[ec] : 0.0;
+        const PetscReal gam = GammaOfTimeDelayed(&fem->act_data.muscle_act_params, delay) * fem->ibm->gamma_scale[ec];
+        PetscPrintf(PETSC_COMM_SELF, "[HOdbg] ec=%d qp=%d gamma=%.17g fib=%.17g,%.17g,%.17g", (int)ec, (int)qp, (double)gam, (double)fc[0], (double)fc[1], (double)fc[2]);
+        for (PetscInt k = 0; k < 3; k++)
+          PetscPrintf(PETSC_COMM_SELF, " G%d=%.17g,%.17g,%.17g", (int)k, (double)ead->g0[qp].Cov[k].x, (double)ead->g0[qp].Cov[k].y, (double)ead->g0[qp].Cov[k].z);
+        for (PetscInt k = 0; k < 3; k++)
+          PetscPrintf(PETSC_COMM_SELF, " g%d=%.17g,%.17g,%.17g", (int)k, (double)ead->g[qp].Cov[k].x, (double)ead->g[qp].Cov[k].y, (double)ead->g[qp].Cov[k].z);
+        PetscPrintf(PETSC_COMM_SELF, " S=%.17g,%.17g,%.17g,%.17g p=%.17g C33=%.17g\n", (double)ead->S[qp].Cont[0][0], (double)ead->S[qp].Cont[1][1],
+                    (double)ead->S[qp].Cont[0][1], (double)ead->S[qp].Cont[2][2], (double)pr, (double)ead->C[qp].Cov[2][2]);
+      }
+    }
+
     if (ec == 0 && qp == 0) {
       static PetscInt last_ti = -1;
       if (ti != last_ti) {
