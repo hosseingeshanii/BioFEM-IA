@@ -148,7 +148,8 @@ PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi) {
   for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->activation_delay[i] = 0.0;
 
   PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->thickness));
-  for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->thickness[i] = h0;
+  PetscMalloc(ibm->n_elmt*sizeof(PetscReal), &(ibm->h0_e));
+  for (PetscInt i = 0; i < ibm->n_elmt; i++) ibm->thickness[i] = ibm->h0_e[i] = h0;
 
   ibm->n_apex_pin = 0;
 
@@ -988,7 +989,7 @@ PetscErrorCode Output(FE *fem, PetscInt ti, PetscInt ibi, const char *out_dir) {
     PetscFPrintf(PETSC_COMM_WORLD, f,  "SCALARS lambda3 float\n");
     PetscFPrintf(PETSC_COMM_WORLD, f,  "LOOKUP_TABLE default\n");
     for (i=0; i<ibm->n_elmt; i++) {
-      PetscFPrintf(PETSC_COMM_WORLD, f, "%.8f \n", ibm->thickness[i] / h0);
+      PetscFPrintf(PETSC_COMM_WORLD, f, "%.8f \n", ibm->thickness[i] / ibm->h0_e[i]);
     }
   }
 

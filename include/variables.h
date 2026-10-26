@@ -60,6 +60,8 @@ typedef struct {
   PetscReal      *activation_delay; /* per-element activation-wavefront delay [same time units as
                                        -dt], 0.0 = instantaneous everywhere (default). See
                                        -lv_gamma_wave in lv_geometry_unstructured.c. */
+  PetscReal      *h0_e;         /* per-element REFERENCE wall thickness (solver units). = h0 everywhere, unless the
+                                  * LV loader reads -lv_nodal_file (prolate wall: h(mu), element = mean of its 3 nodes). */
   PetscReal      *thickness;    /* per-element current wall thickness, persists across timesteps.
                                   * Initialized to h0, updated once per CONVERGED timestep (not per
                                   * Newton iteration) via thickness *= C33 -- see

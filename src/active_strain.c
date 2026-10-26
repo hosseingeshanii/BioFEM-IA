@@ -982,7 +982,7 @@ PetscErrorCode ElemUpdateG(FE *fem, PetscInt ec)
   PetscCheck(ead->geom0,   PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,  "ead->geom0 is NULL (need reference midsurface cache)");
 
   /* thickness half-scale */
-  const PetscReal hhalf = 0.5 * h0;
+  const PetscReal hhalf = 0.5 * fem->ibm->h0_e[ec];   /* reference thickness of this element */
 
   /* -------- CURRENT midsurface data -------- */
   const SubdivGeomQP *Gc = &ead->geom[0];   /* current midsurface */
@@ -2029,8 +2029,8 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out)
 
   /* Convenience scalars */
   PetscReal A0 = ibm->dA0[ec];
-  const PetscReal half_h0 = 0.5 * h0;
-  const PetscReal pref0   = 0.5 * h0 * A0; 
+  const PetscReal half_h0 = 0.5 * ibm->h0_e[ec];
+  const PetscReal pref0   = 0.5 * ibm->h0_e[ec] * A0; 
 
   /* LV apex cap elements are topologically irregular, but their subdivision
      geometry is intentionally replaced with a flat triangle in
@@ -2612,7 +2612,7 @@ PetscErrorCode UpdateElementThickness(FE *fem)
     for (PetscInt qp = 0; qp < n_qp; qp++) sum_C33 += ead->C[qp].Cov[2][2];
     PetscReal C33 = (n_qp > 0) ? sum_C33 / (PetscReal)n_qp : 1.0;
     PetscReal lambda3 = (C33 > 0.0) ? PetscSqrtReal(C33) : 1.0;
-    local_thickness[ec] = h0 * lambda3;
+    local_thickness[ec] = ibm->h0_e[ec] * lambda3;
   }
 
   PetscCallMPI(MPIU_Allreduce(local_thickness, ibm->thickness, ibm->n_elmt, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD));

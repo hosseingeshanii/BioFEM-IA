@@ -25,7 +25,7 @@ extern PetscInt BoundaryGhostCount(PetscInt, const PetscInt *, const PetscInt *)
 #include <stdio.h>
 
 extern PetscInt   dof;
-extern PetscReal  E, mu;
+extern PetscReal  E, mu, h0;
 
 extern PetscErrorCode Create(IBMNodes *ibm, FE *fem, PetscInt ibi);
 extern PetscErrorCode IrrVer(IBMNodes *ibm);
@@ -201,6 +201,34 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
 
   fclose(fd);
 
+  /* -lv_nodal_file <path> (optional, written with the mesh by pz_prolate_mesh.py): per node "h nx ny nz" in
+   * mesh units -- the reference wall thickness and the exact outward unit normal of a non-ellipsoidal midsurface
+   * (Pezzuto's prolate wall, h = h(mu)). Then each element gets h0_e = mean of its 3 nodal h, and the fiber frame's
+   * e_n = normalized sum of its 3 nodal normals, instead of the uniform -h0 and the -lv_a/-lv_b ellipsoid normal. */
+  PetscReal *nod = NULL;   /* 4 per node: h (solver units), nx, ny, nz */
+  {
+    char      nodal_path[512];
+    PetscBool has_nodal = PETSC_FALSE;
+    PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-lv_nodal_file", nodal_path, sizeof(nodal_path), &has_nodal);
+    if (has_nodal) {
+      PetscCheck(char_length_x == char_length_y && char_length_y == char_length_z, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG,
+                 "-lv_nodal_file needs isotropic -char_length_x/y/z (thickness is scaled by one length)");
+      FILE *fn = fopen(nodal_path, "r");
+      PetscCheck(fn, PETSC_COMM_WORLD, PETSC_ERR_FILE_OPEN, "Cannot open -lv_nodal_file '%s'", nodal_path);
+      PetscInt nv_file;
+      PetscCheck(fscanf(fn, "%d", &nv_file) == 1 && nv_file == n_v, PETSC_COMM_WORLD, PETSC_ERR_FILE_READ,
+                 "-lv_nodal_file: node count does not match the mesh (%d)", (int)n_v);
+      ierr = PetscMalloc1(4*n_v, &nod); CHKERRQ(ierr);
+      for (PetscInt i = 0; i < n_v; i++) {
+        double h, nx, ny, nz;
+        PetscCheck(fscanf(fn, "%lf %lf %lf %lf", &h, &nx, &ny, &nz) == 4, PETSC_COMM_WORLD, PETSC_ERR_FILE_READ,
+                   "-lv_nodal_file: bad line for node %d", (int)i);
+        nod[4*i] = h / char_length_x; nod[4*i+1] = nx; nod[4*i+2] = ny; nod[4*i+3] = nz;
+      }
+      fclose(fn);
+    }
+  }
+
   /* ----------------------------------------------------------------
    * bnodes[]/n_bnodes[]: n_edge separately-ordered boundary ring walks
    * (base rim for LV, hole+equator for the hemisphere -- see
@@ -316,6 +344,12 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
 
     struct Cmpnts grad_F = {c.x / (p->b * p->b), c.y / (p->b * p->b), c.z / (p->a * p->a)};
     struct Cmpnts e_n = UNIT(grad_F);
+    if (nod) {   /* exact midsurface normal and prolate wall thickness from the nodal file */
+      struct Cmpnts ns = {nod[4*n1e+1] + nod[4*n2e+1] + nod[4*n3e+1], nod[4*n1e+2] + nod[4*n2e+2] + nod[4*n3e+2],
+                          nod[4*n1e+3] + nod[4*n2e+3] + nod[4*n3e+3]};
+      e_n = UNIT(ns);
+      ibm->h0_e[ec] = ibm->thickness[ec] = (nod[4*n1e] + nod[4*n2e] + nod[4*n3e]) / 3.0;
+    }
 
     PetscReal d = DOT(e_down, e_n);
     struct Cmpnts e_l_raw = {e_down.x - d*e_n.x, e_down.y - d*e_n.y, e_down.z - d*e_n.z};
@@ -403,6 +437,17 @@ PetscErrorCode CreateLVMeshUnstructured(IBMNodes *ibm, FE *fem, const LVParams *
       theta_pin * 180.0 / PETSC_PI,
       apex_taper_on ? "on" : "off", theta_taper_width * 180.0 / PETSC_PI,
       base_taper_on ? "on" : "off", base_taper_width * 180.0 / PETSC_PI);
+  }
+
+  if (nod) {
+    PetscReal hmin = PETSC_MAX_REAL, hmax = 0.0;
+    for (PetscInt ec = 0; ec < n_elmt; ec++) {
+      hmin = PetscMin(hmin, ibm->h0_e[ec]); hmax = PetscMax(hmax, ibm->h0_e[ec]);
+    }
+    PetscPrintf(PETSC_COMM_WORLD, "[lv-unstruct] -lv_nodal_file: element reference thickness h0_e %.5g .. %.5g "
+                "(mean of nodal h; fiber-frame normal from nodal normals; -h0 %.5g not used for the wall)\n",
+                (double)hmin, (double)hmax, (double)h0);
+    ierr = PetscFree(nod); CHKERRQ(ierr);
   }
 
   PetscPrintf(PETSC_COMM_WORLD, "[lv-unstruct] subdivision surface topology (IrrVer + Patch)\n");

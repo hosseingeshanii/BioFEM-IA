@@ -1800,7 +1800,7 @@ PetscErrorCode Init(FE *fem, PetscInt ibi) {
 
   for (nv=0; nv<ibm->n_v; nv++)  ibm->m[nv] = 0.;
   for (ec=0; ec<ibm->n_elmt; ec++) {
-    mass = 1./3.*rho*ibm->dA0[ec]*h0;
+    mass = 1./3.*rho*ibm->dA0[ec]*ibm->h0_e[ec];
     n1e = ibm->nv1[ec];  n2e = ibm->nv2[ec];  n3e = ibm->nv3[ec];
     ibm->m[n1e] += mass;  ibm->m[n2e] += mass;  ibm->m[n3e] += mass;
   }
