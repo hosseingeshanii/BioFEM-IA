@@ -24,6 +24,7 @@
 
 extern PetscInt dof;
 extern PetscInt mean_bc_skip;
+extern PetscInt lv_mean_bc;
 extern PetscErrorCode FormFunctionFEM(SNES snes, Vec x, Vec R, void *ctx);
 
 /* Real nodes an element's residual contribution depends on (its "virtual" patch list). */
@@ -155,12 +156,46 @@ static PetscErrorCode FEM_JacPCCompute_(SNES snes, Vec x, Mat J, Mat P, void *ct
   PetscLogDouble t0, t1;
   PetscCall(PetscTime(&t0));
   mean_bc_skip = 1;      /* the mean-BC penalty couples all DOFs: keep it out of the colored P */
-  PetscCall(SNESComputeJacobianDefaultColor(snes, x, J, P, jp->fdc));
+  {
+    /* The FD columns are (F(x + h e) - F(x))/h. The perturbed F are evaluated with the penalty skipped, so the base
+     * F(x) must be too: SNES's own F(x) includes the penalty, which is nonzero once the means are (slightly) nonzero
+     * after the first Newton update, and would add penalty(x)/h to every column of P. */
+    Vec xc, F0; void *fctx; PetscErrorCode (*ff)(void);
+    PetscCall(VecDuplicate(x, &xc)); PetscCall(VecCopy(x, xc)); PetscCall(VecDuplicate(x, &F0));
+    PetscCall(MatFDColoringGetFunction(jp->fdc, &ff, &fctx));
+    PetscCall(FormFunctionFEM(snes, xc, F0, fctx));
+    PetscCall(MatFDColoringSetF(jp->fdc, F0));
+    PetscCall(MatFDColoringApply(P, jp->fdc, xc, snes));
+    PetscCall(VecDestroy(&xc)); PetscCall(VecDestroy(&F0));
+    if (J != P) { PetscCall(MatAssemblyBegin(J, MAT_FINAL_ASSEMBLY)); PetscCall(MatAssemblyEnd(J, MAT_FINAL_ASSEMBLY)); }   /* sets the MFFD base point */
+  }
   mean_bc_skip = 0;
   PetscCall(MatSetOption(P, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE));
   for (PetscInt i = 0; i < jp->n_ghost_rows; i++) PetscCall(MatSetValue(P, jp->ghost_rows[i], jp->ghost_rows[i], 1.0, INSERT_VALUES));
   PetscCall(MatAssemblyBegin(P, MAT_FINAL_ASSEMBLY));
   PetscCall(MatAssemblyEnd(P, MAT_FINAL_ASSEMBLY));
+  /* -lv_mean_bc: the penalty is left out of the colored P, which is then singular in the 3 in-plane rigid modes
+   * (x, y translation, rotation about z). A tiny shift on the x, y diagonal (-jacpc_rigid_shift_rel times the mean
+   * |diagonal|, default 1e-6) makes P invertible without changing it on the elastic modes; the 3 rigid modes become
+   * outlier eigenvalues of P^-1 J that GMRES removes in a few iterations. (Adding the penalty's own k*I instead is
+   * wrong: k = 352 is ~35x the small-strain cross-fiber membrane stiffness of HO, ~3 a h.) Dofs are node-interleaved. */
+  if (lv_mean_bc) {
+    Vec dk; PetscInt lo, hi; PetscScalar *a; PetscReal rel = 1e-6, sum = 0.0, cnt = 0.0, shift;
+    PetscCall(PetscOptionsGetReal(NULL, NULL, "-jacpc_rigid_shift_rel", &rel, NULL));
+    PetscCall(MatCreateVecs(P, &dk, NULL));
+    PetscCall(MatGetDiagonal(P, dk));
+    PetscCall(VecGetOwnershipRange(dk, &lo, &hi));
+    PetscCall(VecGetArray(dk, &a));
+    for (PetscInt r = lo; r < hi; r++) if (r % dof < 2) { sum += PetscAbsScalar(a[r - lo]); cnt += 1.0; }
+    PetscCallMPI(MPI_Allreduce(MPI_IN_PLACE, &sum, 1, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD));
+    PetscCallMPI(MPI_Allreduce(MPI_IN_PLACE, &cnt, 1, MPIU_REAL, MPI_SUM, PETSC_COMM_WORLD));
+    shift = rel * sum / PetscMax(cnt, 1.0);
+    for (PetscInt r = lo; r < hi; r++) a[r - lo] = (r % dof < 2) ? shift : 0.0;
+    PetscCall(VecRestoreArray(dk, &a));
+    PetscCall(MatDiagonalSet(P, dk, ADD_VALUES));
+    PetscCall(VecDestroy(&dk));
+    if (jp->n_builds == 0) PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[jacpc] mean BC: rigid-mode shift %.3e on the x,y diagonal (rel %.1e of mean |diag|)\n", (double)shift, (double)rel));
+  }
   PetscCall(PetscTime(&t1));
   jp->n_builds++; jp->t_build += t1 - t0;
   PetscFunctionReturn(PETSC_SUCCESS);
