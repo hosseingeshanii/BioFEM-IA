@@ -283,9 +283,35 @@ PetscErrorCode SetGaussianQuadrature(FE *fem)
         fem->act_data.w[2] = 0.5688888888888889;
         break;
 
+    case 6:
+        fem->act_data.theta[0] = -0.9324695142031521;
+        fem->act_data.theta[1] = -0.6612093864662645;
+        fem->act_data.theta[2] = -0.2386191860831969;
+        fem->act_data.theta[3] =  0.2386191860831969;
+        fem->act_data.theta[4] =  0.6612093864662645;
+        fem->act_data.theta[5] =  0.9324695142031521;
+        fem->act_data.w[0] = fem->act_data.w[5] = 0.1713244923791704;
+        fem->act_data.w[1] = fem->act_data.w[4] = 0.3607615730481386;
+        fem->act_data.w[2] = fem->act_data.w[3] = 0.4679139345726910;
+        break;
+
+    case 7:
+        fem->act_data.theta[0] = -0.9491079123427585;
+        fem->act_data.theta[1] = -0.7415311855993945;
+        fem->act_data.theta[2] = -0.4058451513773972;
+        fem->act_data.theta[3] =  0.0;
+        fem->act_data.theta[4] =  0.4058451513773972;
+        fem->act_data.theta[5] =  0.7415311855993945;
+        fem->act_data.theta[6] =  0.9491079123427585;
+        fem->act_data.w[0] = fem->act_data.w[6] = 0.1294849661688697;
+        fem->act_data.w[1] = fem->act_data.w[5] = 0.2797053914892766;
+        fem->act_data.w[2] = fem->act_data.w[4] = 0.3818300505051189;
+        fem->act_data.w[3] = 0.4179591836734694;
+        break;
+
     default:
         SETERRQ(PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE,
-                "Number of Gauss points must be between 1 and 5");
+                "Number of Gauss points must be between 1 and 7");
     }
 
     PetscFunctionReturn(0);
@@ -2357,6 +2383,25 @@ static PetscErrorCode ElemHOStress_(FE *fem, PetscInt ec)
         ead->S[qp].Cont[i][j]  = Sb[i][j] - pr * ead->C_inv[qp].Cont[i][j];
         ead->Se[qp].Cont[i][j] = SW[i][j] - pr * Je * ead->Ce_inv[qp].Cont[i][j];
       }
+
+    /* -debug_ho_nan 1: report quadrature points whose stress is not finite (at most 20 lines per process), with
+     * where they are (element, thickness position theta, reference centroid height z0) and what made them blow up. */
+    {
+      static PetscInt dbg_nan = -1, n_printed = 0;
+      if (dbg_nan < 0) { dbg_nan = 0; PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-debug_ho_nan", &dbg_nan, PETSC_NULL); }
+      PetscBool bad = PETSC_FALSE;
+      for (PetscInt i = 0; i < 3; i++) for (PetscInt j = 0; j < 3; j++) if (!PetscIsNormalReal(ead->S[qp].Cont[i][j]) && ead->S[qp].Cont[i][j] != 0.0) bad = PETSC_TRUE;
+      if (dbg_nan && bad && n_printed < 20) {
+        IBMNodes *ib = fem->ibm;
+        const PetscReal z0 = (ib->z_bp0[ib->nv1[ec]] + ib->z_bp0[ib->nv2[ec]] + ib->z_bp0[ib->nv3[ec]]) / 3.0;
+        const PetscReal detg = ead->gm[qp].Cov[0][0]*ead->gm[qp].Cov[1][1] - ead->gm[qp].Cov[0][1]*ead->gm[qp].Cov[1][0];
+        const PetscReal detG = ead->gm0[qp].Cov[0][0]*ead->gm0[qp].Cov[1][1] - ead->gm0[qp].Cov[0][1]*ead->gm0[qp].Cov[1][0];
+        PetscPrintf(PETSC_COMM_SELF, "[HOnan] ti=%d ec=%d qp=%d theta=%+.3f z0=%.4e  I1=%.4e I4f=%.4e I4s=%.4e I8=%.2e C33=%.4e Jo=sqrt(detg/detG)=%.4e p=%.3e S11=%.3e\n",
+                    (int)ti, (int)ec, (int)qp, (double)PetscRealPart(fem->act_data.theta[qp]), (double)z0, (double)I1, (double)I4f, (double)I4s, (double)I8,
+                    (double)ead->C[qp].Cov[2][2], (double)PetscSqrtReal(PetscMax(detg, 0.0) / detG), (double)pr, (double)ead->S[qp].Cont[0][0]);
+        n_printed++;
+      }
+    }
 
     /* -debug_ho_elem <ec>: full state of this qp for an outside check (pezzuto_lv/checks/ho_code_check.py) */
     {
