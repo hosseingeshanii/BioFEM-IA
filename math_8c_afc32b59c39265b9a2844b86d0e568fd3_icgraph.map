@@ -1,0 +1,22 @@
+<map id="DET3x3" name="DET3x3">
+<area shape="rect" id="Node000001" title=" " alt="" coords="884,84,955,112"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#a4456f61d7effcb0451f1890e5bab63c6" title="Compute elastic second Piola&#45;Kirchhoff stress for one element." alt="" coords="697,5,818,33"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="884,75,835,48,806,36,806,31,837,43,889,76"/>
+<area shape="rect" id="Node000013" href="$active__strain_8c.html#af11cd9885b42c34a06fcbb8c5f4b21b1" title="Compute elastic tangent tensor for one element." alt="" coords="679,57,836,85"/>
+<area shape="poly" id="edge6_Node000001_Node000013" title=" " alt="" coords="866,90,836,87,837,82,871,90"/>
+<area shape="rect" id="Node000014" href="$active__strain_8c.html#ab61f294fec1b07cd4ad4edefffe66536" title=" " alt="" coords="697,109,818,137"/>
+<area shape="poly" id="edge8_Node000001_Node000014" title=" " alt="" coords="871,105,819,116,818,111,866,106"/>
+<area shape="rect" id="Node000015" href="$active__strain_8c.html#a9e8e9e018293087ec6b0ce58ce922403" title="Update through&#45;thickness C33 contribution for one element." alt="" coords="704,161,811,189"/>
+<area shape="poly" id="edge10_Node000001_Node000015" title=" " alt="" coords="888,120,837,151,807,163,805,158,835,146,883,121"/>
+<area shape="rect" id="Node000003" href="$active__strain_8c.html#a3017cdcf59a9d394ac18948cec6e94cf" title="Solve local thickness equation (C33) for one element." alt="" coords="515,84,631,112"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="699,38,680,48,602,86,600,81,678,43,694,39"/>
+<area shape="rect" id="Node000004" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="339,84,467,112"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="497,98,468,100,468,95,502,98"/>
+<area shape="rect" id="Node000005" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="191,84,291,112"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="321,98,292,100,291,95,326,97"/>
+<area shape="rect" id="Node000006" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="5,84,143,112"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="173,99,143,100,142,95,178,97"/>
+<area shape="poly" id="edge7_Node000013_Node000003" title=" " alt="" coords="661,85,632,92,631,87,666,84"/>
+<area shape="poly" id="edge9_Node000014_Node000003" title=" " alt="" coords="678,113,631,108,631,103,684,113"/>
+<area shape="poly" id="edge11_Node000015_Node000003" title=" " alt="" coords="694,155,678,151,601,115,602,110,680,146,699,156"/>
+</map>

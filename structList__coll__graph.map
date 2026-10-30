@@ -1,0 +1,6 @@
+<map id="List" name="List">
+<area shape="rect" id="Node000001" title=" " alt="" coords="10,106,54,134"/>
+<area shape="rect" id="Node000002" href="$structnode.html" title=" " alt="" coords="5,5,59,33"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="34,48,35,106,29,105,30,50"/>
+<area shape="poly" id="edge2_Node000002_Node000002" title=" " alt="" coords="74,8,82,12,85,20,77,29,60,31,58,26,74,24,80,19,78,16,75,14"/>
+</map>

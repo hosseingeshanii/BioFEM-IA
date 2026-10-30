@@ -1,0 +1,36 @@
+<map id="ComputeMetricTensor" name="ComputeMetricTensor">
+<area shape="rect" id="Node000001" title=" " alt="" coords="1309,260,1472,288"/>
+<area shape="rect" id="Node000002" href="$active__strain_8c.html#a993ef27fda81bb402cba4aa14fa9b51a" title="Build current covariant/contravariant basis vectors for one element." alt="" coords="1149,260,1261,288"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="1291,274,1261,276,1261,271,1296,274"/>
+<area shape="rect" id="Node000003" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="973,184,1101,212"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="1156,253,1069,215,1070,210,1161,253"/>
+<area shape="rect" id="Node000012" href="$cuda__processes_8c.html#a627a27228923fbc3e63f0f4e1c5aa765" title=" " alt="" coords="781,260,925,288"/>
+<area shape="poly" id="edge14_Node000002_Node000012" title=" " alt="" coords="1131,274,925,276,925,271,1136,274"/>
+<area shape="rect" id="Node000013" href="$dmplex__geom_8c.html#a14490a5ebe1fce84a8ad0654ef0e798b" title="Synchronise remote coordinates and evaluate the geometry kernel for all local cells." alt="" coords="392,311,544,338"/>
+<area shape="poly" id="edge16_Node000002_Node000013" title=" " alt="" coords="1131,281,925,302,545,324,545,318,925,297,1136,281"/>
+<area shape="rect" id="Node000004" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="803,159,903,186"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="955,187,903,182,903,177,961,187"/>
+<area shape="rect" id="Node000005" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="595,133,733,161"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="785,164,733,159,733,154,790,163"/>
+<area shape="rect" id="Node000006" href="$main_8c.html#af99424d86bad4d4933f456e6f0b67498" title=" " alt="" coords="140,5,308,33"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="638,122,598,86,573,68,546,54,487,34,424,23,364,18,310,17,308,12,364,13,425,18,488,29,548,49,576,63,602,82,643,122"/>
+<area shape="rect" id="Node000007" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,209,60,237"/>
+<area shape="poly" id="edge12_Node000005_Node000007" title=" " alt="" coords="623,126,588,111,547,98,503,90,469,89,389,98,308,108,245,119,184,137,109,170,77,189,51,210,47,207,74,185,106,165,182,132,243,114,307,103,389,93,468,84,504,85,548,93,590,106,628,126"/>
+<area shape="rect" id="Node000008" href="$jacobian__pc_8c.html#a3ad2999d9e2cc7bf1095f8104c4c264f" title=" " alt="" coords="389,107,547,134"/>
+<area shape="poly" id="edge7_Node000005_Node000008" title=" " alt="" coords="578,136,548,134,548,129,583,135"/>
+<area shape="rect" id="Node000011" href="$jacobian__pc_8c.html#aea81246a8b8146dfe0d1550663405f05" title=" " alt="" coords="400,159,536,186"/>
+<area shape="poly" id="edge8_Node000005_Node000011" title=" " alt="" coords="577,159,537,166,535,161,583,157"/>
+<area shape="rect" id="Node000010" href="$main_8c.html#a055ede0f78afbc368a5be6e1e441512b" title=" " alt="" coords="166,209,282,237"/>
+<area shape="poly" id="edge13_Node000005_Node000010" title=" " alt="" coords="626,167,588,187,548,200,477,214,406,222,283,227,282,222,405,217,477,209,547,195,586,182,621,169"/>
+<area shape="poly" id="edge6_Node000006_Node000007" title=" " alt="" coords="124,41,109,53,93,71,79,91,58,135,45,177,38,209,33,208,40,176,53,133,74,88,89,67,106,49,127,37"/>
+<area shape="poly" id="edge9_Node000011_Node000007" title=" " alt="" coords="383,174,254,181,181,189,108,200,62,214,58,210,107,195,180,183,254,176,387,171"/>
+<area shape="poly" id="edge10_Node000011_Node000010" title=" " alt="" coords="383,191,284,214,282,209,388,188"/>
+<area shape="poly" id="edge11_Node000010_Node000007" title=" " alt="" coords="149,225,61,226,59,221,152,221"/>
+<area shape="poly" id="edge15_Node000012_Node000007" title=" " alt="" coords="763,279,637,286,472,285,290,275,197,265,107,251,61,237,60,232,108,246,198,260,290,270,472,280,637,281,768,279"/>
+<area shape="rect" id="Node000014" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="124,311,324,338"/>
+<area shape="poly" id="edge17_Node000013_Node000014" title=" " alt="" coords="374,325,325,327,325,322,379,324"/>
+<area shape="rect" id="Node000015" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="108,363,341,390"/>
+<area shape="poly" id="edge19_Node000013_Node000015" title=" " alt="" coords="387,342,293,365,292,359,382,343"/>
+<area shape="poly" id="edge18_Node000014_Node000007" title=" " alt="" coords="133,306,106,295,70,268,45,240,45,235,74,264,109,290,138,304"/>
+<area shape="poly" id="edge20_Node000015_Node000007" title=" " alt="" coords="114,355,106,352,79,325,59,294,37,240,39,235,64,292,83,322,109,348,119,356"/>
+</map>

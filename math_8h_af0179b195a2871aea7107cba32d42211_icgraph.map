@@ -1,0 +1,31 @@
+<map id="TRANS" name="TRANS">
+<area shape="rect" id="Node000001" title=" " alt="" coords="1285,81,1350,109"/>
+<area shape="rect" id="Node000002" href="$muscle__activation_8c.html#a4c5d08ae67f23baed5c8a45656a64f84" title=" " alt="" coords="1103,55,1237,82"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="1267,86,1237,83,1237,78,1272,87"/>
+<area shape="rect" id="Node000005" href="$active__strain_8c.html#ade5fbd2ac288952d9b05edaa3cfab167" title="Compute active deformation gradient for one element." alt="" coords="1105,107,1235,134"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="1272,103,1235,112,1235,107,1267,104"/>
+<area shape="rect" id="Node000003" href="$muscle__activation_8c.html#ac332e445f79d1bdc2c6cd1e00514021e" title=" " alt="" coords="942,55,1040,82"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="1085,69,1040,71,1040,66,1091,68"/>
+<area shape="rect" id="Node000004" href="$muscle__activation_8c.html#aad998374ae4f3ca2c8f14b4c4b2aaafd" title=" " alt="" coords="716,55,879,82"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="924,69,880,71,879,66,930,68"/>
+<area shape="rect" id="Node000006" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="927,107,1055,134"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="1087,121,1056,123,1055,118,1093,120"/>
+<area shape="rect" id="Node000007" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="747,107,848,134"/>
+<area shape="poly" id="edge6_Node000006_Node000007" title=" " alt="" coords="909,121,848,123,848,118,915,120"/>
+<area shape="rect" id="Node000008" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="530,107,668,134"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="729,121,668,123,668,118,734,120"/>
+<area shape="rect" id="Node000009" href="$main_8c.html#af99424d86bad4d4933f456e6f0b67498" title=" " alt="" coords="108,5,276,33"/>
+<area shape="poly" id="edge8_Node000008_Node000009" title=" " alt="" coords="565,97,527,75,481,54,430,39,376,30,277,22,276,16,377,25,431,34,483,49,529,70,570,98"/>
+<area shape="rect" id="Node000010" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,83,60,110"/>
+<area shape="poly" id="edge15_Node000008_Node000010" title=" " alt="" coords="526,103,482,98,359,90,238,89,61,97,60,92,237,84,359,84,483,93,531,103"/>
+<area shape="rect" id="Node000011" href="$jacobian__pc_8c.html#a3ad2999d9e2cc7bf1095f8104c4c264f" title=" " alt="" coords="324,107,482,134"/>
+<area shape="poly" id="edge10_Node000008_Node000011" title=" " alt="" coords="512,121,483,123,483,118,517,120"/>
+<area shape="rect" id="Node000014" href="$jacobian__pc_8c.html#aea81246a8b8146dfe0d1550663405f05" title=" " alt="" coords="336,159,471,186"/>
+<area shape="poly" id="edge11_Node000008_Node000014" title=" " alt="" coords="532,138,459,161,458,155,527,139"/>
+<area shape="rect" id="Node000013" href="$main_8c.html#a055ede0f78afbc368a5be6e1e441512b" title=" " alt="" coords="134,159,250,186"/>
+<area shape="poly" id="edge16_Node000008_Node000013" title=" " alt="" coords="574,144,533,176,509,190,483,200,451,208,417,212,351,210,289,202,239,190,239,184,290,196,351,205,417,206,450,203,482,195,507,185,530,172,569,145"/>
+<area shape="poly" id="edge9_Node000009_Node000010" title=" " alt="" coords="133,41,109,54,56,84,53,80,106,49,137,37"/>
+<area shape="poly" id="edge12_Node000014_Node000010" title=" " alt="" coords="319,158,60,105,60,99,321,153"/>
+<area shape="poly" id="edge13_Node000014_Node000013" title=" " alt="" coords="318,173,250,175,250,170,323,172"/>
+<area shape="poly" id="edge14_Node000013_Node000010" title=" " alt="" coords="132,153,106,143,56,114,56,108,109,138,137,152"/>
+</map>

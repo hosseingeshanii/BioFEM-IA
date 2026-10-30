@@ -1,0 +1,12 @@
+<map id="triple" name="triple">
+<area shape="rect" id="Node000001" title=" " alt="" coords="341,32,397,60"/>
+<area shape="rect" id="Node000002" href="$solid3d__ho_8c.html#ab95a2726a1598b2d81545d8c11ecb841" title=" " alt="" coords="216,32,293,60"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="323,46,294,48,294,43,329,46"/>
+<area shape="rect" id="Node000003" href="$solid3d_8c.html#a2f8b7bd2e9204e96f19f458568adb0be" title=" " alt="" coords="113,5,162,33"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="199,34,163,27,163,22,204,33"/>
+<area shape="rect" id="Node000005" href="$solid3d_8c.html#a4d9989a33d0ce408aa08313c5a184af6" title=" " alt="" coords="108,57,168,85"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="204,57,169,67,168,62,199,58"/>
+<area shape="rect" id="Node000004" href="$solid3d_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,32,60,60"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="96,31,61,42,59,37,100,27"/>
+<area shape="poly" id="edge5_Node000005_Node000004" title=" " alt="" coords="90,61,60,55,60,50,95,59"/>
+</map>

@@ -1,0 +1,34 @@
+<map id="FEM_DMPlexGeomSetup" name="FEM_DMPlexGeomSetup">
+<area shape="rect" id="Node000001" title="One&#45;time setup of the distributed DMPlex geometry context." alt="" coords="5,178,188,206"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#a25a289b6847656028b83d98388767fc5" title="Build a global table mapping each original vertex index to its owning MPI rank." alt="" coords="261,5,450,50"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="107,176,158,120,194,88,234,60,249,55,245,58,237,65,198,92,162,123,111,179"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#a661af262a984dd056c4489c06984eac8" title="Build the DMPlexPatchExchange SF for cross&#45;rank coordinate fetching." alt="" coords="240,74,470,102"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="117,175,169,143,235,112,263,104,259,108,237,117,172,148,121,179"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#ab02736f3446add6db615133986b8a51c" title="Distribute the serial DMPlex and return per&#45;rank original&#45;index arrays." alt="" coords="259,126,452,154"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="168,175,270,155,266,159,170,180"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#aa4423d1b5775f32ebd063753442784a2" title="Copy Loop subdivision patch stencil data from IBMNodes to a local layout." alt="" coords="255,178,456,206"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="187,189,242,190,237,193,189,194"/>
+<area shape="rect" id="Node000007" href="$active__strain_8c.html#ac93e65e44aa9af3d11c2165016210d87" title="Update reference midsurface geometry cache for one element." alt="" coords="259,230,452,258"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="169,203,270,225,265,228,169,209"/>
+<area shape="rect" id="Node000014" href="$dmplex__geom_8c.html#aa8f242260c80f04e57bb298c97a87fac" title=" " alt="" coords="241,282,470,310"/>
+<area shape="poly" id="edge16_Node000001_Node000014" title=" " alt="" coords="119,203,172,235,237,267,263,277,258,278,235,271,169,240,119,209"/>
+<area shape="rect" id="Node000015" href="$dmplex__geom_8c.html#a0e285c5152466ed0d16f3ccb265e2c99" title="Broadcast updated vertex coordinates from owning ranks to all ranks that need them." alt="" coords="236,334,475,362"/>
+<area shape="poly" id="edge17_Node000001_Node000015" title=" " alt="" coords="109,203,161,261,197,292,237,319,254,328,248,328,234,323,194,296,157,264,108,209"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#a7888018139fb6d8231505d5c8d4abbf9" title="Construct a serial DMPlex from the IBMNodes connectivity on rank 0." alt="" coords="558,126,706,154"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="452,137,545,139,539,140,453,142"/>
+<area shape="rect" id="Node000008" href="$active__strain_8c.html#a9ef026a24ded6fec7243fd82f49394c3" title=" " alt="" coords="523,221,740,266"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="452,241,510,243,505,244,452,246"/>
+<area shape="rect" id="Node000009" href="$math_8c.html#a7ef9263b0a3a10c2cd00bb4dc0059d70" title=" " alt="" coords="857,102,923,130"/>
+<area shape="poly" id="edge8_Node000008_Node000009" title=" " alt="" coords="661,218,717,179,787,140,845,124,840,126,789,145,720,183,663,223"/>
+<area shape="rect" id="Node000010" href="$math_8c.html#a9d60990d26296194c921d537ea26f3c7" title=" " alt="" coords="857,178,923,206"/>
+<area shape="poly" id="edge10_Node000008_Node000010" title=" " alt="" coords="740,219,845,201,840,202,741,224"/>
+<area shape="rect" id="Node000011" href="$math_8c.html#a870a70f4845a041458d9bdb0dd7aabd3" title=" " alt="" coords="865,230,915,258"/>
+<area shape="poly" id="edge12_Node000008_Node000011" title=" " alt="" coords="740,241,852,243,847,244,741,246"/>
+<area shape="rect" id="Node000012" href="$active__strain_8c.html#af8eb71852e7e9e1290f27656e66736fe" title=" " alt="" coords="788,281,992,326"/>
+<area shape="poly" id="edge13_Node000008_Node000012" title=" " alt="" coords="731,264,779,277,774,277,731,269"/>
+<area shape="rect" id="Node000013" href="$math_8c.html#ac616709995f2ae60c4308ffa328337d7" title=" " alt="" coords="863,374,917,402"/>
+<area shape="poly" id="edge14_Node000008_Node000013" title=" " alt="" coords="669,264,790,336,852,370,847,369,787,341,668,269"/>
+<area shape="poly" id="edge9_Node000009_Node000009" title=" " alt="" coords="854,105,840,97,842,85,859,78,890,75,915,77,932,81,941,89,938,99,934,95,936,91,930,86,915,82,890,80,860,83,846,89,845,95,859,106"/>
+<area shape="poly" id="edge11_Node000010_Node000010" title=" " alt="" coords="854,182,841,173,842,162,859,154,890,151,916,153,933,158,941,166,937,176,934,172,936,167,930,162,915,158,890,156,860,159,846,165,845,171,860,182"/>
+<area shape="poly" id="edge15_Node000013_Node000013" title=" " alt="" coords="860,380,843,372,839,365,841,359,857,350,890,347,919,349,936,355,941,366,932,376,929,372,936,365,932,360,917,355,890,352,859,355,845,362,844,365,846,368,866,381"/>
+</map>

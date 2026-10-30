@@ -1,0 +1,7 @@
+<map id="FEM_DMPlexGeomDestroy" name="FEM_DMPlexGeomDestroy">
+<area shape="rect" id="Node000001" title="Destroy the persistent DMPlex geometry context in fem&#45;&gt;geom_ctx." alt="" coords="5,32,202,60"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#a7e60d333a6f6667a8a2f4fdb3651a3f4" title="Free all heap memory owned by a DMPlexPatchExchange and zero the struct." alt="" coords="250,5,477,33"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="202,33,237,32,231,33,202,38"/>
+<area shape="rect" id="Node000003" href="$dmplex__geom_8c.html#a8661deca8813ac6ed08fa660b602fefe" title="Free all heap memory owned by a DMPlexPatchLayout and zero the struct." alt="" coords="259,57,468,85"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="202,53,246,59,241,60,202,58"/>
+</map>

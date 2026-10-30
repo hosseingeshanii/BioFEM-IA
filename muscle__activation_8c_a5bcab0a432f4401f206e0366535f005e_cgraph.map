@@ -1,0 +1,13 @@
+<map id="compute_act_Fa_element" name="compute_act_Fa_element">
+<area shape="rect" id="Node000001" title="High&#45;Level Procedure for Muscle Activation Update." alt="" coords="5,108,193,136"/>
+<area shape="rect" id="Node000002" href="$math_8c.html#a9d60990d26296194c921d537ea26f3c7" title=" " alt="" coords="241,29,306,57"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="131,105,229,62,225,66,133,110"/>
+<area shape="rect" id="Node000003" href="$math_8c.html#a870a70f4845a041458d9bdb0dd7aabd3" title=" " alt="" coords="249,81,298,109"/>
+<area shape="poly" id="edge3_Node000001_Node000003" title=" " alt="" coords="192,105,235,100,231,102,194,110"/>
+<area shape="rect" id="Node000004" href="$math_8c.html#a3f73e4cd9eab76eeee084eabf2b98ec9" title=" " alt="" coords="251,133,296,161"/>
+<area shape="poly" id="edge4_Node000001_Node000004" title=" " alt="" coords="193,133,239,141,234,143,193,138"/>
+<area shape="rect" id="Node000005" href="$math_8c.html#ac616709995f2ae60c4308ffa328337d7" title=" " alt="" coords="247,209,300,237"/>
+<area shape="poly" id="edge5_Node000001_Node000005" title=" " alt="" coords="125,134,237,200,233,203,124,139"/>
+<area shape="poly" id="edge2_Node000002_Node000002" title=" " alt="" coords="243,28,238,20,242,11,254,5,273,3,294,5,307,14,301,14,292,10,273,8,255,10,246,15,243,20,248,29"/>
+<area shape="poly" id="edge6_Node000005_Node000005" title=" " alt="" coords="244,209,238,201,242,191,254,185,273,183,295,185,307,195,302,194,293,191,273,188,255,190,246,195,243,201,248,211"/>
+</map>

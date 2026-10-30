@@ -1,0 +1,10 @@
+<map id="prolate_frame" name="prolate_frame">
+<area shape="rect" id="Node000001" title=" " alt="" coords="233,32,346,60"/>
+<area shape="rect" id="Node000002" href="$solid3d_8c.html#a939c42cd446f26012977eea519caec13" title=" " alt="" coords="111,5,182,33"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="215,33,182,28,182,23,220,32"/>
+<area shape="rect" id="Node000004" href="$solid3d_8c.html#a03d6a2d4b24a0e66b35acaa768ddef4c" title=" " alt="" coords="108,57,185,85"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="220,58,186,67,185,62,215,59"/>
+<area shape="rect" id="Node000003" href="$solid3d_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,32,60,60"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="94,33,61,42,59,37,98,29"/>
+<area shape="poly" id="edge4_Node000004_Node000003" title=" " alt="" coords="90,60,60,55,60,49,95,58"/>
+</map>

@@ -1,0 +1,7 @@
+<map id="DMPlexGeomCtx" name="DMPlexGeomCtx">
+<area shape="rect" id="Node000001" title="Persistent DMPlex geometry context stored in FE." alt="" coords="106,106,239,134"/>
+<area shape="rect" id="Node000002" href="$structDMPlexPatchLayout.html" title="Per&#45;rank local copy of Loop subdivision patch stencil data." alt="" coords="5,5,156,33"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="104,42,163,105,158,106,101,47"/>
+<area shape="rect" id="Node000003" href="$structDMPlexPatchExchange.html" title="MPI coordinate exchange for cross&#45;rank patch stencil nodes." alt="" coords="180,5,349,33"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="245,43,186,108,183,103,240,45"/>
+</map>

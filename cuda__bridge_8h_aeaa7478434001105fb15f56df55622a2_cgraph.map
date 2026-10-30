@@ -1,0 +1,15 @@
+<map id="RunCudaSubdivGeomKernelPartitioned" name="RunCudaSubdivGeomKernelPartitioned">
+<area shape="rect" id="Node000001" title="Partitioned variant of RunCudaSubdivGeomKernel for the DMPlex+CUDA path: operates on a per&#45;rank local..." alt="" coords="5,109,279,137"/>
+<area shape="rect" id="Node000002" href="$cuda__wrapper_8cpp.html#a08e5a5b43a752e588032bd4b9bb3c2ff" title=" " alt="" coords="371,5,536,33"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="171,106,241,75,326,43,361,36,356,38,327,48,243,80,174,111"/>
+<area shape="rect" id="Node000003" href="$cuda__stub_8c.html#a0a03590281de9e411f95975e4d02dc56" title="Partitioned variant of RunCudaMetricTensorKernel for the DMPlex+CUDA path: operates on a per&#45;rank loc..." alt="" coords="376,57,530,85"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="229,106,363,85,359,88,230,111"/>
+<area shape="rect" id="Node000004" href="$cuda__wrapper_8cpp.html#af58a317c68baf828e294afef2d80de72" title=" " alt="" coords="380,109,526,137"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="279,121,367,122,362,124,280,126"/>
+<area shape="rect" id="Node000006" href="$cuda__wrapper_8cpp.html#afe9e402747f1ef71eb37a0e002bea3ec" title=" " alt="" coords="327,161,580,189"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="229,135,354,157,349,159,229,140"/>
+<area shape="rect" id="Node000007" href="$cuda__wrapper_8cpp.html#a3408505d02557cc51ea4eb661b4fc384" title=" " alt="" coords="390,213,517,241"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="173,135,243,166,327,198,378,213,372,213,326,203,241,171,172,140"/>
+<area shape="rect" id="Node000005" href="$cuda__wrapper_8cpp.html#af5d59f1f3f208d21777faed2e8763f3f" title=" " alt="" coords="628,109,803,137"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="527,121,615,123,610,124,527,126"/>
+</map>

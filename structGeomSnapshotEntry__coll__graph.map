@@ -1,0 +1,7 @@
+<map id="GeomSnapshotEntry" name="GeomSnapshotEntry">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,363,160,391"/>
+<area shape="rect" id="Node000002" href="$structSubdivGeomQP.html" title="Cached subdivision&#45;surface geometry quantities at one quadrature point." alt="" coords="21,262,144,290"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="85,304,85,363,80,362,80,307"/>
+<area shape="rect" id="Node000003" href="$structCmpnts.html" title=" " alt="" coords="47,5,118,33"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="85,48,85,262,80,262,80,49"/>
+</map>

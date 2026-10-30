@@ -1,0 +1,29 @@
+<map id="FE" name="FE">
+<area shape="rect" id="Node000001" title=" " alt="" coords="427,788,466,815"/>
+<area shape="rect" id="Node000002" href="$structActData.html" title="Global active&#45;strain data stored in FE context." alt="" coords="263,687,337,715"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="322,724,366,761,398,779,430,794,424,793,395,784,362,766,321,729"/>
+<area shape="rect" id="Node000003" href="$structMuscleActParams.html" title="Active&#45;muscle model parameters." alt="" coords="62,586,199,614"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="136,627,145,646,156,661,180,677,208,688,266,699,261,700,207,693,178,682,152,665,140,649,135,632"/>
+<area shape="rect" id="Node000004" href="$structElemActData.html" title="Element&#45;level active&#45;strain tensors, stresses, and cached basis/geometry." alt="" coords="242,586,348,614"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="298,627,302,687,297,685,295,631"/>
+<area shape="rect" id="Node000005" href="$structElem2DTens.html" title="Second&#45;order tensor in covariant and contravariant forms." alt="" coords="5,262,107,290"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="54,303,57,360,65,429,74,465,87,500,105,532,128,560,170,574,243,589,239,591,169,579,125,565,101,535,82,502,69,467,60,430,52,360,54,309"/>
+<area shape="rect" id="Node000006" href="$structElem4DTens.html" title="Fourth&#45;order tensor (for example, material tangent)." alt="" coords="131,262,232,290"/>
+<area shape="poly" id="edge5_Node000004_Node000006" title=" " alt="" coords="184,303,192,356,205,422,226,493,258,561,279,586,274,586,253,564,221,495,200,423,187,357,183,308"/>
+<area shape="rect" id="Node000007" href="$structElemVec.html" title="Vector in covariant and contravariant forms." alt="" coords="256,262,333,290"/>
+<area shape="poly" id="edge6_Node000004_Node000007" title=" " alt="" coords="297,304,297,586,292,585,293,307"/>
+<area shape="rect" id="Node000008" href="$structCmpnts.html" title=" " alt="" coords="383,5,454,33"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="386,45,378,59,346,114,323,173,300,263,295,261,318,171,341,112,373,55,389,41"/>
+<area shape="rect" id="Node000009" href="$structSubdivGeomQP.html" title="Cached subdivision&#45;surface geometry quantities at one quadrature point." alt="" coords="358,262,480,290"/>
+<area shape="poly" id="edge9_Node000009_Node000008" title=" " alt="" coords="420,46,421,263,416,262,418,51"/>
+<area shape="rect" id="Node000013" href="$structIBMNodes.html" title=" " alt="" coords="458,424,545,452"/>
+<area shape="poly" id="edge14_Node000013_Node000008" title=" " alt="" coords="459,40,474,56,498,106,512,159,520,214,522,268,517,363,507,425,502,423,511,362,517,268,515,215,507,161,493,108,470,58,459,45"/>
+<area shape="poly" id="edge8_Node000004_Node000009" title=" " alt="" coords="400,301,395,315,380,351,371,383,362,439,352,496,342,528,326,564,309,588,305,584,322,561,337,526,347,494,357,438,366,381,375,349,390,313,397,305"/>
+<area shape="rect" id="Node000010" href="$structDMPlexGeomCtx.html" title="Persistent DMPlex geometry context stored in FE." alt="" coords="492,687,625,715"/>
+<area shape="poly" id="edge10_Node000001_Node000010" title=" " alt="" coords="535,724,463,789,460,785,530,726"/>
+<area shape="rect" id="Node000011" href="$structDMPlexPatchLayout.html" title="Per&#45;rank local copy of Loop subdivision patch stencil data." alt="" coords="484,586,634,614"/>
+<area shape="poly" id="edge11_Node000010_Node000011" title=" " alt="" coords="560,628,561,688,556,685,557,632"/>
+<area shape="rect" id="Node000012" href="$structDMPlexPatchExchange.html" title="MPI coordinate exchange for cross&#45;rank patch stencil nodes." alt="" coords="658,586,827,614"/>
+<area shape="poly" id="edge12_Node000010_Node000012" title=" " alt="" coords="707,621,584,689,582,684,702,623"/>
+<area shape="poly" id="edge13_Node000001_Node000013" title=" " alt="" coords="497,465,475,587,459,703,450,789,446,786,454,702,469,586,493,469"/>
+</map>

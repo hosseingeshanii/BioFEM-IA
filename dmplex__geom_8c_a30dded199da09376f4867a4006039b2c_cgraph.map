@@ -1,0 +1,29 @@
+<map id="RunLocalGeometryCuda_" name="RunLocalGeometryCuda_">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,136,191,164"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#aa8f242260c80f04e57bb298c97a87fac" title=" " alt="" coords="261,53,490,81"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="129,133,180,112,238,91,275,84,271,86,239,96,182,117,132,138"/>
+<area shape="rect" id="Node000003" href="$cuda__wrapper_8cpp.html#a3733d0b75bbfb459a639d5b04f9fa1cf" title=" " alt="" coords="274,157,477,202"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="191,157,261,166,256,168,192,162"/>
+<area shape="rect" id="Node000010" href="$cuda__wrapper_8cpp.html#aeaa7478434001105fb15f56df55622a2" title="Partitioned variant of RunCudaSubdivGeomKernel for the DMPlex+CUDA path: operates on a per&#45;rank local..." alt="" coords="239,105,512,133"/>
+<area shape="poly" id="edge9_Node000001_Node000010" title=" " alt="" coords="190,137,232,134,227,136,192,142"/>
+<area shape="rect" id="Node000012" href="$dmplex__geom_8c.html#a0e285c5152466ed0d16f3ccb265e2c99" title="Broadcast updated vertex coordinates from owning ranks to all ranks that need them." alt="" coords="256,225,495,253"/>
+<area shape="poly" id="edge15_Node000001_Node000012" title=" " alt="" coords="125,161,178,187,240,211,268,221,263,222,238,216,176,192,125,167"/>
+<area shape="rect" id="Node000004" href="$cuda__wrapper_8cpp.html#a08e5a5b43a752e588032bd4b9bb3c2ff" title=" " alt="" coords="604,57,769,85"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="477,157,511,142,525,131,534,119,543,107,559,96,587,87,592,85,561,100,547,111,538,123,529,135,513,147,479,162"/>
+<area shape="rect" id="Node000005" href="$cuda__stub_8c.html#a0a03590281de9e411f95975e4d02dc56" title="Partitioned variant of RunCudaMetricTensorKernel for the DMPlex+CUDA path: operates on a per&#45;rank loc..." alt="" coords="610,109,764,137"/>
+<area shape="poly" id="edge4_Node000003_Node000005" title=" " alt="" coords="477,158,597,139,592,140,478,164"/>
+<area shape="rect" id="Node000006" href="$cuda__wrapper_8cpp.html#af58a317c68baf828e294afef2d80de72" title=" " alt="" coords="614,161,760,189"/>
+<area shape="poly" id="edge5_Node000003_Node000006" title=" " alt="" coords="477,175,601,176,595,177,478,181"/>
+<area shape="rect" id="Node000008" href="$cuda__wrapper_8cpp.html#a49ab5cd29ad628e6617f018eb9789e19" title=" " alt="" coords="560,265,813,293"/>
+<area shape="poly" id="edge7_Node000003_Node000008" title=" " alt="" coords="478,197,513,211,528,221,538,232,547,241,561,250,582,261,576,260,559,255,544,245,534,235,525,225,511,216,477,202"/>
+<area shape="rect" id="Node000009" href="$cuda__wrapper_8cpp.html#a3408505d02557cc51ea4eb661b4fc384" title=" " alt="" coords="623,213,750,241"/>
+<area shape="poly" id="edge8_Node000003_Node000009" title=" " alt="" coords="477,192,611,215,605,215,477,197"/>
+<area shape="rect" id="Node000007" href="$cuda__wrapper_8cpp.html#af5d59f1f3f208d21777faed2e8763f3f" title=" " alt="" coords="861,161,1037,189"/>
+<area shape="poly" id="edge6_Node000006_Node000007" title=" " alt="" coords="760,173,848,175,843,175,761,178"/>
+<area shape="poly" id="edge10_Node000010_Node000004" title=" " alt="" coords="469,102,592,85,587,87,470,107"/>
+<area shape="poly" id="edge11_Node000010_Node000005" title=" " alt="" coords="512,118,597,121,591,122,513,124"/>
+<area shape="poly" id="edge12_Node000010_Node000006" title=" " alt="" coords="457,131,601,159,596,160,457,136"/>
+<area shape="poly" id="edge14_Node000010_Node000009" title=" " alt="" coords="488,131,513,142,530,156,538,171,547,185,561,198,584,209,610,219,605,219,582,214,559,203,543,189,534,174,525,160,511,147,488,136"/>
+<area shape="rect" id="Node000011" href="$cuda__wrapper_8cpp.html#afe9e402747f1ef71eb37a0e002bea3ec" title=" " alt="" coords="560,5,813,33"/>
+<area shape="poly" id="edge13_Node000010_Node000011" title=" " alt="" coords="481,102,511,90,525,79,534,68,543,55,559,44,573,40,578,38,561,48,547,59,538,71,529,83,513,95,483,107"/>
+</map>
