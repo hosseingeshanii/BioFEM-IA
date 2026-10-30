@@ -423,7 +423,11 @@ int main(int argc, char **argv)
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes)); PetscCall(SNESSetDM(snes, dm));
   PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, NULL));
   PetscCall(SNESSetFromOptions(snes));
-  if (prob == PROB_LV) PetscCall(PetscMkdir(out_dir));
+  if (prob == PROB_LV) {                                   /* rank 0 creates the output directory, the others wait */
+    PetscMPIInt rank; PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
+    if (!rank) PetscCall(PetscMkdir(out_dir));
+    PetscCallMPI(MPI_Barrier(PETSC_COMM_WORLD));
+  }
 
   /* plate: Nitti's diagonal Fa at gamma */
   const PetscReal a1 = 1.0 - gmax / (nLx * nLx), a2 = 1.0 - gmax / (nLy * nLy), a3 = 1.0 / (a1 * a2);
