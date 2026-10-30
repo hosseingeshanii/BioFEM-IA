@@ -39,6 +39,14 @@ static void kernel_data(const PetscScalar c[], const PetscInt aOff[], const Pets
     kd->f[i] = aux ? PetscRealPart(a[aOff[0] + i]) : PetscRealPart(c[C_F0 + i]);
     kd->s[i] = aux ? PetscRealPart(a[aOff[1] + i]) : PetscRealPart(c[C_S0 + i]);
   }
+  if (aux) {   /* interpolated P1 vectors are not unit / orthogonal between vertices: f unit, s Gram-Schmidt against f */
+    PetscReal nf = PetscSqrtReal(kd->f[0] * kd->f[0] + kd->f[1] * kd->f[1] + kd->f[2] * kd->f[2]), sf;
+    for (PetscInt i = 0; i < 3; i++) kd->f[i] /= nf;
+    sf = kd->s[0] * kd->f[0] + kd->s[1] * kd->f[1] + kd->s[2] * kd->f[2];
+    for (PetscInt i = 0; i < 3; i++) kd->s[i] -= sf * kd->f[i];
+    PetscReal ns = PetscSqrtReal(kd->s[0] * kd->s[0] + kd->s[1] * kd->s[1] + kd->s[2] * kd->s[2]);
+    for (PetscInt i = 0; i < 3; i++) kd->s[i] /= ns;
+  }
   if (PetscRealPart(c[C_FA_DIAG]) != 0.0) {
     for (PetscInt i = 0; i < 9; i++) kd->A[i] = 0.0;
     kd->A[0] = 1.0 / PetscRealPart(c[C_A1]); kd->A[4] = 1.0 / PetscRealPart(c[C_A2]); kd->A[8] = 1.0 / PetscRealPart(c[C_A3]);
