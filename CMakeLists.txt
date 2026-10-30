@@ -96,6 +96,11 @@ if(BIOFEM_DMPLEX)
   biofem_common_setup(biofem-dmplex)
   install(TARGETS biofem-dmplex DESTINATION bin)
   message(STATUS "Backend enabled: dmplex")
+
+  # 3D active-strain HO solid (P2-P1, DMPlex/PetscFE); separate executable while it is being developed
+  add_executable(biofem-solid3d src/solid3d.c src/solid3d_ho.c)
+  biofem_common_setup(biofem-solid3d)
+  install(TARGETS biofem-solid3d DESTINATION bin)
 endif()
 
 # ── Direct CUDA backend ──────────────────────────────────────────────────
