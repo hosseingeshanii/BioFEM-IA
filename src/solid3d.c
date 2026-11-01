@@ -272,6 +272,47 @@ static PetscErrorCode WriteVertexDisplacement(DM dm, Vec U, const char fname[])
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* ParaView output: displacement and pressure interpolated to P1 (their vertex values) and written as VTU by PETSc's
+ * VTK viewer (parallel). The P1 copy of the DM is made once. */
+static void copy_u(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{
+  for (PetscInt i = 0; i < 3; i++) f[i] = u[uOff[0] + i];
+}
+static void copy_p(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{
+  f[0] = u[uOff[1]];
+}
+static PetscErrorCode WriteVTU(DM dm, Vec U, const char fname[])
+{
+  /* P1 copy of (u, p) on the same mesh: the VTK viewer writes vertex fields only, and refuses two grids per file */
+  static DM dmV = NULL;
+  void (*funcs[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {copy_u, copy_p};
+  Vec V; PetscViewer vw;
+  PetscFunctionBeginUser;
+  if (!dmV) {
+    const char *names[2] = {"displacement", "pressure"};
+    PetscSection sec;
+    PetscCall(DMClone(dm, &dmV));
+    for (PetscInt f = 0; f < 2; f++) {
+      PetscFE fe;
+      PetscCall(PetscFECreateLagrange(PETSC_COMM_WORLD, 3, f == 0 ? 3 : 1, PETSC_TRUE, 1, PETSC_DETERMINE, &fe));
+      PetscCall(PetscObjectSetName((PetscObject)fe, names[f]));
+      PetscCall(DMSetField(dmV, f, NULL, (PetscObject)fe)); PetscCall(PetscFEDestroy(&fe));
+    }
+    PetscCall(DMCreateDS(dmV));
+    PetscCall(DMGetLocalSection(dmV, &sec));
+    PetscCall(PetscSectionSetComponentName(sec, 1, 0, "p"));     /* scalar arrays are named <vec><field>.<component> */
+  }
+  PetscCall(DMGetGlobalVector(dmV, &V));
+  PetscCall(PetscObjectSetName((PetscObject)V, ""));           /* arrays "displacement" and "pressure.p" */
+  PetscCall(DMProjectField(dmV, 0.0, U, funcs, INSERT_VALUES, V));
+  PetscCall(PetscViewerVTKOpen(PETSC_COMM_WORLD, fname, FILE_MODE_WRITE, &vw));
+  PetscCall(VecView(V, vw));
+  PetscCall(PetscViewerDestroy(&vw));
+  PetscCall(DMRestoreGlobalVector(dmV, &V));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* one load step, with up to 'levels' halvings on failure (substeps interpolate the constants linearly) */
 static PetscErrorCode SolveStep(SNES snes, PetscDS ds, Vec U, PetscScalar c0[], const PetscScalar c1[], PetscInt levels, PetscInt *its_out, PetscBool *ok)
 {
@@ -304,7 +345,7 @@ int main(int argc, char **argv)
   DM dm; SNES snes; Vec U; PetscFE fe[2]; PetscDS ds;
   Problem prob = PROB_CUBE;
   PetscReal gmax = 0.2, traction = 9.0e5, nLx = 1.2, nLy = 0.9;
-  PetscInt steps = 4, out_every = 5, levels = 3;
+  PetscInt steps = 4, out_every = 5, levels = 3, vtk_every = -1;
   char out_dir[PETSC_MAX_PATH_LEN] = "solid3d_out";
   MatParams m = {MAT_HO, 236.2, 10.810, 20037.0, 14.154, 3724.5, 5.1645, 410.8, 11.300, PETSC_TRUE, PETSC_TRUE, 1.5e6, 7.445e7};
   Prolate geo = {0.0291, 0.557, 1.00, -60.0, 60.0};
@@ -324,6 +365,7 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsInt("-substep_levels", "halvings tried on a failed step", "", levels, &levels, NULL));
   PetscCall(PetscOptionsInt("-out_every", "lv: write vertex displacements every N steps", "", out_every, &out_every, NULL));
   PetscCall(PetscOptionsString("-out_dir", "output directory", "", out_dir, out_dir, sizeof(out_dir), NULL));
+  PetscCall(PetscOptionsInt("-vtk_every", "write <out_dir>/solid3d_NNNN.vtu (P1 displacement, pressure) every N steps (default: -out_every for lv, off otherwise; 0 = off)", "", vtk_every, &vtk_every, NULL));
   PetscCall(PetscOptionsBool("-ho_tension_only", "", "", m.tension_only, &m.tension_only, NULL));
   PetscCall(PetscOptionsBool("-ho_sheet", "", "", m.sheet, &m.sheet, NULL));
   PetscCall(PetscOptionsReal("-mu", "neo-Hookean mu (plate)", "", m.mu, &m.mu, NULL));
@@ -335,6 +377,7 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsReal("-alpha_epi", "lv: helix angle at the epicardium [deg]", "", geo.a_epi, &geo.a_epi, NULL));
   PetscOptionsEnd();
   if (prob == PROB_PLATE) m.law = MAT_NH;
+  if (vtk_every < 0) vtk_every = (prob == PROB_LV) ? out_every : 0;
 
   PetscCall(DMCreate(PETSC_COMM_WORLD, &dm));
   PetscCall(DMSetType(dm, DMPLEX));
@@ -435,7 +478,7 @@ int main(int argc, char **argv)
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes)); PetscCall(SNESSetDM(snes, dm));
   PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, NULL));
   PetscCall(SNESSetFromOptions(snes));
-  if (prob == PROB_LV) {                                   /* rank 0 creates the output directory, the others wait */
+  if (prob == PROB_LV || vtk_every > 0) {                  /* rank 0 creates the output directory, the others wait */
     PetscMPIInt rank; PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
     if (!rank) {
       char fn[PETSC_MAX_PATH_LEN], mesh[PETSC_MAX_PATH_LEN] = ""; FILE *fp;
@@ -475,6 +518,10 @@ int main(int argc, char **argv)
     if (prob == PROB_LV && (k % out_every == 0 || k == steps)) {
       char fn[PETSC_MAX_PATH_LEN]; PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/u_step%04d.txt", out_dir, (int)k));
       PetscCall(WriteVertexDisplacement(dm, U, fn));
+    }
+    if (vtk_every > 0 && (k % vtk_every == 0 || k == steps)) {
+      char fn[PETSC_MAX_PATH_LEN]; PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/solid3d_%04d.vtu", out_dir, (int)k));
+      PetscCall(WriteVTU(dm, U, fn));
     }
   }
 

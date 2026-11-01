@@ -56,17 +56,31 @@ def read_run(run_dir, mesh_override=""):
     if not mesh.exists():
         raise FileNotFoundError(f"mesh {mesh} not found (use --mesh)")
     X0, tets, tris, tags = read_msh22(mesh)
-    from scipy.spatial import cKDTree
-    tree, steps = cKDTree(X0), int(info["steps"])
+    # match vertices by position (numpy only): hash the mesh vertices into 10 um cells, look each point up in its cell
+    # and the 26 neighbours (no rounding-boundary misses); mesh vertices are >= ~0.1 mm apart
+    cell = lambda P: np.floor(P / 1e-5).astype(np.int64)
+    grid = {}
+    for i, c in enumerate(map(tuple, cell(X0))):
+        grid.setdefault(c, []).append(i)
+    offs = [(a, b, c) for a in (-1, 0, 1) for b in (-1, 0, 1) for c in (-1, 0, 1)]
+    def match(P):
+        order = np.full(len(P), -1); dist = np.full(len(P), np.inf)
+        for j, (p, c) in enumerate(zip(P, map(tuple, cell(P)))):
+            for o in offs:
+                for i in grid.get((c[0] + o[0], c[1] + o[1], c[2] + o[2]), ()):
+                    dd = np.linalg.norm(X0[i] - p)
+                    if dd < dist[j]: dist[j], order[j] = dd, i
+        return dist, order
+    steps = int(info["steps"])
     U = {0: np.zeros_like(X0)}
     for f in sorted(run_dir.glob("u_step*.txt")):
         d = np.loadtxt(f)
-        dist, order = tree.query(d[:, :3])
+        dist, order = match(d[:, :3])
         if dist.max() > 1e-8 or len(np.unique(order)) != len(X0):
             raise ValueError(f"{f}: vertices do not match the mesh {mesh} (max distance {dist.max():.2e})")
         u = np.zeros_like(X0); u[order] = d[:, 3:6]
         U[int(f.stem[6:])] = u
-    return dict(info=info, X0=X0, tets=tets, endo=tris[tags == 1], epi_v=np.unique(tris[tags == 2]),
+    return dict(info=info, X0=X0, tets=tets, bnd=tris, endo=tris[tags == 1], epi_v=np.unique(tris[tags == 2]),
                 endo_v=np.unique(tris[tags == 1]), steps=steps, U=U)
 
 

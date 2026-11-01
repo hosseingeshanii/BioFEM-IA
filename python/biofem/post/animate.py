@@ -1,6 +1,8 @@
 """biofem post animate: animation (GIF + full-colour animated PNG) of one case.
 
-Frames come from shell3d00_*.vtk (thick wall, -write_3d_shell 1) or surface00_*.vtk (mid-surface).
+Frames come from shell3d00_*.vtk (thick wall, -write_3d_shell 1) or surface00_*.vtk (mid-surface) of a shell case,
+or from a 3D vertex run (run_info.txt + u_stepNNNN.txt, biofem-solid3d / pulse export; boundary surface of the mesh,
+gamma from the ramp in run_info, V and h/h0 from the biofem post solid3d metrics).
 Each frame shows the chosen views (side: apex motion; base: from below the base into the cavity)
 with the reference shape as a grey wireframe, coloured by |u| (cm) or the wall thickness ratio h/h0
 (shell3d only). The title gives t, mean gamma, endocardial volume and mean h/h0; steps whose
@@ -54,30 +56,42 @@ def cmd_animate(args):
     from PIL import Image
 
     case = Path(args.dir)
-    ctrl = read_control(case)
-    out_path = output_dir(case, ctrl, args.out_dir or None)
-    dt = control_float(ctrl, "-dt", 1.0)
-    s = TO_CM[args.solver_unit]
+    vertex_run = (case / "run_info.txt").exists()
+    if vertex_run:                                     # 3D run: metres, boundary triangles of the volume mesh
+        from .solid3d import read_run, metrics
+        if args.field != "u":
+            sys.exit("error: 3D vertex runs: only --field u")
+        vr = read_run(case, args.mesh)
+        vm = metrics(vr)
+        ks = sorted(vr["U"])[::args.every]
+        if sorted(vr["U"])[-1] not in ks:
+            ks.append(sorted(vr["U"])[-1])
+        source, bad_steps, s = "3D vertex run", set(), 100.0
+        gmax = float(vr["info"].get("gamma", 0.0))
+    else:
+        ctrl = read_control(case)
+        out_path = output_dir(case, ctrl, args.out_dir or None)
+        dt = control_float(ctrl, "-dt", 1.0)
+        s = TO_CM[args.solver_unit]
+        surf = dict(output_files(out_path, "surface"))
+        shell = dict(output_files(out_path, "shell3d"))
+        source = args.source
+        if source == "auto":
+            source = "shell3d" if shell else "surface"
+        series = shell if source == "shell3d" else surf
+        if not series:
+            sys.exit(f"error: no {source}00_*.vtk in {out_path}")
+        if args.field == "h_ratio" and source != "shell3d":
+            sys.exit("error: --field h_ratio needs shell3d output (-write_3d_shell 1)")
+        ks = sorted(k for k in series if k != 1)[::args.every]      # file 1 repeats file 0
+        if sorted(series)[-1] not in ks:
+            ks.append(sorted(series)[-1])
 
-    surf = dict(output_files(out_path, "surface"))
-    shell = dict(output_files(out_path, "shell3d"))
-    source = args.source
-    if source == "auto":
-        source = "shell3d" if shell else "surface"
-    series = shell if source == "shell3d" else surf
-    if not series:
-        sys.exit(f"error: no {source}00_*.vtk in {out_path}")
-    if args.field == "h_ratio" and source != "shell3d":
-        sys.exit("error: --field h_ratio needs shell3d output (-write_3d_shell 1)")
-    ks = sorted(k for k in series if k != 1)[::args.every]      # file 1 repeats file 0
-    if sorted(series)[-1] not in ks:
-        ks.append(sorted(series)[-1])
-
-    bad_steps = set()
-    log = find_solver_log(case)
-    if log is not None:
-        bad_steps = {st["step"] for st in parse_solver_log(log) if st["converged"] is False}
-    vol = read_lv_volume(out_path)
+        bad_steps = set()
+        log = find_solver_log(case)
+        if log is not None:
+            bad_steps = {st["step"] for st in parse_solver_log(log) if st["converged"] is False}
+        vol = read_lv_volume(out_path)
 
     auto_range = args.range.strip().lower() == "auto"
     if not auto_range:
@@ -91,29 +105,40 @@ def cmd_animate(args):
     work = Path(tempfile.mkdtemp(prefix="biofem_animate_"))
     try:
         # 1. frames in cm with the colour field
-        ref = VTK(series[ks[0]])
-        X0 = ref.points * s
-        h0 = ref.point_data.get("thickness")
-        info = {}
-        for k in ks:
-            v = VTK(series[k])
-            X = v.points * s
-            fields = {"u": np.linalg.norm(X - X0, axis=1)}
-            hr = None
-            if "thickness" in v.point_data and h0 is not None:
-                fields["h_ratio"] = v.point_data["thickness"] / h0
-                hr = float(fields["h_ratio"].mean())
-            _write_vtk(work / f"in_{k:06d}.vtk", X, v.cells, fields)
-            fld = fields.get("u" if args.field == "u" else "h_ratio")
-            if fld is not None:
-                fmin, fmax = min(fmin, float(fld.min())), max(fmax, float(fld.max()))
-            g = None
-            if k in surf:
-                gv = VTK(surf[k]).cell_data.get("gamma")
-                g = float(gv.mean()) if gv is not None else None
-            ti = file_step(source, k)
-            info[k] = dict(t=max(ti, 0) * dt, step=ti, gamma=g, h=hr,
-                           V=vol[k][1] * s ** 3 if k in vol else None)
+        if vertex_run:
+            X0 = vr["X0"] * s
+            info = {}
+            for k in ks:
+                X = (vr["X0"] + vr["U"][k]) * s
+                fields = {"u": np.linalg.norm(X - X0, axis=1)}
+                _write_vtk(work / f"in_{k:06d}.vtk", X, vr["bnd"], fields)
+                fmin, fmax = min(fmin, float(fields["u"].min())), max(fmax, float(fields["u"].max()))
+                i = list(vm["k"]).index(k); t = k / vr["steps"]
+                info[k] = dict(t=t, step=k, gamma=gmax * (1.0 - abs(2.0 * t - 1.0)), h=1.0 + vm["thick"][i] / 100.0, V=vm["V"][i])
+        else:
+            ref = VTK(series[ks[0]])
+            X0 = ref.points * s
+            h0 = ref.point_data.get("thickness")
+            info = {}
+            for k in ks:
+                v = VTK(series[k])
+                X = v.points * s
+                fields = {"u": np.linalg.norm(X - X0, axis=1)}
+                hr = None
+                if "thickness" in v.point_data and h0 is not None:
+                    fields["h_ratio"] = v.point_data["thickness"] / h0
+                    hr = float(fields["h_ratio"].mean())
+                _write_vtk(work / f"in_{k:06d}.vtk", X, v.cells, fields)
+                fld = fields.get("u" if args.field == "u" else "h_ratio")
+                if fld is not None:
+                    fmin, fmax = min(fmin, float(fld.min())), max(fmax, float(fld.max()))
+                g = None
+                if k in surf:
+                    gv = VTK(surf[k]).cell_data.get("gamma")
+                    g = float(gv.mean()) if gv is not None else None
+                ti = file_step(source, k)
+                info[k] = dict(t=max(ti, 0) * dt, step=ti, gamma=g, h=hr,
+                               V=vol[k][1] * s ** 3 if k in vol else None)
 
         if auto_range:   # 0..max |u| (or min..max h/h0) over all frames, rounded outward to 2 significant digits
             def _nice(x, up):
