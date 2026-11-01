@@ -7,6 +7,7 @@ from pathlib import Path
 from ..config import BACKENDS, load_site_config, detect_cluster, _load_env_line
 from ..jobs import _run_jobfile
 from ..monitor import _run_with_monitor
+from ..case import load_case, write_control, is_generated
 
 
 def cmd_run(args):
@@ -18,8 +19,16 @@ def cmd_run(args):
         sys.exit(1)
 
     run_dir = Path.cwd()
+    if (run_dir / "case.json").exists():
+        ctrl = run_dir / "control.dat"
+        if ctrl.exists() and not is_generated(ctrl):
+            print("[biofem] case.json and a hand-written control.dat are both here; keep one", file=sys.stderr)
+            print("         (biofem case convert turns control.dat into case.json)", file=sys.stderr)
+            sys.exit(1)
+        write_control(load_case(run_dir / "case.json"), ctrl)
+        print("[biofem] control.dat generated from case.json")
     if not (run_dir / "control.dat").exists():
-        print("[biofem] No control.dat found in current directory.", file=sys.stderr)
+        print("[biofem] No case.json or control.dat found in current directory.", file=sys.stderr)
         print("         cd into a case directory before running.", file=sys.stderr)
         sys.exit(1)
 

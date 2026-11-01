@@ -10,19 +10,24 @@
  *                 HO, fibers as an auxiliary P1 field from the prolate depth (same formula and P1 interpolation as the
  *                 pulse script), base u_z = 0, rim pins (endo rim theta=0: u_x = u_y = 0; epi rim theta=0: u_y = 0),
  *                 gamma linear 0 -> gamma -> 0 over -steps (Pezzuto ramp); vertex displacements written every -out_every steps.
+ *                 -p_ed > 0: Track P, the Pezzuto PV loop (same protocol as pulse3d/lv3d_pv_loop.py): cavity pressure p_c as
+ *                 a follower load on the endocardium (tag 1), filling 0 -> p_ed with gamma = 0 in -fill_steps, then over the
+ *                 gamma ramp: isovolumic contraction (V = EDV, p_c unknown) until p_c >= p_ao, ejection at p_ao until gamma
+ *                 peaks, isovolumic relaxation (V = ESV) until p_c <= p_ed, filling at p_ed. pv.csv in -out_dir.
  * Mesh from options: -dm_plex_filename <file.msh> (or a PETSc box with a mesh generator).
  */
 #include <petscdmplex.h>
 #include <petscsnes.h>
 #include <petscds.h>
 #include "solid3d_ho.h"
+#include "solid3d.h"
 
 typedef enum { PROB_CUBE = 0, PROB_PLATE = 1, PROB_LV = 2 } Problem;
 static const char *const ProblemNames[] = {"cube", "plate", "lv", "Problem", "PROB_", NULL};
 
 /* PetscDS constants */
 enum { C_LAW, C_A, C_B, C_AF, C_BF, C_AS, C_BS, C_AFS, C_BFS, C_TENSION, C_SHEET, C_MU, C_K,
-       C_GAMMA, C_FA_DIAG, C_A1, C_A2, C_A3, C_FIBER_AUX, C_F0, C_S0 = C_F0 + 3, C_TRACTION = C_S0 + 3, C_N };
+       C_GAMMA, C_FA_DIAG, C_A1, C_A2, C_A3, C_FIBER_AUX, C_F0, C_S0 = C_F0 + 3, C_TRACTION = C_S0 + 3, C_PCAV, C_ZB, C_N };
 
 typedef struct { MatParams m; PetscReal A[9], f[3], s[3]; } KernelData;
 
@@ -89,6 +94,23 @@ static void f0_p(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const 
 static void f0_traction(KERNEL_ARGS, const PetscReal x[], const PetscReal n[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f0[])
 {
   f0[0] = -constants[C_TRACTION]; f0[1] = 0.0; f0[2] = 0.0;
+}
+/* cavity pressure p_c on the endocardium, a follower load (3.8): R_u += p_c int du . J F^-T N dA, N = outward normal of
+   the wall (into the cavity). Tangent: d(J F^-T)_iJ/dF_kl = (M_iJ M_kl - M_il M_kJ)/J with M = J F^-T (as PETSc ex77). */
+static void f0_pressure(KERNEL_ARGS, const PetscReal x[], const PetscReal n[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f0[])
+{
+  PetscReal F[9], M[9]; const PetscReal pc = PetscRealPart(constants[C_PCAV]);
+  grad_to_F(u_x, uOff_x, F); JFinvT(F, M);
+  for (PetscInt i = 0; i < 3; i++) f0[i] = pc * (M[i * 3] * n[0] + M[i * 3 + 1] * n[1] + M[i * 3 + 2] * n[2]);
+}
+static void g1_pressure(KERNEL_ARGS, PetscReal u_tShift, const PetscReal x[], const PetscReal n[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g1[])
+{
+  PetscReal F[9], M[9], m[3]; const PetscReal pc = PetscRealPart(constants[C_PCAV]);
+  grad_to_F(u_x, uOff_x, F); JFinvT(F, M);
+  const PetscReal J = F[0] * M[0] + F[1] * M[1] + F[2] * M[2];
+  for (PetscInt i = 0; i < 3; i++) m[i] = M[i * 3] * n[0] + M[i * 3 + 1] * n[1] + M[i * 3 + 2] * n[2];
+  for (PetscInt i = 0; i < 3; i++) for (PetscInt k = 0; k < 3; k++) for (PetscInt l = 0; l < 3; l++)
+    g1[(i * 3 + k) * 3 + l] = pc / J * (m[i] * M[k * 3 + l] - M[i * 3 + l] * m[k]);
 }
 /* g3_uu = dP_ij/dF_kl at ((i*3 + k)*3 + j)*3 + l */
 static void g3_uu(KERNEL_ARGS, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g3[])
@@ -313,8 +335,83 @@ static PetscErrorCode WriteVTU(DM dm, Vec U, const char fname[])
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-/* one load step, with up to 'levels' halvings on failure (substeps interpolate the constants linearly) */
-static PetscErrorCode SolveStep(SNES snes, PetscDS ds, Vec U, PetscScalar c0[], const PetscScalar c1[], PetscInt levels, PetscInt *its_out, PetscBool *ok)
+/* reference position relative to x0 = (0, 0, z_b) on the displacement field (exact in P2 on straight tets) */
+static PetscErrorCode xrel_fn(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
+{
+  for (PetscInt i = 0; i < 3; i++) u[i] = x[i];
+  u[2] -= *(const PetscReal *)ctx;
+  return PETSC_SUCCESS;
+}
+
+/* cavity volume V = -1/3 int (x - x0) . J F^-T N dA over the endocardium (x0 = (0, 0, z_b) on the base plane; the endo
+   rim keeps u_z = 0, so the flat cap closing the cavity adds nothing), and optionally b = dR/dp_c (the pressure load at
+   p_c = 1; R is linear in p_c; dV/du = -b). With the local load b_a = int N_a J F^-T N dA over ALL dofs (PETSc assembles
+   local residuals with ADD_ALL_VALUES), V = -1/3 sum_a (x - x0)_a . b_a exactly, since x - x0 = X + u - x0 is in the P2
+   space. Rank sums count each face once (no overlap). */
+static PetscErrorCode CavityVolume(DM dm, PetscDS ds, Vec U, const PetscScalar c[], PetscReal *V, Vec b)
+{
+  static Vec Xrel = NULL;
+  Vec Ul, R0, R1; PetscScalar cc[C_N], dot; PetscReal loc;
+  PetscFunctionBeginUser;
+  if (!Xrel) {
+    PetscReal zb = PetscRealPart(c[C_ZB]);
+    PetscErrorCode (*funcs[2])(PetscInt, PetscReal, const PetscReal[], PetscInt, PetscScalar *, void *) = {xrel_fn, zero_fn};
+    void *ctxs[2] = {&zb, NULL};
+    PetscCall(DMCreateLocalVector(dm, &Xrel));
+    PetscCall(DMProjectFunctionLocal(dm, 0.0, funcs, ctxs, INSERT_ALL_VALUES, Xrel));
+  }
+  PetscCall(DMGetLocalVector(dm, &Ul)); PetscCall(DMGetLocalVector(dm, &R0)); PetscCall(DMGetLocalVector(dm, &R1));
+  PetscCall(VecSet(Ul, 0.0));
+  PetscCall(DMPlexInsertBoundaryValues(dm, PETSC_TRUE, Ul, 0.0, NULL, NULL, NULL));
+  PetscCall(DMGlobalToLocal(dm, U, INSERT_VALUES, Ul));
+  for (PetscInt i = 0; i < C_N; i++) cc[i] = c[i];
+  cc[C_PCAV] = 0.0; PetscCall(PetscDSSetConstants(ds, C_N, cc));
+  PetscCall(VecSet(R0, 0.0)); PetscCall(DMPlexSNESComputeResidualFEM(dm, Ul, R0, NULL));
+  cc[C_PCAV] = 1.0; PetscCall(PetscDSSetConstants(ds, C_N, cc));
+  PetscCall(VecSet(R1, 0.0)); PetscCall(DMPlexSNESComputeResidualFEM(dm, Ul, R1, NULL));
+  PetscCall(PetscDSSetConstants(ds, C_N, (PetscScalar *)c));
+  PetscCall(VecAXPY(R1, -1.0, R0));                          /* local b (all dofs) */
+  PetscCall(VecAXPY(Ul, 1.0, Xrel));                         /* x - x0 (the pressure-field entries of b are 0) */
+  PetscCall(VecDot(Ul, R1, &dot)); loc = -PetscRealPart(dot) / 3.0;
+  PetscCallMPI(MPIU_Allreduce(&loc, V, 1, MPIU_REAL, MPIU_SUM, PetscObjectComm((PetscObject)dm)));
+  if (b) { PetscCall(VecSet(b, 0.0)); PetscCall(DMLocalToGlobal(dm, R1, ADD_VALUES, b)); }
+  PetscCall(DMRestoreLocalVector(dm, &Ul)); PetscCall(DMRestoreLocalVector(dm, &R0)); PetscCall(DMRestoreLocalVector(dm, &R1));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* isovolumic solve at the constants c: find p_c = c[C_PCAV] with V(u(p_c)) = Vstar. Outer Newton on p_c around full SNES
+   solves: b = dR/dp_c (the pressure load at p_c = 1, R is linear in p_c), dV/du = -b, so with K z = b (the last SNES
+   factorization) dV/dp_c = b . z. */
+static PetscErrorCode SolveVolume(SNES snes, PetscDS ds, Vec U, PetscScalar c[], PetscReal Vstar, PetscReal vtol, PetscInt *its_out, PetscBool *ok)
+{
+  DM dm; Vec b, z; KSP ksp; PetscReal V = 0.0, dVdp;
+  PetscFunctionBeginUser;
+  PetscCall(SNESGetDM(snes, &dm));
+  PetscCall(VecDuplicate(U, &b)); PetscCall(VecDuplicate(U, &z));
+  *ok = PETSC_FALSE;
+  for (PetscInt it = 0; it < 25; it++) {
+    SNESConvergedReason r; PetscInt its;
+    PetscCall(PetscDSSetConstants(ds, C_N, c));
+    PetscCall(SNESSolve(snes, NULL, U));
+    PetscCall(SNESGetConvergedReason(snes, &r)); PetscCall(SNESGetIterationNumber(snes, &its));
+    *its_out += its;
+    if (r <= 0) break;
+    PetscCall(CavityVolume(dm, ds, U, c, &V, b));
+    if (PetscAbsReal(V - Vstar) <= vtol * Vstar) { *ok = PETSC_TRUE; break; }
+    const PetscReal pc = PetscRealPart(c[C_PCAV]);
+    PetscCall(SNESGetKSP(snes, &ksp)); PetscCall(KSPSolve(ksp, b, z));
+    PetscCall(VecDot(b, z, &dVdp));
+    if (!(dVdp > 0.0)) { PetscCall(PetscPrintf(PETSC_COMM_WORLD, "  isovolumic: dV/dp = %g <= 0\n", (double)dVdp)); break; }
+    c[C_PCAV] = pc + (Vstar - V) / dVdp;
+  }
+  if (!*ok) PetscCall(PetscPrintf(PETSC_COMM_WORLD, "  isovolumic solve failed: V %.6e target %.6e, p_c %.1f Pa\n", (double)V, (double)Vstar, (double)PetscRealPart(c[C_PCAV])));
+  PetscCall(VecDestroy(&b)); PetscCall(VecDestroy(&z));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* one load step, with up to 'levels' halvings on failure (substeps interpolate the constants linearly). Vstar > 0: the
+   cavity volume is held at Vstar and p_c is solved for (starting from c0's p_c) instead of interpolated. */
+static PetscErrorCode SolveStep(SNES snes, PetscDS ds, Vec U, PetscScalar c0[], const PetscScalar c1[], PetscReal Vstar, PetscReal vtol, PetscInt levels, PetscInt *its_out, PetscBool *ok)
 {
   Vec U0; PetscScalar c[C_N];
   PetscFunctionBeginUser;
@@ -322,30 +419,48 @@ static PetscErrorCode SolveStep(SNES snes, PetscDS ds, Vec U, PetscScalar c0[], 
   *ok = PETSC_FALSE; *its_out = 0;
   for (PetscInt lev = 0; lev <= levels && !*ok; lev++) {
     const PetscInt n = 1 << lev; PetscBool good = PETSC_TRUE;
+    PetscScalar pc = c0[C_PCAV];
     PetscCall(VecCopy(U0, U));
     for (PetscInt j = 1; j <= n && good; j++) {
       for (PetscInt i = 0; i < C_N; i++) c[i] = c0[i] + (c1[i] - c0[i]) * (PetscReal)j / n;
-      PetscCall(PetscDSSetConstants(ds, C_N, c));
-      PetscCall(SNESSolve(snes, NULL, U));
-      SNESConvergedReason r; PetscInt its;
-      PetscCall(SNESGetConvergedReason(snes, &r)); PetscCall(SNESGetIterationNumber(snes, &its));
-      *its_out += its; good = (PetscBool)(r > 0);
+      if (Vstar > 0.0) {
+        c[C_PCAV] = pc;
+        PetscCall(SolveVolume(snes, ds, U, c, Vstar, vtol, its_out, &good));
+        pc = c[C_PCAV];
+      } else {
+        SNESConvergedReason r; PetscInt its;
+        PetscCall(PetscDSSetConstants(ds, C_N, c));
+        PetscCall(SNESSolve(snes, NULL, U));
+        PetscCall(SNESGetConvergedReason(snes, &r)); PetscCall(SNESGetIterationNumber(snes, &its));
+        *its_out += its; good = (PetscBool)(r > 0);
+      }
     }
     if (good) *ok = PETSC_TRUE;
     else if (lev < levels) PetscCall(PetscPrintf(PETSC_COMM_WORLD, "  step failed with %d substep(s), retrying smaller\n", (int)n));
   }
-  if (*ok) for (PetscInt i = 0; i < C_N; i++) c0[i] = c1[i];
+  if (*ok) for (PetscInt i = 0; i < C_N; i++) c0[i] = c[i];
   else { PetscCall(VecCopy(U0, U)); PetscCall(PetscDSSetConstants(ds, C_N, c0)); }
   PetscCall(VecDestroy(&U0));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-int main(int argc, char **argv)
+/* vertex file u_stepNNNN.txt and VTU solid3d_NNNN.vtu for step k */
+static PetscErrorCode WriteStep(DM dm, Vec U, const char out_dir[], PetscInt k, PetscBool vertex, PetscBool vtk)
+{
+  char fn[PETSC_MAX_PATH_LEN];
+  PetscFunctionBeginUser;
+  if (vertex) { PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/u_step%04d.txt", out_dir, (int)k)); PetscCall(WriteVertexDisplacement(dm, U, fn)); }
+  if (vtk) { PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/solid3d_%04d.vtu", out_dir, (int)k)); PetscCall(WriteVTU(dm, U, fn)); }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* the 3D solver: called by the biofem executables for -model solid3d (main.c), or by the standalone main below */
+PetscErrorCode Solid3dRun(void)
 {
   DM dm; SNES snes; Vec U; PetscFE fe[2]; PetscDS ds;
   Problem prob = PROB_CUBE;
-  PetscReal gmax = 0.2, traction = 9.0e5, nLx = 1.2, nLy = 0.9;
-  PetscInt steps = 4, out_every = 5, levels = 3, vtk_every = -1;
+  PetscReal gmax = 0.2, traction = 9.0e5, nLx = 1.2, nLy = 0.9, p_ed = 0.0, p_ao = 1.0e4, vtol = 1e-8;
+  PetscInt steps = 4, out_every = 5, levels = 3, vtk_every = -1, fill_steps = 20;
   char out_dir[PETSC_MAX_PATH_LEN] = "solid3d_out";
   MatParams m = {MAT_HO, 236.2, 10.810, 20037.0, 14.154, 3724.5, 5.1645, 410.8, 11.300, PETSC_TRUE, PETSC_TRUE, 1.5e6, 7.445e7};
   Prolate geo = {0.0291, 0.557, 1.00, -60.0, 60.0};
@@ -353,11 +468,6 @@ int main(int argc, char **argv)
   PetscScalar c0[C_N], c1[C_N];
 
   PetscFunctionBeginUser;
-  PetscCall(PetscInitialize(&argc, &argv, NULL, "biofem-solid3d: 3D active-strain solid, P2-P1"));
-#ifndef BIOFEM_GIT
-#define BIOFEM_GIT "unknown"
-#endif
-  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[biofem-solid3d] source %s\n", BIOFEM_GIT));
   PetscOptionsBegin(PETSC_COMM_WORLD, "", "biofem-solid3d options", "");
   PetscCall(PetscOptionsEnum("-problem", "cube | plate | lv", "", ProblemNames, (PetscEnum)prob, (PetscEnum *)&prob, NULL));
   PetscCall(PetscOptionsReal("-gamma", "peak activation", "", gmax, &gmax, NULL));
@@ -375,6 +485,10 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsReal("-nitti_Ly", "plate: Nitti patch Ly", "", nLy, &nLy, NULL));
   PetscCall(PetscOptionsReal("-alpha_endo", "lv: helix angle at the endocardium [deg]", "", geo.a_endo, &geo.a_endo, NULL));
   PetscCall(PetscOptionsReal("-alpha_epi", "lv: helix angle at the epicardium [deg]", "", geo.a_epi, &geo.a_epi, NULL));
+  PetscCall(PetscOptionsReal("-p_ed", "lv: end-diastolic cavity pressure [Pa]; > 0 runs the PV loop (Track P)", "", p_ed, &p_ed, NULL));
+  PetscCall(PetscOptionsReal("-p_ao", "lv: aortic pressure during ejection [Pa]", "", p_ao, &p_ao, NULL));
+  PetscCall(PetscOptionsInt("-fill_steps", "lv: pressure steps of the passive filling 0 -> p_ed", "", fill_steps, &fill_steps, NULL));
+  PetscCall(PetscOptionsReal("-volume_rtol", "lv: isovolumic phases, |V - V*| <= rtol V*", "", vtol, &vtol, NULL));
   PetscOptionsEnd();
   if (prob == PROB_PLATE) m.law = MAT_NH;
   if (vtk_every < 0) vtk_every = (prob == PROB_LV) ? out_every : 0;
@@ -409,6 +523,7 @@ int main(int argc, char **argv)
     const PetscReal Bpt[3] = {geo.d * PetscSinhReal(geo.lp) * PetscSinReal(mub), 0.0, geo.d * PetscCoshReal(geo.lp) * PetscCosReal(mub)};
     PetscInt nA, nB;
     PetscCall(LabelFromFaceSets(dm, "base", 3));
+    PetscCall(LabelFromFaceSets(dm, "endo", 1));
     PetscCall(LabelVertexAt(dm, "pinA", Apt, 1e-8, &nA));
     PetscCall(LabelVertexAt(dm, "pinB", Bpt, 1e-8, &nB));
     PetscCheck(nA && nB, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "rim pin vertices not found (A %d, B %d)", (int)nA, (int)nB);
@@ -444,6 +559,14 @@ int main(int argc, char **argv)
     PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "pinA", lab, 1, &one, 0, 2, cxy, (void (*)(void))zero_fn, NULL, NULL, NULL));
     PetscCall(DMGetLabel(dm, "pinB", &lab));
     PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "pinB", lab, 1, &one, 0, 1, &cy, (void (*)(void))zero_fn, NULL, NULL, NULL));
+    if (p_ed > 0.0) {                                       /* cavity pressure on the endocardium */
+      PetscInt bd, comps[3] = {0, 1, 2}; PetscWeakForm wf;
+      PetscCall(DMGetLabel(dm, "endo", &lab));
+      PetscCall(DMAddBoundary(dm, DM_BC_NATURAL, "cavity", lab, 1, &one, 0, 3, comps, NULL, NULL, NULL, &bd));
+      PetscCall(PetscDSGetBoundary(ds, bd, &wf, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL));
+      PetscCall(PetscWeakFormSetIndexBdResidual(wf, lab, 1, 0, 0, 0, f0_pressure, 0, NULL));
+      PetscCall(PetscWeakFormSetIndexBdJacobian(wf, lab, 1, 0, 0, 0, 0, NULL, 0, g1_pressure, 0, NULL, 0, NULL));
+    }
   }
 
   /* fibers as an auxiliary P1 field (lv) */
@@ -471,6 +594,7 @@ int main(int argc, char **argv)
   c0[C_FIBER_AUX] = (prob == PROB_LV); c0[C_FA_DIAG] = (prob == PROB_PLATE);
   c0[C_A1] = c0[C_A2] = c0[C_A3] = 1.0;
   c0[C_F0] = 1.0; c0[C_S0 + 2] = 1.0;                       /* uniform fiber e_x, sheet e_z (cube) */
+  c0[C_ZB] = geo.d * PetscCoshReal(geo.le) * PetscCosReal(mu_base_deg * PETSC_PI / 180.0);   /* z of the endo rim */
   PetscCall(PetscDSSetConstants(ds, C_N, c0));
 
   PetscCall(DMCreateGlobalVector(dm, &U)); PetscCall(PetscObjectSetName((PetscObject)U, "solution"));
@@ -490,6 +614,8 @@ int main(int argc, char **argv)
       /* read by biofem post solid3d: the vertex files u_stepNNNN.txt are at t = k/steps of the gamma ramp */
       fprintf(fp, "code=biofem-solid3d\nsource=%s\nproblem=%s\nmesh=%s\ngamma=%g\nsteps=%d\nout_every=%d\nalpha_endo=%g\nalpha_epi=%g\n",
               BIOFEM_GIT, ProblemNames[prob], mesh, (double)gmax, (int)steps, (int)out_every, (double)geo.a_endo, (double)geo.a_epi);
+      /* p_ed > 0: u_step0000.txt is end-diastole (after filling); metrics are relative to it */
+      if (prob == PROB_LV && p_ed > 0.0) fprintf(fp, "p_ed=%g\np_ao=%g\nfill_steps=%d\n", (double)p_ed, (double)p_ao, (int)fill_steps);
       fclose(fp);
     }
     PetscCallMPI(MPI_Barrier(PETSC_COMM_WORLD));
@@ -498,32 +624,81 @@ int main(int argc, char **argv)
   /* plate: Nitti's diagonal Fa at gamma */
   const PetscReal a1 = 1.0 - gmax / (nLx * nLx), a2 = 1.0 - gmax / (nLy * nLy), a3 = 1.0 / (a1 * a2);
   PetscLogDouble t0; PetscCall(PetscTime(&t0));
+  const PetscBool pv = (PetscBool)(prob == PROB_LV && p_ed > 0.0);
+  const char *phase_names[5] = {"filling", "isovol-contraction", "ejection", "isovol-relaxation", "filling"};
+  FILE *fpv = NULL; PetscReal V, EDV = 0.0, ESV = 0.0, Vfix = 0.0; PetscInt phase = 0;
+  if (pv) {                                                  /* phase 0: passive filling 0 -> p_ed at gamma = 0 */
+    char fn[PETSC_MAX_PATH_LEN]; PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/pv.csv", out_dir));
+    PetscCall(PetscFOpen(PETSC_COMM_WORLD, fn, "w", &fpv));
+    PetscCall(PetscFPrintf(PETSC_COMM_WORLD, fpv, "step,t,phase,gamma,p_kPa,V_ml,converged,newton_its\n"));
+    PetscCall(CavityVolume(dm, ds, U, c0, &V, NULL));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[filling] unloaded cavity volume %.3f ml\n", (double)(V * 1e6)));
+    for (PetscInt j = 1; j <= fill_steps; j++) {
+      PetscInt its; PetscBool ok;
+      for (PetscInt i = 0; i < C_N; i++) c1[i] = c0[i];
+      c1[C_PCAV] = p_ed * (PetscReal)j / fill_steps;
+      PetscCall(SolveStep(snes, ds, U, c0, c1, 0.0, vtol, levels, &its, &ok));
+      PetscCall(CavityVolume(dm, ds, U, c0, &V, NULL));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[filling %d/%d] p_c %.3f kPa: V %.3f ml, %s, %d Newton its\n", (int)j, (int)fill_steps,
+                            (double)(PetscRealPart(c1[C_PCAV]) / 1000), (double)(V * 1e6), ok ? "converged" : "NOT converged", (int)its));
+      PetscCheck(ok, PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "filling step %d did not converge", (int)j);
+    }
+    EDV = V; Vfix = EDV; phase = 1;
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "END-DIASTOLE: EDV %.3f ml at %.3f kPa\n", (double)(EDV * 1e6), (double)(p_ed / 1000)));
+    PetscCall(PetscFPrintf(PETSC_COMM_WORLD, fpv, "0,0,0,0,%.6f,%.6f,1,0\n", (double)(p_ed / 1000), (double)(EDV * 1e6)));
+    PetscCall(WriteStep(dm, U, out_dir, 0, PETSC_TRUE, (PetscBool)(vtk_every > 0)));
+  }
+  Vec Ustart; PetscScalar cstart[C_N];
+  PetscCall(VecDuplicate(U, &Ustart));
   for (PetscInt k = 1; k <= steps; k++) {
+    const PetscReal tt = (PetscReal)k / steps;
     for (PetscInt i = 0; i < C_N; i++) c1[i] = c0[i];
     if (prob == PROB_LV) {                                 /* Pezzuto ramp: linear up to T/2, back to 0 at T */
-      const PetscReal tt = (PetscReal)k / steps;
       c1[C_GAMMA] = gmax * (1.0 - PetscAbsReal(2.0 * tt - 1.0));
     } else {
-      const PetscReal s = (PetscReal)k / steps;
+      const PetscReal s = tt;
       c1[C_GAMMA] = gmax * s;
       c1[C_A1] = 1.0 + (a1 - 1.0) * s; c1[C_A2] = 1.0 + (a2 - 1.0) * s; c1[C_A3] = 1.0 + (a3 - 1.0) * s;
       c1[C_TRACTION] = traction * s;
     }
-    PetscInt its; PetscBool ok;
-    PetscCall(SolveStep(snes, ds, U, c0, c1, levels, &its, &ok));
+    PetscInt its = 0; PetscBool ok;
+    if (pv && phase == 2 && tt > 0.5 + 1e-12) {           /* gamma starts to fall: the aortic valve closes */
+      PetscCall(CavityVolume(dm, ds, U, c0, &ESV, NULL)); Vfix = ESV; phase = 3;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "END-SYSTOLE: ESV %.3f ml, EF %.2f%%\n", (double)(ESV * 1e6), (double)(100 * (EDV - ESV) / EDV)));
+    }
+    PetscCall(VecCopy(U, Ustart)); for (PetscInt i = 0; i < C_N; i++) cstart[i] = c0[i];
+    for (;;) {                                             /* a valve event re-solves the step in the new phase */
+      const PetscBool iso = (PetscBool)(pv && (phase == 1 || phase == 3));
+      if (pv && !iso) c1[C_PCAV] = (phase == 2) ? p_ao : p_ed;
+      PetscCall(SolveStep(snes, ds, U, c0, c1, iso ? Vfix : 0.0, vtol, levels, &its, &ok));
+      if (!ok || !pv) break;
+      const PetscReal pc = PetscRealPart(c0[C_PCAV]);
+      PetscInt next = phase;
+      if (phase == 1 && pc >= p_ao) next = 2;               /* aortic valve opens */
+      if (phase == 3 && pc <= p_ed) next = 4;               /* mitral valve opens */
+      if (next == phase) break;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "  %s valve opens at t = %.3f (p_c %.3f kPa): step redone as %s\n", next == 2 ? "aortic" : "mitral",
+                            (double)tt, (double)(pc / 1000), phase_names[next]));
+      phase = next; PetscCall(VecCopy(Ustart, U)); for (PetscInt i = 0; i < C_N; i++) c0[i] = cstart[i];
+      PetscCall(PetscDSSetConstants(ds, C_N, c0));
+    }
     PetscLogDouble t1; PetscCall(PetscTime(&t1));
-    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[step %d] gamma %.5f: %s, %d Newton its (%.1f s)\n", (int)k, (double)PetscRealPart(c1[C_GAMMA]),
-                          ok ? "converged" : "NOT converged", (int)its, (double)(t1 - t0)));
+    if (pv) {
+      PetscCall(CavityVolume(dm, ds, U, c0, &V, NULL));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[step %d %s] gamma %.5f: p_c %.3f kPa, V %.3f ml, %s, %d Newton its (%.1f s)\n", (int)k, phase_names[phase],
+                            (double)PetscRealPart(c1[C_GAMMA]), (double)(PetscRealPart(c0[C_PCAV]) / 1000), (double)(V * 1e6),
+                            ok ? "converged" : "NOT converged", (int)its, (double)(t1 - t0)));
+      PetscCall(PetscFPrintf(PETSC_COMM_WORLD, fpv, "%d,%.6f,%d,%.6f,%.6f,%.6f,%d,%d\n", (int)k, (double)tt, (int)phase, (double)PetscRealPart(c1[C_GAMMA]),
+                             (double)(PetscRealPart(c0[C_PCAV]) / 1000), (double)(V * 1e6), (int)ok, (int)its));
+    } else
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[step %d] gamma %.5f: %s, %d Newton its (%.1f s)\n", (int)k, (double)PetscRealPart(c1[C_GAMMA]),
+                            ok ? "converged" : "NOT converged", (int)its, (double)(t1 - t0)));
     if (!ok) { PetscCall(PetscPrintf(PETSC_COMM_WORLD, "stopping: step %d failed with %d substep levels\n", (int)k, (int)levels)); break; }
-    if (prob == PROB_LV && (k % out_every == 0 || k == steps)) {
-      char fn[PETSC_MAX_PATH_LEN]; PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/u_step%04d.txt", out_dir, (int)k));
-      PetscCall(WriteVertexDisplacement(dm, U, fn));
-    }
-    if (vtk_every > 0 && (k % vtk_every == 0 || k == steps)) {
-      char fn[PETSC_MAX_PATH_LEN]; PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/solid3d_%04d.vtu", out_dir, (int)k));
-      PetscCall(WriteVTU(dm, U, fn));
-    }
+    PetscCall(WriteStep(dm, U, out_dir, k, (PetscBool)(prob == PROB_LV && (k % out_every == 0 || k == steps)),
+                        (PetscBool)(vtk_every > 0 && (k % vtk_every == 0 || k == steps))));
   }
+  PetscCall(VecDestroy(&Ustart));
+  if (fpv) PetscCall(PetscFClose(PETSC_COMM_WORLD, fpv));
 
   /* checks */
   if (prob == PROB_CUBE || prob == PROB_PLATE) {
@@ -563,6 +738,20 @@ int main(int argc, char **argv)
   PetscCall(VecDestroy(&U));
   PetscCall(PetscFEDestroy(&fe[0])); PetscCall(PetscFEDestroy(&fe[1]));
   PetscCall(SNESDestroy(&snes)); PetscCall(DMDestroy(&dm));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+#ifdef SOLID3D_STANDALONE
+int main(int argc, char **argv)
+{
+  PetscFunctionBeginUser;
+  PetscCall(PetscInitialize(&argc, &argv, NULL, "biofem-solid3d: 3D active-strain solid, P2-P1"));
+#ifndef BIOFEM_GIT
+#define BIOFEM_GIT "unknown"
+#endif
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[biofem-solid3d] source %s\n", BIOFEM_GIT));
+  PetscCall(Solid3dRun());
   PetscCall(PetscFinalize());
   return 0;
 }
+#endif

@@ -5,6 +5,8 @@ A vertex run is a directory with
   u_stepNNNN.txt        one line per mesh vertex: X Y Z ux uy uz (reference position, displacement, metres)
 written by biofem-solid3d (-problem lv) and, for the pulse reference, by pulse3d/export_vertex_u.py. Step k is at
 t = k/steps of the gamma ramp (k = 0 is the reference). Vertices are matched to the mesh by position.
+Runs with cavity pressure (Track P, p_ed in run_info.txt) also write u_step0000.txt = end-diastole and pv.csv; their metrics
+are relative to end-diastole (as Pezzuto), and a PV-loop figure <out>_pv.png is written.
 
 Metrics (definitions follow biofem post lv so shell runs can be overlaid; long axis z, apex at +z):
   - cavity volume V and EF(t) = (V0 - V)/V0: divergence theorem over the deformed endocardial triangles, origin on the base
@@ -105,12 +107,13 @@ def metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
         x, X = P[:, :2], P0[:, :2]
         return np.degrees(np.arctan2(-(x[:, 0] * X[:, 1] - x[:, 1] * X[:, 0]), np.sum(x * X, axis=1)))   # e3 = -z
     rad = lambda P: np.hypot(P[:, 0], P[:, 1])
-    V0, W0, L0 = cavity(X0), wall(X0), X0[iapex, 2] - zb
-    h0 = rad(X0[pv][bp]).mean() - rad(X0[ev][be]).mean()
+    R = X0 + r["U"][0]                                            # reference of the metrics: end-diastole with pressure
+    V0, W0, L0 = cavity(R), wall(X0), R[iapex, 2] - zb
+    h0 = rad(R[pv][bp]).mean() - rad(R[ev][be]).mean()
     out = {k: [] for k in ("t", "k", "V", "EF", "wall", "thick", "short", "tors")}
     for k in sorted(r["U"]):
         P = X0 + r["U"][k]
-        th = theta(P[pv], X0[pv])
+        th = theta(P[pv], R[pv])
         out["t"].append(k / r["steps"]); out["k"].append(k)
         V = cavity(P); out["V"].append(V * 1e6); out["EF"].append(100 * (V0 - V) / V0)
         out["wall"].append(100 * (wall(P) / W0 - 1))
@@ -173,6 +176,25 @@ def cmd_solid3d(args):
     out = Path(args.out or "solid3d_metrics.png")
     fig.savefig(out, dpi=130)
     print(f"[biofem] plot saved -> {out}")
+
+    pvs = [(lab, np.genfromtxt(Path(d) / "pv.csv", delimiter=",", names=True)) for d, lab in zip(dirs, labels)
+           if (Path(d) / "pv.csv").exists()]
+    if pvs:                                             # Track P: PV loop and pressure / volume vs time
+        fig, axs = plt.subplots(1, 3, figsize=(13, 4))
+        for i, (lab, pv) in enumerate(pvs):
+            c = style.case_color(i)
+            axs[0].plot(pv["V_ml"], pv["p_kPa"], color=c, lw=1.8, label=lab)
+            axs[1].plot(pv["t"], pv["p_kPa"], color=c, lw=1.8, label=lab)
+            axs[2].plot(pv["t"], pv["V_ml"], color=c, lw=1.8, label=lab)
+            edv, esv = pv["V_ml"][0], pv["V_ml"].min()
+            print(f"[biofem] {lab}: EDV {edv:.2f} ml, ESV {esv:.2f} ml, SV {edv - esv:.2f} ml, EF {100 * (edv - esv) / edv:.1f}%")
+        for ax, (xl, yl) in zip(axs, [("cavity volume (ml)", "cavity pressure (kPa)"), ("t / T", "cavity pressure (kPa)"),
+                                      ("t / T", "cavity volume (ml)")]):
+            ax.set_ylabel(yl, fontsize=9); style.finish(ax, xl)
+        axs[0].legend(frameon=False, fontsize=7)
+        fig.tight_layout()
+        fig.savefig(out.with_name(out.stem + "_pv.png"), dpi=130)
+        print(f"[biofem] PV loop saved -> {out.with_name(out.stem + '_pv.png')}")
 
     with open(out.with_suffix(".csv"), "w", newline="") as fh:
         w = csv.writer(fh); cols = ["t", "k", "V", "EF", "wall", "thick", "short", "tors"]

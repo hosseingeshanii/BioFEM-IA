@@ -3,6 +3,7 @@
 Subcommands:
   run          run solver (submits to SLURM when on a cluster)
   sweep        generate mesh cases and submit parameter sweep jobs
+  case         case.json <-> control.dat (options grouped by topic)
   post         post-process solver output (field, convergence, lv, animate)
   postprocess  alias of `post field`
 """
@@ -18,6 +19,7 @@ from .post.convergence import cmd_convergence
 from .post.lv import cmd_lv
 from .post.animate import cmd_animate
 from .post.solid3d import cmd_solid3d
+from .case import cmd_case
 
 
 def _add_common_post_args(p, default_out):
@@ -78,7 +80,9 @@ Run:
     p_run = sub.add_parser(
         "run", help="run solver in current case directory",
         description=(
-            "Run the solver from the current directory (must contain control.dat).\n"
+            "Run the solver from the current directory (case.json or control.dat).\n"
+            "With case.json, control.dat is generated from it first; \"model\" picks\n"
+            "the shell or the 3D solid (same executable, -model shell|solid3d).\n"
             "On a SLURM cluster the job is submitted via sbatch unless you are\n"
             "already inside an interactive allocation."
         ),
@@ -141,6 +145,21 @@ Run:
                       help="re-submit jobs that already completed successfully")
     p_sw.add_argument("--dry-run", action="store_true",
                       help="generate jobfiles but do not submit")
+
+    # case
+    p_case = sub.add_parser("case", help="case.json (options grouped by topic) <-> control.dat",
+                            description=__import__("biofem.case", fromlist=["x"]).__doc__,
+                            formatter_class=argparse.RawDescriptionHelpFormatter)
+    case_sub = p_case.add_subparsers(dest="case_command", metavar="CASE_COMMAND")
+    p_cc = case_sub.add_parser("convert", help="sort a hand-written control.dat into case.json sections")
+    p_cc.add_argument("control", nargs="?", default="control.dat")
+    p_cc.add_argument("-o", "--out", default="case.json")
+    p_cc.add_argument("--force", action="store_true", help="overwrite an existing output file")
+    p_cs = case_sub.add_parser("show", help="list the solver options a case.json gives, by section")
+    p_cs.add_argument("case", nargs="?", default="case.json")
+    p_cw = case_sub.add_parser("write", help="generate control.dat next to case.json")
+    p_cw.add_argument("case", nargs="?", default="case.json")
+    p_cw.add_argument("--force", action="store_true", help="overwrite a hand-written control.dat")
 
     # postprocess
     p_pp = sub.add_parser(
@@ -242,7 +261,10 @@ Run:
         {"field": cmd_postprocess, "convergence": cmd_convergence, "lv": cmd_lv, "animate": cmd_animate,
          "solid3d": cmd_solid3d}[args.post_command](args)
         return
-    {"run": cmd_run, "sweep": cmd_sweep, "postprocess": cmd_postprocess}[args.command](args)
+    if args.command == "case" and args.case_command is None:
+        p_case.print_help()
+        sys.exit(0)
+    {"run": cmd_run, "sweep": cmd_sweep, "postprocess": cmd_postprocess, "case": cmd_case}[args.command](args)
 
 
 if __name__ == "__main__":

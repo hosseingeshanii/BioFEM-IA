@@ -20,6 +20,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include "lv_geometry.h"
 #include "jacobian_pc.h"
 #include "biofem_proto.h"
+#include "solid3d.h"
 
 PetscReal  E=0.0, mu=0.0, rho=0.0, h0=0.0, dt=0.0, dampfactor=0.0, char_length_x=1.0, char_length_y=1.0, char_length_z=1.0;
 PetscInt   dof=3, twod=0, damping=0, membrane=0, bending=0, outghost=0, ConstitutiveLawNonLinear=0;
@@ -375,6 +376,18 @@ int main(int argc, char **argv)
     if (access(control_path, F_OK) == 0) {
       PetscOptionsInsertFile(PETSC_COMM_WORLD, PETSC_NULL, control_path, PETSC_TRUE);
     }
+  }
+
+  /* -model shell (default) | solid3d: the 3D P2-P1 solid has its own setup and time loop (src/solid3d.c) */
+  {
+    char model[32] = "shell";
+    PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-model", model, sizeof(model), PETSC_NULL);
+    if (strcmp(model, "solid3d") == 0) {
+      PetscErrorCode ierr = Solid3dRun();
+      if (!ierr) ierr = PetscFinalize();
+      return (int)ierr;
+    }
+    if (strcmp(model, "shell") != 0) SETERRABORT(PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "-model must be shell or solid3d");
   }
   
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-nbody", &nbody, PETSC_NULL);

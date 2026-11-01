@@ -1,0 +1,49 @@
+{
+  "model": "solid3d",
+  "description": "Pezzuto & Ambrosi 2014 LV, 3D P2-P1, HO active strain, PV loop (Track P)",
+  "geometry": {
+    "problem": "lv",
+    "dm_plex_filename": "pz3d.msh",
+    "_mesh": "gmsh 2.2 prolate mesh with physical surfaces 1 endo, 2 epi, 3 base (BioFEM-studies pezzuto_lv/pulse3d/prolate_mesh.py)"
+  },
+  "material": {
+    "ho_tension_only": true,
+    "ho_sheet": true
+  },
+  "activation": {
+    "gamma": 0.2
+  },
+  "fibers": {
+    "alpha_endo": -60,
+    "alpha_epi": 60
+  },
+  "bcs": {
+    "_note": "base u_z = 0 and two rim pins are built in for problem lv"
+  },
+  "pressure": {
+    "p_ed": 1000,
+    "p_ao": 10000,
+    "fill_steps": 20,
+    "volume_rtol": 1e-8
+  },
+  "time": {
+    "steps": 100,
+    "substep_levels": 3
+  },
+  "solver": {
+    "snes_type": "newtonls",
+    "snes_linesearch_type": "bt",
+    "snes_rtol": 1e-8,
+    "snes_atol": 1e-9,
+    "snes_max_it": 30,
+    "snes_converged_reason": true,
+    "ksp_type": "preonly",
+    "pc_type": "lu",
+    "pc_factor_mat_solver_type": "mumps"
+  },
+  "output": {
+    "out_dir": "out",
+    "out_every": 5,
+    "vtk_every": 5
+  }
+}

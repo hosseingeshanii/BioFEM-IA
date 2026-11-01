@@ -81,6 +81,8 @@ set(BIOFEM_COMMON
   src/manufactured_active_strain.c
   src/cuda_processes.c
   src/kokkos_processes.c
+  src/solid3d.c
+  src/solid3d_ho.c
 )
 
 # Helper: apply flags every backend needs
@@ -108,9 +110,11 @@ if(BIOFEM_DMPLEX)
   install(TARGETS biofem-dmplex DESTINATION bin)
   message(STATUS "Backend enabled: dmplex")
 
-  # 3D active-strain HO solid (P2-P1, DMPlex/PetscFE); separate executable while it is being developed
+  # 3D active-strain solid (P2-P1, DMPlex/PetscFE): every biofem executable runs it with -model solid3d;
+  # biofem-solid3d is the same solver without the shell code
   add_executable(biofem-solid3d src/solid3d.c src/solid3d_ho.c)
   biofem_common_setup(biofem-solid3d)
+  target_compile_definitions(biofem-solid3d PRIVATE SOLID3D_STANDALONE)
   install(TARGETS biofem-solid3d DESTINATION bin)
 endif()
 
