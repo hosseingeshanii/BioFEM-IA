@@ -10,6 +10,7 @@ static char help[] = "Hosein FEM Petsc 3.6.2 \n\n";
 #include <unistd.h>
 #include <stdbool.h>  
 #include <stdlib.h>
+#include <limits.h>
 #include "active_strain.h"
 #include "cuda_bridge.h"
 #include "kokkos_bridge.h"
@@ -367,14 +368,18 @@ int main(int argc, char **argv)
 #endif
 
   /* Also load control.dat from -in_dir if provided (e.g. when running from a
-   * different directory).  These are inserted AFTER argv so in_dir file wins
-   * over the cwd control.dat but still loses to explicit command-line flags. */
+   * different directory): it wins over the cwd control.dat but still loses to
+   * explicit command-line flags, so the command line is inserted again after it.
+   * in_dir defaults to "./": that file is the one PetscInitialize already read,
+   * and inserting it again would override the command line. */
   PetscOptionsGetString(PETSC_NULL, PETSC_NULL, "-in_dir", in_dir, 255, PETSC_NULL);
   if (in_dir[0] != '\0') {
-    char control_path[512];
+    char control_path[512], a[PATH_MAX], b[PATH_MAX];
     snprintf(control_path, sizeof(control_path), "%s/%s", in_dir, "control.dat");
-    if (access(control_path, F_OK) == 0) {
+    const PetscBool same = (PetscBool)(realpath(control_path, a) && realpath("control.dat", b) && strcmp(a, b) == 0);
+    if (access(control_path, F_OK) == 0 && !same) {
       PetscOptionsInsertFile(PETSC_COMM_WORLD, PETSC_NULL, control_path, PETSC_TRUE);
+      PetscOptionsInsert(PETSC_NULL, &argc, &argv, PETSC_NULL);
     }
   }
 
