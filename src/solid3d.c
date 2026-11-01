@@ -444,6 +444,46 @@ static PetscErrorCode SolveStep(SNES snes, PetscDS ds, Vec U, PetscScalar c0[], 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* -test_jacobian_dir: the follower-load tangent alone. With D(.) = (.)(p_c) - (.)(0): D(J v) against the central difference
+   D(R(u + h v) - R(u - h v)) / 2h along a random v; the elastic part cancels exactly in D (the full -snes_test_jacobian
+   is dense and too slow on LV meshes) */
+static PetscErrorCode TestJacobianDir(SNES snes, PetscDS ds, Vec U, const PetscScalar c[], PetscReal pc, const char *where)
+{
+  Mat J; Vec v, Jv[2], FD[2][4], R, W; PetscRandom rnd; PetscReal nu, nv, err, nJv; PetscScalar cs[C_N];
+  DM dm;
+  PetscFunctionBeginUser;
+  PetscCall(SNESGetDM(snes, &dm));
+  PetscCall(DMCreateMatrix(dm, &J));
+  PetscCall(VecDuplicate(U, &v)); PetscCall(VecDuplicate(U, &R)); PetscCall(VecDuplicate(U, &W));
+  PetscCall(PetscRandomCreate(PETSC_COMM_WORLD, &rnd)); PetscCall(PetscRandomSetInterval(rnd, -1.0, 1.0));
+  PetscCall(VecSetRandom(v, rnd)); PetscCall(PetscRandomDestroy(&rnd));
+  PetscCall(VecNorm(U, NORM_INFINITY, &nu)); PetscCall(VecNorm(v, NORM_INFINITY, &nv));
+  PetscCall(VecScale(v, 1e-3 * PetscMax(nu, 1e-6) / nv));
+  for (PetscInt i = 0; i < C_N; i++) cs[i] = c[i];
+  for (PetscInt q = 0; q < 2; q++) {                       /* q = 0: p_c = 0, q = 1: p_c = pc */
+    cs[C_PCAV] = q ? pc : 0.0; PetscCall(PetscDSSetConstants(ds, C_N, cs));
+    PetscCall(VecDuplicate(U, &Jv[q]));
+    PetscCall(SNESComputeJacobian(snes, U, J, J)); PetscCall(MatMult(J, v, Jv[q]));
+    for (PetscInt e = 0; e < 4; e++) {
+      const PetscReal h = PetscPowReal(10.0, -2.0 - 2.0 * e);
+      PetscCall(VecDuplicate(U, &FD[q][e]));
+      PetscCall(VecWAXPY(W, h, v, U)); PetscCall(SNESComputeFunction(snes, W, FD[q][e]));
+      PetscCall(VecWAXPY(W, -h, v, U)); PetscCall(SNESComputeFunction(snes, W, R));
+      PetscCall(VecAXPY(FD[q][e], -1.0, R)); PetscCall(VecScale(FD[q][e], 0.5 / h));
+    }
+  }
+  PetscCall(VecAXPY(Jv[1], -1.0, Jv[0])); PetscCall(VecNorm(Jv[1], NORM_2, &nJv));
+  for (PetscInt e = 0; e < 4; e++) {
+    PetscCall(VecAXPY(FD[1][e], -1.0, FD[0][e])); PetscCall(VecAXPY(FD[1][e], -1.0, Jv[1])); PetscCall(VecNorm(FD[1][e], NORM_2, &err));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[test_jacobian_dir %s] follower load, h %.0e: |D(Jv) - D(FD)| / |D(Jv)| = %.3e (|D(Jv)| %.3e)\n",
+                          where, (double)PetscPowReal(10.0, -2.0 - 2.0 * e), (double)(err / nJv), (double)nJv));
+  }
+  PetscCall(PetscDSSetConstants(ds, C_N, (PetscScalar *)c));
+  PetscCall(MatDestroy(&J)); PetscCall(VecDestroy(&v)); PetscCall(VecDestroy(&R)); PetscCall(VecDestroy(&W));
+  for (PetscInt q = 0; q < 2; q++) { PetscCall(VecDestroy(&Jv[q])); for (PetscInt e = 0; e < 4; e++) PetscCall(VecDestroy(&FD[q][e])); }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* vertex file u_stepNNNN.txt and VTU solid3d_NNNN.vtu for step k */
 static PetscErrorCode WriteStep(DM dm, Vec U, const char out_dir[], PetscInt k, PetscBool vertex, PetscBool vtk)
 {
@@ -461,6 +501,7 @@ PetscErrorCode Solid3dRun(void)
   Problem prob = PROB_CUBE;
   PetscReal gmax = 0.2, traction = 9.0e5, nLx = 1.2, nLy = 0.9, p_ed = 0.0, p_ao = 1.0e4, vtol = 1e-8;
   PetscInt steps = 4, out_every = 5, levels = 3, vtk_every = -1, fill_steps = 20;
+  PetscBool test_jdir = PETSC_FALSE;
   char out_dir[PETSC_MAX_PATH_LEN] = "solid3d_out";
   MatParams m = {MAT_HO, 236.2, 10.810, 20037.0, 14.154, 3724.5, 5.1645, 410.8, 11.300, PETSC_TRUE, PETSC_TRUE, 1.5e6, 7.445e7};
   Prolate geo = {0.0291, 0.557, 1.00, -60.0, 60.0};
@@ -488,6 +529,7 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(PetscOptionsReal("-p_ed", "lv: end-diastolic cavity pressure [Pa]; > 0 runs the PV loop (Track P)", "", p_ed, &p_ed, NULL));
   PetscCall(PetscOptionsReal("-p_ao", "lv: aortic pressure during ejection [Pa]", "", p_ao, &p_ao, NULL));
   PetscCall(PetscOptionsInt("-fill_steps", "lv: pressure steps of the passive filling 0 -> p_ed", "", fill_steps, &fill_steps, NULL));
+  PetscCall(PetscOptionsBool("-test_jacobian_dir", "check J v against a central difference of R (lv: unloaded and at end-diastole)", "", test_jdir, &test_jdir, NULL));
   PetscCall(PetscOptionsReal("-volume_rtol", "lv: isovolumic phases, |V - V*| <= rtol V*", "", vtol, &vtol, NULL));
   PetscOptionsEnd();
   if (prob == PROB_PLATE) m.law = MAT_NH;
@@ -632,6 +674,15 @@ PetscErrorCode Solid3dRun(void)
     PetscCall(PetscFOpen(PETSC_COMM_WORLD, fn, "w", &fpv));
     PetscCall(PetscFPrintf(PETSC_COMM_WORLD, fpv, "step,t,phase,gamma,p_kPa,V_ml,converged,newton_its\n"));
     PetscCall(CavityVolume(dm, ds, U, c0, &V, NULL));
+    if (test_jdir) {                                        /* on a small random state, gamma 0.1 */
+      Vec r; PetscRandom rnd; PetscScalar cs[C_N];
+      for (PetscInt i = 0; i < C_N; i++) cs[i] = c0[i];
+      cs[C_GAMMA] = 0.1;
+      PetscCall(VecDuplicate(U, &r)); PetscCall(PetscRandomCreate(PETSC_COMM_WORLD, &rnd)); PetscCall(PetscRandomSetInterval(rnd, -1e-4, 1e-4));
+      PetscCall(VecSetRandom(r, rnd)); PetscCall(PetscRandomDestroy(&rnd));
+      PetscCall(TestJacobianDir(snes, ds, r, cs, 5000.0, "random state"));
+      PetscCall(VecDestroy(&r));
+    }
     PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[filling] unloaded cavity volume %.3f ml\n", (double)(V * 1e6)));
     for (PetscInt j = 1; j <= fill_steps; j++) {
       PetscInt its; PetscBool ok;
@@ -644,6 +695,7 @@ PetscErrorCode Solid3dRun(void)
       PetscCheck(ok, PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "filling step %d did not converge", (int)j);
     }
     EDV = V; Vfix = EDV; phase = 1;
+    if (test_jdir) PetscCall(TestJacobianDir(snes, ds, U, c0, p_ed, "end-diastole"));
     PetscCall(PetscPrintf(PETSC_COMM_WORLD, "END-DIASTOLE: EDV %.3f ml at %.3f kPa\n", (double)(EDV * 1e6), (double)(p_ed / 1000)));
     PetscCall(PetscFPrintf(PETSC_COMM_WORLD, fpv, "0,0,0,0,%.6f,%.6f,1,0\n", (double)(p_ed / 1000), (double)(EDV * 1e6)));
     PetscCall(WriteStep(dm, U, out_dir, 0, PETSC_TRUE, (PetscBool)(vtk_every > 0)));
