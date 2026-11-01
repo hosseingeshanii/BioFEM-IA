@@ -17,6 +17,7 @@ from .post.field import cmd_postprocess
 from .post.convergence import cmd_convergence
 from .post.lv import cmd_lv
 from .post.animate import cmd_animate
+from .post.solid3d import cmd_solid3d
 
 
 def _add_common_post_args(p, default_out):
@@ -155,7 +156,7 @@ Run:
     _add_field_args(p_pp)
 
     # post: post-processing commands (field = the same as postprocess)
-    p_post = sub.add_parser("post", help="post-process solver output (field, convergence, lv, animate)")
+    p_post = sub.add_parser("post", help="post-process solver output (field, convergence, lv, solid3d, animate)")
     post_sub = p_post.add_subparsers(dest="post_command", metavar="POST_COMMAND")
     p_field = post_sub.add_parser("field", help="plot avg node/element field vs time from VTK output",
                                   description=p_pp.description)
@@ -194,6 +195,20 @@ Run:
     p_lv.add_argument("--ref", default="", help="JSON file with reference values (label, EF, SV, thickening, shortening, torsion)")
     _add_common_post_args(p_lv, "lv_metrics.png")
 
+    p_s3 = post_sub.add_parser(
+        "solid3d", help="LV metrics vs time for 3D runs (vertex-run format), with pulse / shell / paper overlays",
+        description=("Reads 3D runs in the vertex-run format (run_info.txt + u_stepNNNN.txt: biofem-solid3d -problem lv, or the "
+                     "pulse exporter) and plots EF, mid-axis thickening, apex-base shortening, torsion and the wall-volume change "
+                     "vs time, with the definitions of biofem post lv. Two or more --dir on the same mesh add the displacement "
+                     "difference against the first. Writes <out>.png, <out>.csv (and <out>_du.csv)."))
+    p_s3.add_argument("--dir", action="append", help="vertex-run directory (repeat to overlay; the first is the base for differences)")
+    p_s3.add_argument("--mesh", default="", help="gmsh .msh of the runs (default: the path in run_info.txt)")
+    p_s3.add_argument("--ref-shell", action="append", default=[], help="shell case directory to overlay (biofem post lv metrics; repeat)")
+    p_s3.add_argument("--ref", default="", help="JSON with paper values (label, EF, thickening, shortening, torsion), drawn as peak lines")
+    p_s3.add_argument("--band", type=float, default=0.4, help="half-width of the mid-axis band for thickening, in cm (default: 0.4)")
+    p_s3.add_argument("--torsion-sections", default="0.10,0.85", help="base,apex section heights as fractions of the base-apex height")
+    _add_common_post_args(p_s3, "solid3d_metrics.png")
+
     p_an = post_sub.add_parser(
         "animate", help="animation of one case (side view + view into the cavity), via pvpython",
         description=("Render every output frame (shell3d00_*.vtk if present, else surface00_*.vtk) from\n"
@@ -223,7 +238,8 @@ Run:
         if args.post_command is None:
             p_post.print_help()
             sys.exit(0)
-        {"field": cmd_postprocess, "convergence": cmd_convergence, "lv": cmd_lv, "animate": cmd_animate}[args.post_command](args)
+        {"field": cmd_postprocess, "convergence": cmd_convergence, "lv": cmd_lv, "animate": cmd_animate,
+         "solid3d": cmd_solid3d}[args.post_command](args)
         return
     {"run": cmd_run, "sweep": cmd_sweep, "postprocess": cmd_postprocess}[args.command](args)
 

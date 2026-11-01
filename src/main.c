@@ -361,6 +361,9 @@ int main(int argc, char **argv)
    * PetscInitialize order: file → PETSC_OPTIONS env → argv (command line).
    * This means command-line flags override control.dat, not the other way round. */
   PetscInitialize(&argc, &argv, "control.dat", help);
+#ifdef BIOFEM_GIT
+  PetscPrintf(PETSC_COMM_WORLD, "[biofem] source %s\n", BIOFEM_GIT);
+#endif
 
   /* Also load control.dat from -in_dir if provided (e.g. when running from a
    * different directory).  These are inserted AFTER argv so in_dir file wins

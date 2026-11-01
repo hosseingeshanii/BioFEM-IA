@@ -313,6 +313,10 @@ int main(int argc, char **argv)
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &argv, NULL, "biofem-solid3d: 3D active-strain solid, P2-P1"));
+#ifndef BIOFEM_GIT
+#define BIOFEM_GIT "unknown"
+#endif
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[biofem-solid3d] source %s\n", BIOFEM_GIT));
   PetscOptionsBegin(PETSC_COMM_WORLD, "", "biofem-solid3d options", "");
   PetscCall(PetscOptionsEnum("-problem", "cube | plate | lv", "", ProblemNames, (PetscEnum)prob, (PetscEnum *)&prob, NULL));
   PetscCall(PetscOptionsReal("-gamma", "peak activation", "", gmax, &gmax, NULL));
@@ -433,7 +437,18 @@ int main(int argc, char **argv)
   PetscCall(SNESSetFromOptions(snes));
   if (prob == PROB_LV) {                                   /* rank 0 creates the output directory, the others wait */
     PetscMPIInt rank; PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
-    if (!rank) PetscCall(PetscMkdir(out_dir));
+    if (!rank) {
+      char fn[PETSC_MAX_PATH_LEN], mesh[PETSC_MAX_PATH_LEN] = ""; FILE *fp;
+      PetscCall(PetscMkdir(out_dir));
+      PetscCall(PetscOptionsGetString(NULL, NULL, "-dm_plex_filename", mesh, sizeof(mesh), NULL));
+      PetscCall(PetscSNPrintf(fn, sizeof(fn), "%s/run_info.txt", out_dir));
+      fp = fopen(fn, "w");
+      PetscCheck(fp, PETSC_COMM_SELF, PETSC_ERR_FILE_OPEN, "cannot write %s", fn);
+      /* read by biofem post solid3d: the vertex files u_stepNNNN.txt are at t = k/steps of the gamma ramp */
+      fprintf(fp, "code=biofem-solid3d\nsource=%s\nproblem=%s\nmesh=%s\ngamma=%g\nsteps=%d\nout_every=%d\nalpha_endo=%g\nalpha_epi=%g\n",
+              BIOFEM_GIT, ProblemNames[prob], mesh, (double)gmax, (int)steps, (int)out_every, (double)geo.a_endo, (double)geo.a_epi);
+      fclose(fp);
+    }
     PetscCallMPI(MPI_Barrier(PETSC_COMM_WORLD));
   }
 

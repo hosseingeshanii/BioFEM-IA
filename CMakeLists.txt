@@ -8,6 +8,16 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 
+# ── Git commit of the source tree, compiled into every executable (refreshed on each `make build`,
+#    which reconfigures); printed at startup so every run log says which code produced it ──
+execute_process(COMMAND git describe --always --dirty --abbrev=7
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE BIOFEM_GIT
+                OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT BIOFEM_GIT)
+  set(BIOFEM_GIT "unknown")
+endif()
+message(STATUS "BioFEM-IA source: ${BIOFEM_GIT}")
+
 # ── Build options (pass with -D on the cmake command line) ───────────────
 option(BIOFEM_DMPLEX        "Build DMPlex/MPI backend"    ON)
 option(BIOFEM_CUDA          "Build direct CUDA backend"   OFF)
@@ -77,6 +87,7 @@ set(BIOFEM_COMMON
 function(biofem_common_setup target)
   target_include_directories(${target} PRIVATE include)
   target_compile_options(${target} PRIVATE -fopenmp -g)
+  target_compile_definitions(${target} PRIVATE BIOFEM_GIT="${BIOFEM_GIT}")
   # GCC >= 14 (FASTER) turns these old C leniencies into errors; GCC 13 (Grace) only warns.
   # Keep them as warnings until every cross-file call has a prototype (see include/biofem_proto.h).
   if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 14)
