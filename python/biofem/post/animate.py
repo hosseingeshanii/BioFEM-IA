@@ -107,9 +107,20 @@ def cmd_animate(args):
         # 1. frames in cm with the colour field
         if vertex_run:
             X0 = vr["X0"] * s
+            # the rim pins leave the base free to swing about the pinned point; remove the best-fit in-plane rigid
+            # motion of the endocardial rim (lowest ring; the mu = const base is not a plane), Kabsch in x-y with
+            # rotation about z, so |u| matches the shell's null-average BC
+            zb = vr["X0"][:, 2].min()
+            base = np.abs(vr["X0"][:, 2] - zb) < 1e-6 * np.ptp(vr["X0"][:, 2])
             info = {}
             for k in ks:
                 X = (vr["X0"] + vr["U"][k]) * s
+                P, Q = X0[base, :2], X[base, :2]
+                cp, cq = P.mean(0), Q.mean(0)
+                H = (Q - cq).T @ (P - cp)
+                a = np.arctan2(H[0, 1] - H[1, 0], H[0, 0] + H[1, 1])      # rotation taking Q onto P
+                R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+                X[:, :2] = (X[:, :2] - cq) @ R.T + cp
                 fields = {"u": np.linalg.norm(X - X0, axis=1)}
                 _write_vtk(work / f"in_{k:06d}.vtk", X, vr["bnd"], fields)
                 fmin, fmax = min(fmin, float(fields["u"].min())), max(fmax, float(fields["u"].max()))
