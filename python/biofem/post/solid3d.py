@@ -146,7 +146,10 @@ def cmd_solid3d(args):
             axs.flat[5].semilogy([k / base["steps"] for k in ks], v, color=style.case_color(i), lw=1.8, label=f"{lab}: max")
             axs.flat[5].semilogy([k / base["steps"] for k in ks], rms, color=style.case_color(i), lw=1.2, ls="--", label=f"{lab}: RMS")
             du_rows += [(lab, k, a, b) for k, a, b in zip(ks, v, rms)]
+    if not du_rows:
+        axs.flat[5].set_visible(False)                  # one 3D run: nothing to difference
     for ax, (key, title, rk) in zip(axs.flat, PANELS):
+        if not ax.get_visible(): continue
         if rk and rk in ref:
             ax.axhline(ref[rk], color=style.INK2, lw=1, ls=":", label=f"{ref.get('label', 'ref')} peak {ref[rk]:g}")
         style.finish(ax)
@@ -171,10 +174,13 @@ def cmd_solid3d(args):
     names = [("EF", "peak EF (%)", max), ("thick", "peak thickening (%)", max), ("short", "peak shortening (%)", max),
              ("short", "peak elongation (%)", lambda a: -min(a)), ("tors", "peak torsion (deg)", lambda a: a[np.argmax(np.abs(a))]),
              ("wall", "max |wall vol. change| (%)", lambda a: max(abs(a)))]
-    width = 2 + max(14, *(len(l) for l, _ in data))
-    print("\n" + f"{'':28s}" + "".join(f"{l:>{width}s}" for l, _ in data) + (f"{ref.get('label', 'ref'):>{width}s}" if ref else ""))
+    shell_cols = [(lab, {"EF": s["EF"], "thick": s["thick_radial"], "short": s["shortening"], "tors": s["torsion"]})
+                  for lab, s in shells if "thick_radial" in s]
+    cols = data + shell_cols
+    width = 2 + max(14, *(len(l) for l, _ in cols))
+    print("\n" + f"{'':28s}" + "".join(f"{l:>{width}s}" for l, _ in cols) + (f"{ref.get('label', 'ref'):>{width}s}" if ref else ""))
     for key, name, f in names:
-        line = f"{name:28s}" + "".join(f"{f(m[key]):>{width}.4g}" for _, m in data)
+        line = f"{name:28s}" + "".join(f"{f(m[key]):>{width}.4g}" if key in m else f"{'-':>{width}s}" for _, m in cols)
         rk = {"EF": "EF", "thick": "thickening", "tors": "torsion"}.get(key) if "elongation" not in name else None
         if "shortening" in name: rk = "shortening"
         if ref: line += f"{ref[rk]:>{width}.4g}" if rk and rk in ref else f"{'':>{width}s}"
