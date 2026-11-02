@@ -41,6 +41,9 @@ CAM = {
     "side": dict(pos=[c[0] + 2.2 * R, c[1] - 2.2 * R, c[2] + 0.8 * R], up=[0, 0, 1], foc=c),
     "base": dict(pos=[c[0], c[1], z0 - 2.6 * R], up=[0, 1, 0], foc=[c[0], c[1], z0]),
 }
+# paraview.simple.Render resets the camera on a view's FIRST render: render once now, so frame 0 keeps the fixed camera
+# below like every other frame (otherwise frame 0 is zoomed differently: a jump at every loop of the animation)
+Render(view)
 lut = GetColorTransferFunction(field)
 lut.ApplyPreset({"viridis": "Viridis (matplotlib)", "coolwarm": "Cool to Warm"}[cmap], True)
 lut.AutomaticRescaleRangeMode = "Never"

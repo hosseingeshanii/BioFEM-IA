@@ -20,10 +20,11 @@ Metrics (definitions follow biofem post lv so shell runs can be overlaid; long a
 --ref-curves JSON (e.g. Pezzuto 2014 Fig. 6 digitized: panels radial_position_cm, torsion_case2_deg, I1e, I4fe, each
 with endo / mid / epi lists of [s, value], s = phase coordinate 0 EDP, 1 AVO, 2 ESP, 3 MVO, 4 EDP) writes <out>_curves.png:
 the same quantities of the runs on that phase axis (Track P runs: valve events from pv.csv), at the mid-axis section:
-radial position of the endo / epi surfaces; I1 and I4f of Ce = Fa^-T C Fa^-1 averaged over the tets of the band in the
-depth classes sub-endo (psi < 0.15), mid (0.4..0.6), sub-epi (psi > 0.85), psi = transmural prolate depth (P1 F from the
-vertex values). It also writes <out>_phase.png: volume, pressure, thickening, epicardial torsion and shortening, all from
-end-diastole, on the same phase axis against the paper's time-dependent data.
+radial position of the endo / epi surfaces; torsion from the unloaded mesh (as the paper's Fig. 6) of the depth classes
+sub-endo (psi < 0.15), mid (0.4..0.6), sub-epi (psi > 0.85), psi = transmural prolate depth, each at --torsion-sections of
+its own base-apex height, points < 3 mm from the axis left out; I1 and I4f of Ce = Fa^-T C Fa^-1 averaged over the tets
+of the band in the same classes (P1 F from the vertex values). It also writes <out>_phase.png: volume, pressure,
+thickening and shortening from end-diastole on the same phase axis against the paper's time-dependent data.
 --ref-shell overlays shell runs (biofem post lv), --ref a JSON of paper values (peak lines). With two or more --dir on the
 same mesh, the last panel shows max |u_k - u_1| / max |u_1| of each run k against the first.
 """
@@ -168,7 +169,13 @@ def curve_metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
     psi_v, _ = prolate_depth_fiber(X0, a_endo, a_epi, **geo)
     frac = (X0[:, 2] - zb) / H
     cls = {"endo": psi_v < 0.15, "mid": (psi_v > 0.4) & (psi_v < 0.6), "epi": psi_v > 0.85}
-    sb, sa = np.abs(frac - sections[0]) < 0.04, np.abs(frac - sections[1]) < 0.04
+    # torsion sections per layer, at sections[0] / [1] of THAT layer's own base-apex height (the endocardium ends lower:
+    # mid-wall fractions put its apex section among points next to the axis), points < 3 mm from the axis left out
+    off = np.hypot(X0[:, 0], X0[:, 1]) > 0.003
+    lsec = {}
+    for c, m in cls.items():
+        zl = X0[m, 2].max(); fl = (X0[:, 2] - zb) / (zl - zb)
+        lsec[c] = (m & off & (np.abs(fl - sections[1]) < 0.04), m & off & (np.abs(fl - sections[0]) < 0.04))
     be, bp = ev[np.abs(X0[ev, 2] - zmid) < band], pv_[np.abs(X0[pv_, 2] - zmid) < band]
     C = X0[T].mean(1); psi_c, f_c = prolate_depth_fiber(C, a_endo, a_epi, **geo)
     tb = np.abs(C[:, 2] - zmid) < band
@@ -186,7 +193,7 @@ def curve_metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
         out["t"].append(t)
         out["rad_endo"].append(100 * rad(P[be]).mean()); out["rad_epi"].append(100 * rad(P[bp]).mean())
         th = theta(P, X0)
-        for c, m in cls.items(): out[f"tors_{c}"].append(th[m & sa].mean() - th[m & sb].mean())
+        for c, (a_, b_) in lsec.items(): out[f"tors_{c}"].append(th[a_].mean() - th[b_].mean())
         Ds = np.stack([P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]], P[T[:, 3]] - P[T[:, 0]]], axis=2)
         F = Ds @ Dinv
         A = (1 / (1 - g) - np.sqrt(1 - g)) * np.einsum("ni,nj->nij", f_c, f_c) + np.sqrt(1 - g) * np.eye(3)   # Fa^-1
@@ -207,13 +214,16 @@ def shell_curve_metrics(case_dir, band_cm=0.4, sections=(0.10, 0.85)):
     ks = sorted(k for k in surf if k in s3)
     M0 = VTK(surf[ks[0]]).points * 100.0; n = len(M0)
     zb, za = M0[:, 2].min(), M0[:, 2].max(); H = za - zb; zmid = 0.5 * (zb + za)
-    band = np.abs(M0[:, 2] - zmid) < band_cm; frac = (M0[:, 2] - zb) / H
-    sb, sa = np.abs(frac - sections[0]) < 0.04, np.abs(frac - sections[1]) < 0.04
+    band = np.abs(M0[:, 2] - zmid) < band_cm
     rad = lambda P: np.hypot(P[:, 0], P[:, 1])
     def layers(k):
         P = VTK(s3[k]).points * 100.0; A, B = P[:n], P[n:]
         return (A, B) if rad(A).mean() < rad(B).mean() else (B, A)
     E0, P0 = layers(ks[0])
+    def sec(X):                                          # per-layer sections, as curve_metrics; not within 3 mm of the axis
+        fl = (X[:, 2] - zb) / (X[:, 2].max() - zb); off = np.hypot(X[:, 0], X[:, 1]) > 0.3
+        return off & (np.abs(fl - sections[1]) < 0.04), off & (np.abs(fl - sections[0]) < 0.04)
+    secs_ = {"endo": sec(E0), "mid": sec(M0), "epi": sec(P0)}
     def theta(P, R):
         return np.degrees(np.arctan2(-(P[:, 0] * R[:, 1] - P[:, 1] * R[:, 0]), P[:, 0] * R[:, 0] + P[:, 1] * R[:, 1]))
     out_ = {"t": [], "rad_endo": [], "rad_epi": [], "tors_endo": [], "tors_mid": [], "tors_epi": []}
@@ -223,17 +233,17 @@ def shell_curve_metrics(case_dir, band_cm=0.4, sections=(0.10, 0.85)):
         out_["t"].append((k - 1) * dt)
         out_["rad_endo"].append(rad(E[band]).mean()); out_["rad_epi"].append(rad(P[band]).mean())
         for L, X, X0 in (("endo", E, E0), ("mid", Mk, M0), ("epi", P, P0)):
-            th = theta(X, X0); out_[f"tors_{L}"].append(th[sa].mean() - th[sb].mean())
+            th = theta(X, X0); a_, b_ = secs_[L]; out_[f"tors_{L}"].append(th[a_].mean() - th[b_].mean())
     return {k: np.array(v) for k, v in out_.items()}, out
 
 
 def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs, shells=()):
-    # torsion: in <out>_phase.png only (from end-diastole, as the paper's text values and the other metrics)
     panels = [("radial_position_cm", "radial position, mid-axis section (cm)", ["endo", "epi"], "rad"),
+              ("torsion_case2_deg", "torsion, apex vs base, from unloaded (deg)", ["endo", "mid", "epi"], "tors"),
               ("I1e", r"$I_1^e$, mid-axis section", ["endo", "mid", "epi"], "I1e"),
               ("I4fe", r"$I_{4f}^e$, mid-axis section", ["endo", "mid", "epi"], "I4fe")]
     ls = {"endo": "--", "mid": "-.", "epi": "-"}
-    fig, axs = plt.subplots(1, 3, figsize=(13, 4.2))
+    fig, axs = plt.subplots(1, 4, figsize=(17, 4.2))
     rows = []
     cases = [(lab, curve_metrics(r, band, secs), phase_events(d, r["steps"])) for r, d, lab in zip(runs, dirs, labels)]
     for d in shells:                                     # shell Track P runs
@@ -267,12 +277,13 @@ def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs, shells=()):
 def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
     """<out>_phase.png: the cycle on the paper's phase axis (0 EDP, 1 AVO, 2 ESP, 3 MVO, 4 EDP; each run's own valve
     events from pv.csv), against the paper's time-dependent data only: cavity volume / pressure at its Fig. 4 points
-    (constant segments where the protocol fixes them), wall thickening from its Fig. 6 endo / epi radii, epicardial torsion
-    (Fig. 6, rebased to EDP). Shortening: no curve published (text value only)."""
+    (constant segments where the protocol fixes them), wall thickening from its Fig. 6 endo / epi radii. Shortening: no
+    curve published (text value only). Torsion: <out>_curves.png."""
     from .lv import compute
+    # torsion: in <out>_curves.png (endo / mid / epi from the unloaded state, as the paper's Fig. 6)
     panels = [("V", "cavity volume (ml)"), ("p", "cavity pressure (kPa)"), ("thick", "mid-axis wall thickening vs ED (%)"),
-              ("tors", "epicardial torsion vs ED (deg)"), ("short", "apex-base shortening vs ED (%)  (<0: elongation)")]
-    fig, axs = plt.subplots(1, 5, figsize=(21, 4.2)); ax = dict(zip([k for k, _ in panels], axs))
+              ("short", "apex-base shortening vs ED (%)  (<0: elongation)")]
+    fig, axs = plt.subplots(1, 4, figsize=(17, 4.2)); ax = dict(zip([k for k, _ in panels], axs))
     rows, cases = [], []
     for r, d, lab in zip(runs, dirs, labels):
         ev = phase_events(d, r["steps"])
@@ -292,7 +303,7 @@ def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
                       tors=cut(sh["torsion"]), short=cut(sh["shortening"])), dict(t=pv["t"], V=pv["V_ml"], p=pv["p_kPa"])))
     for i, (lab, ev, m, pv) in enumerate(cases):
         c = style.case_color(i)
-        for key, src in (("V", pv), ("p", pv), ("thick", m), ("tors", m), ("short", m)):
+        for key, src in (("V", pv), ("p", pv), ("thick", m), ("short", m)):
             if src.get(key) is None: continue
             sx = np.interp(src["t"], ev, [0, 1, 2, 3, 4])
             ax[key].plot(sx, src[key], color=c, lw=1.8, label=lab)
@@ -311,9 +322,6 @@ def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
         sg = np.linspace(max(en[0, 0], ep[0, 0]), min(en[-1, 0], ep[-1, 0]), 200)
         w = np.interp(sg, ep[:, 0], ep[:, 1]) - np.interp(sg, en[:, 0], en[:, 1])
         ax["thick"].plot(sg, 100 * (w / w[0] - 1), color=style.INK, lw=1.4, label=f"{lab} (Fig. 6 radii)")
-    te = P.get("torsion_case2_deg", {}).get("epi")
-    if te:
-        te = np.array(te); ax["tors"].plot(te[:, 0], te[:, 1] - te[0, 1], color=style.INK, lw=1.4, label=f"{lab} (Fig. 6 epi, from EDP)")
     ax["short"].plot([2], [4.0], "o", mfc="none", color=style.INK, ms=6, label=f"{lab}: text value ~4% (no curve)")
     for key, title in panels:
         a = ax[key]; a.set_title(title, fontsize=9); style.finish(a, "")
