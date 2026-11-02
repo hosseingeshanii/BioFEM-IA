@@ -135,10 +135,12 @@ def cmd_animate(args):
                 # twist: rotation about the long axis relative to the reference, e3 = -z (apex -> base) as the torsion
                 # metric; merid: sin(6 theta_ref), its zero contour = 12 material meridians (helices under torsion)
                 tw = np.degrees(np.arctan2(-(X[:, 0] * Xr[:, 1] - X[:, 1] * Xr[:, 0]), X[:, 0] * Xr[:, 0] + X[:, 1] * Xr[:, 1]))
+                tw[np.hypot(Xr[:, 0], Xr[:, 1]) < 0.3] = 0.0         # undefined on the axis (apex): 3 mm
                 fields = {"u": np.linalg.norm(X - Xr, axis=1), "twist": tw, "merid": np.sin(6.0 * th0)}
                 _write_vtk(work / f"in_{k:06d}.vtk", X, vr["bnd"], fields)
                 fld = fields[args.field]
-                fmin, fmax = min(fmin, float(fld.min())), max(fmax, float(fld.max()))
+                lo, hi = (np.percentile(fld, [0.5, 99.5]) if args.field == "twist" else (fld.min(), fld.max()))
+                fmin, fmax = min(fmin, float(lo)), max(fmax, float(hi))
                 i = list(vm["k"]).index(k); t = k / vr["steps"]
                 info[k] = dict(t=t, step=k, gamma=gmax * (1.0 - abs(2.0 * t - 1.0)), h=1.0 + vm["thick"][i] / 100.0, V=vm["V"][i],
                                p=pc.get(k))
