@@ -263,6 +263,7 @@ def cmd_solid3d(args):
     if len(runs) > 1:                                   # displacement difference against the first run, same mesh
         base = runs[0]
         for i, (r, (lab, _)) in enumerate(zip(runs[1:], data[1:]), start=1):
+            if r["X0"].shape != base["X0"].shape or not np.allclose(r["X0"], base["X0"]): continue   # other mesh
             ks = [k for k in sorted(r["U"]) if k in base["U"] and k > 0]
             v = [np.abs(r["U"][k] - base["U"][k]).max() / max(np.abs(base["U"][k]).max(), 1e-300) for k in ks]
             rms = [np.sqrt(((r["U"][k] - base["U"][k]) ** 2).sum(1).mean()) / np.sqrt((base["U"][k] ** 2).sum(1).mean()) for k in ks]
