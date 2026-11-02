@@ -1,7 +1,8 @@
-"""pvpython pv_views.py <frames_in_dir> <png_out_dir> <field> <vmin> <vmax> <views>
+"""pvpython pv_views.py <frames_in_dir> <png_out_dir> <field> <vmin> <vmax> <views> [cmap: viridis | coolwarm]
 Renders every in_<k>.vtk (legacy VTK, lengths in cm, point field <field>) for each view in
 <views> (comma list of: side, base) to <png_out_dir>/<view>_<k>.png. The reference shape
-(in_<first k>.vtk) is drawn as a grey wireframe. Camera fixed from the reference bounds;
+(in_<first k>.vtk) is drawn as a grey wireframe. If the frames carry a point field "merid", its zero contour is drawn as
+black lines (material meridians: they turn into helices under torsion). Camera fixed from the reference bounds;
 long axis z, apex at +z, open base at -z. No scalar bar (the caller draws it).
 Run by `biofem post animate`; not meant to be called directly.
 """
@@ -11,9 +12,10 @@ import re
 import sys
 
 from paraview.simple import (CreateView, LegacyVTKReader, Show, Hide, Delete, ColorBy, Render,
-                             SaveScreenshot, GetColorTransferFunction)
+                             SaveScreenshot, GetColorTransferFunction, Contour)
 
 src, out, field, vmin, vmax, views = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4]), float(sys.argv[5]), sys.argv[6].split(",")
+cmap = sys.argv[7] if len(sys.argv) > 7 else "viridis"
 files = sorted(glob.glob(os.path.join(src, "in_*.vtk")), key=lambda f: int(re.findall(r"in_(\d+)\.vtk", f)[0]))
 os.makedirs(out, exist_ok=True)
 
@@ -40,18 +42,28 @@ CAM = {
     "base": dict(pos=[c[0], c[1], z0 - 2.6 * R], up=[0, 1, 0], foc=[c[0], c[1], z0]),
 }
 lut = GetColorTransferFunction(field)
-lut.ApplyPreset("Viridis (matplotlib)", True)
+lut.ApplyPreset({"viridis": "Viridis (matplotlib)", "coolwarm": "Cool to Warm"}[cmap], True)
 lut.AutomaticRescaleRangeMode = "Never"
 lut.Discretize = 0
-cur = None
+cur, lines = None, None
 for f in files:
     k = int(re.findall(r"in_(\d+)\.vtk", f)[0])
+    if lines is not None:
+        Hide(lines, view)
+        Delete(lines)
+        lines = None
     if cur is not None:
         Hide(cur, view)
         Delete(cur)
     cur = LegacyVTKReader(FileNames=[f])
     cd = Show(cur, view)
     ColorBy(cd, ("POINTS", field))
+    if "merid" in cur.PointData.keys():
+        lines = Contour(Input=cur, ContourBy=["POINTS", "merid"], Isosurfaces=[0.0])
+        ld = Show(lines, view)
+        ColorBy(ld, None)
+        ld.AmbientColor = ld.DiffuseColor = [0.05, 0.05, 0.05]
+        ld.LineWidth = 2.0
     cd.SetScalarBarVisibility(view, False)
     lut.RescaleTransferFunction(vmin, vmax)
     for name in views:

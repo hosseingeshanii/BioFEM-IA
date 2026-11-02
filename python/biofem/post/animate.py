@@ -59,8 +59,8 @@ def cmd_animate(args):
     vertex_run = (case / "run_info.txt").exists()
     if vertex_run:                                     # 3D run: metres, boundary triangles of the volume mesh
         from .solid3d import read_run, metrics
-        if args.field != "u":
-            sys.exit("error: 3D vertex runs: only --field u")
+        if args.field not in ("u", "twist"):
+            sys.exit("error: 3D vertex runs: --field u or twist")
         vr = read_run(case, args.mesh)
         vm = metrics(vr)
         ks = sorted(vr["U"])[::args.every]
@@ -68,6 +68,11 @@ def cmd_animate(args):
             ks.append(sorted(vr["U"])[-1])
         source, bad_steps, s = "3D vertex run", set(), 100.0
         gmax = float(vr["info"].get("gamma", 0.0))
+        pc = {}                                        # Track P runs: cavity pressure per step (pv.csv)
+        if (case / "pv.csv").exists():
+            pv = np.genfromtxt(case / "pv.csv", delimiter=",", names=True)
+            pcol = "p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"
+            pc = {int(st): float(p) for st, p in zip(pv["step"], pv[pcol]) if st >= 0}
     else:
         ctrl = read_control(case)
         out_path = output_dir(case, ctrl, args.out_dir or None)
@@ -112,20 +117,31 @@ def cmd_animate(args):
             # rotation about z, so |u| matches the shell's null-average BC
             zb = vr["X0"][:, 2].min()
             base = np.abs(vr["X0"][:, 2] - zb) < 1e-6 * np.ptp(vr["X0"][:, 2])
-            info = {}
-            for k in ks:
-                X = (vr["X0"] + vr["U"][k]) * s
+            def place(U):
+                X = (vr["X0"] + U) * s
                 P, Q = X0[base, :2], X[base, :2]
                 cp, cq = P.mean(0), Q.mean(0)
                 H = (Q - cq).T @ (P - cp)
                 a = np.arctan2(H[0, 1] - H[1, 0], H[0, 0] + H[1, 1])      # rotation taking Q onto P
                 R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
                 X[:, :2] = (X[:, :2] - cq) @ R.T + cp
-                fields = {"u": np.linalg.norm(X - X0, axis=1)}
+                return X
+            # reference of the colours: end-diastole for Track P runs (u_step0000 = ED), else the unloaded mesh
+            Xr = place(vr["U"][0])
+            th0 = np.arctan2(Xr[:, 1], Xr[:, 0])
+            info = {}
+            for k in ks:
+                X = place(vr["U"][k])
+                # twist: rotation about the long axis relative to the reference, e3 = -z (apex -> base) as the torsion
+                # metric; merid: sin(6 theta_ref), its zero contour = 12 material meridians (helices under torsion)
+                tw = np.degrees(np.arctan2(-(X[:, 0] * Xr[:, 1] - X[:, 1] * Xr[:, 0]), X[:, 0] * Xr[:, 0] + X[:, 1] * Xr[:, 1]))
+                fields = {"u": np.linalg.norm(X - Xr, axis=1), "twist": tw, "merid": np.sin(6.0 * th0)}
                 _write_vtk(work / f"in_{k:06d}.vtk", X, vr["bnd"], fields)
-                fmin, fmax = min(fmin, float(fields["u"].min())), max(fmax, float(fields["u"].max()))
+                fld = fields[args.field]
+                fmin, fmax = min(fmin, float(fld.min())), max(fmax, float(fld.max()))
                 i = list(vm["k"]).index(k); t = k / vr["steps"]
-                info[k] = dict(t=t, step=k, gamma=gmax * (1.0 - abs(2.0 * t - 1.0)), h=1.0 + vm["thick"][i] / 100.0, V=vm["V"][i])
+                info[k] = dict(t=t, step=k, gamma=gmax * (1.0 - abs(2.0 * t - 1.0)), h=1.0 + vm["thick"][i] / 100.0, V=vm["V"][i],
+                               p=pc.get(k))
         else:
             ref = VTK(series[ks[0]])
             X0 = ref.points * s
@@ -159,16 +175,19 @@ def cmd_animate(args):
                 return (np.ceil(x / e) if up else np.floor(x / e)) * e
             vmin = 0.0 if args.field == "u" else _nice(fmin, False)
             vmax = _nice(fmax, True)
+            if args.field == "twist":                  # diverging: symmetric about 0
+                vmax = _nice(max(abs(fmin), abs(fmax)), True); vmin = -vmax
             if vmax <= vmin:
                 vmax = vmin + 1e-6
             print(f"[biofem] --range auto -> {vmin:g},{vmax:g}")
 
         # 2. render with ParaView
-        field = "u" if args.field == "u" else "h_ratio"
+        field = args.field
+        cmap = "coolwarm" if field == "twist" else "viridis"
         # no X display (ssh / batch node): render offscreen, else VTK's X interactor segfaults
         pv = [_pvpython()] + ([] if os.environ.get("DISPLAY") else ["--force-offscreen-rendering"])
         r = subprocess.run(pv + [str(RENDER_SCRIPT), str(work), str(work / "png"), field,
-                            str(vmin), str(vmax), ",".join(views)], capture_output=True, text=True)
+                            str(vmin), str(vmax), ",".join(views), cmap], capture_output=True, text=True)
         if r.returncode != 0:
             sys.exit("error: pvpython failed:\n" + r.stderr[-2000:])
 
@@ -185,12 +204,14 @@ def cmd_animate(args):
                 ax.axis("off")
                 ax.set_title({"side": "side view (apex)", "base": "from the base, into the cavity"}[name], fontsize=11, pad=2)
             cb = fig.add_axes([0.9, 0.15, 0.02, 0.58])
-            fig.colorbar(matplotlib.cm.ScalarMappable(matplotlib.colors.Normalize(vmin, vmax), "viridis"),
-                         cax=cb).set_label("|u| (cm)" if field == "u" else "h / h0", fontsize=10)
+            fig.colorbar(matplotlib.cm.ScalarMappable(matplotlib.colors.Normalize(vmin, vmax), cmap), cax=cb).set_label(
+                {"u": "|u| (cm)", "h_ratio": "h / h0", "twist": "rotation about the long axis (deg)"}[field], fontsize=10)
             d = info[k]
             parts = [label, f"t = {d['t']:.2f} s"]
             if d["gamma"] is not None:
                 parts.append(f"$\\gamma$ = {d['gamma']:.3f}")
+            if d.get("p") is not None:
+                parts.append(f"$p_c$ = {d['p']:.2f} kPa")
             if d["V"] is not None:
                 parts.append(f"$V_{{endo}}$ = {d['V']:.2f} ml")
             if d["h"] is not None:
