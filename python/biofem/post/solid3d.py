@@ -263,6 +263,68 @@ def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs, shells=()):
     print(f"[biofem] curves vs {ref.get('label', 'reference')} saved -> {f}")
 
 
+def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
+    """<out>_phase.png: the cycle on the paper's phase axis (0 EDP, 1 AVO, 2 ESP, 3 MVO, 4 EDP; each run's own valve
+    events from pv.csv), against the paper's time-dependent data only: cavity volume / pressure at its Fig. 4 points
+    (constant segments where the protocol fixes them), wall thickening from its Fig. 6 endo / epi radii, epicardial torsion
+    (Fig. 6, rebased to EDP). Shortening: no curve published (text value only)."""
+    from .lv import compute
+    panels = [("V", "cavity volume (ml)"), ("p", "cavity pressure (kPa)"), ("thick", "mid-axis wall thickening vs ED (%)"),
+              ("tors", "epicardial torsion vs ED (deg)"), ("short", "apex-base shortening vs ED (%)  (<0: elongation)")]
+    fig, axs = plt.subplots(1, 5, figsize=(21, 4.2)); ax = dict(zip([k for k, _ in panels], axs))
+    rows, cases = [], []
+    for r, d, lab in zip(runs, dirs, labels):
+        ev = phase_events(d, r["steps"])
+        if ev is None: continue
+        m = metrics(r, band, secs); pv = np.genfromtxt(Path(d) / "pv.csv", delimiter=",", names=True); pv = pv[pv["step"] >= 0]
+        cases.append((lab, ev, dict(t=m["t"], thick=m["thick"], tors=m["tors"], short=m["short"]),
+                      dict(t=pv["t"], V=pv["V_ml"], p=pv["p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"])))
+    for d in shells:
+        sh = compute(d, None, "m", "+z", band, secs)
+        from .io import read_control, output_dir
+        od = output_dir(Path(d), read_control(Path(d)), None); ev = phase_events(od, None)
+        if ev is None: continue
+        pv = np.genfromtxt(od / "pv.csv", delimiter=",", names=True)
+        i0 = sh.get("iref", 0)                           # drop the unloaded file 0 (also at t = 0)
+        cut = lambda a: None if a is None else a[i0:]
+        cases.append((f"shell {Path(d).resolve().name}", ev, dict(t=sh["t"][i0:], thick=cut(sh.get("thick_radial")),
+                      tors=cut(sh["torsion"]), short=cut(sh["shortening"])), dict(t=pv["t"], V=pv["V_ml"], p=pv["p_kPa"])))
+    for i, (lab, ev, m, pv) in enumerate(cases):
+        c = style.case_color(i)
+        for key, src in (("V", pv), ("p", pv), ("thick", m), ("tors", m), ("short", m)):
+            if src.get(key) is None: continue
+            sx = np.interp(src["t"], ev, [0, 1, 2, 3, 4])
+            ax[key].plot(sx, src[key], color=c, lw=1.8, label=lab)
+            rows += [(lab, key, a, b) for a, b in zip(sx, src[key])]
+    k = ref.get("key_points_fig4", {}); P = ref.get("panels", {}); lab = "Pezzuto 2014"
+    if k:
+        Vk = [k["EDV_ml"], k["EDV_ml"], k["ESV_ml"], k["ESV_ml"], k["EDV_ml"]]
+        ax["V"].plot([0, 1], Vk[:2], color=style.INK, lw=1.2, ls=":"); ax["V"].plot([2, 3], Vk[2:4], color=style.INK, lw=1.2, ls=":")
+        ax["V"].plot(range(5), Vk, "o", color=style.INK, ms=5, label=f"{lab} (Fig. 4 table; isovolumic exact)")
+        ped, pao = k["p_ed_mmHg"] * 0.133322, k["p_ao_mmHg"] * 0.133322
+        ax["p"].plot([1, 2], [pao, pao], color=style.INK, lw=1.2, ls=":"); ax["p"].plot([3, 4], [ped, ped], color=style.INK, lw=1.2, ls=":")
+        ax["p"].plot(range(5), [ped, pao, pao, ped, ped], "o", color=style.INK, ms=5, label=f"{lab} (protocol; valve points)")
+    rp = P.get("radial_position_cm", {})
+    if rp.get("endo") and rp.get("epi"):
+        en, ep = np.array(rp["endo"]), np.array(rp["epi"])
+        sg = np.linspace(max(en[0, 0], ep[0, 0]), min(en[-1, 0], ep[-1, 0]), 200)
+        w = np.interp(sg, ep[:, 0], ep[:, 1]) - np.interp(sg, en[:, 0], en[:, 1])
+        ax["thick"].plot(sg, 100 * (w / w[0] - 1), color=style.INK, lw=1.4, label=f"{lab} (Fig. 6 radii)")
+    te = P.get("torsion_case2_deg", {}).get("epi")
+    if te:
+        te = np.array(te); ax["tors"].plot(te[:, 0], te[:, 1] - te[0, 1], color=style.INK, lw=1.4, label=f"{lab} (Fig. 6 epi, from EDP)")
+    ax["short"].plot([2], [4.0], "o", mfc="none", color=style.INK, ms=6, label=f"{lab}: text value ~4% (no curve)")
+    for key, title in panels:
+        a = ax[key]; a.set_title(title, fontsize=9); style.finish(a, "")
+        a.set_xticks([0, 1, 2, 3, 4]); a.set_xticklabels(["EDP", "AVO", "ESP", "MVO", "EDP"]); a.legend(frameon=False, fontsize=6)
+    fig.tight_layout()
+    f = out.with_name(out.stem + "_phase.png"); fig.savefig(f, dpi=130)
+    with open(f.with_suffix(".csv"), "w", newline="") as fh:
+        wr = csv.writer(fh); wr.writerow(["case", "quantity", "s", "value"])
+        for row in rows: wr.writerow([row[0], row[1], f"{row[2]:.4f}", f"{row[3]:.6g}"])
+    print(f"[biofem] cycle vs {lab} on the phase axis saved -> {f}")
+
+
 def cmd_solid3d(args):
     plt = style.setup(args.show)
     dirs = args.dir or ["."]
@@ -363,8 +425,9 @@ def cmd_solid3d(args):
     print(f"[biofem] data saved -> {out.with_suffix('.csv')}")
 
     if args.ref_curves:
-        plot_ref_curves(plt, runs, dirs, labels, json.loads(Path(args.ref_curves).read_text()), out, args.band, secs,
-                        shells=args.ref_shell)
+        refc = json.loads(Path(args.ref_curves).read_text())
+        plot_ref_curves(plt, runs, dirs, labels, refc, out, args.band, secs, shells=args.ref_shell)
+        plot_phase_metrics(plt, runs, dirs, labels, args.ref_shell, refc, out, args.band, secs)
 
     names = [("EF", "peak EF (%)", max), ("thick", "peak thickening (%)", max), ("short", "peak shortening (%)", max),
              ("short", "peak elongation (%)", lambda a: -min(a)), ("tors", "peak torsion (deg)", lambda a: a[np.argmax(np.abs(a))]),

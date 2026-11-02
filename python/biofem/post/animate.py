@@ -88,7 +88,8 @@ def cmd_animate(args):
             sys.exit(f"error: no {source}00_*.vtk in {out_path}")
         if args.field == "h_ratio" and source != "shell3d":
             sys.exit("error: --field h_ratio needs shell3d output (-write_3d_shell 1)")
-        ks = sorted(k for k in series if k != 1)[::args.every]      # file 1 repeats file 0
+        pvrun = (out_path / "pv.csv").exists()          # Track P: file 1 = end-diastole (cycle step 0), the reference
+        ks = sorted(k for k in series if (k >= 1 if pvrun else k != 1))[::args.every]   # else file 1 repeats file 0
         if sorted(series)[-1] not in ks:
             ks.append(sorted(series)[-1])
 
@@ -148,26 +149,38 @@ def cmd_animate(args):
             ref = VTK(series[ks[0]])
             X0 = ref.points * s
             h0 = ref.point_data.get("thickness")
+            cxy = X0[:, :2].mean(0)                         # long axis through the centroid of the reference
+            R0 = X0[:, :2] - cxy
+            th0 = np.arctan2(R0[:, 1], R0[:, 0])
+            pcs = {}
+            if pvrun:                                       # file k = cycle step k - 1
+                pv = np.genfromtxt(out_path / "pv.csv", delimiter=",", names=True)
+                pcs = {int(st) + 1: (float(p), float(vv)) for st, p, vv in zip(pv["step"], pv["p_kPa"], pv["V_ml"])}
             info = {}
             for k in ks:
                 v = VTK(series[k])
                 X = v.points * s
-                fields = {"u": np.linalg.norm(X - X0, axis=1)}
+                Rk = X[:, :2] - cxy
+                tw = np.degrees(np.arctan2(-(Rk[:, 0] * R0[:, 1] - Rk[:, 1] * R0[:, 0]), (Rk * R0).sum(1)))
+                tw[np.hypot(R0[:, 0], R0[:, 1]) < 0.3] = 0.0          # undefined on the axis (apex): 3 mm
+                fields = {"u": np.linalg.norm(X - X0, axis=1), "twist": tw, "merid": np.sin(6.0 * th0)}
                 hr = None
                 if "thickness" in v.point_data and h0 is not None:
                     fields["h_ratio"] = v.point_data["thickness"] / h0
                     hr = float(fields["h_ratio"].mean())
                 _write_vtk(work / f"in_{k:06d}.vtk", X, v.cells, fields)
-                fld = fields.get("u" if args.field == "u" else "h_ratio")
+                fld = fields.get(args.field)
                 if fld is not None:
-                    fmin, fmax = min(fmin, float(fld.min())), max(fmax, float(fld.max()))
+                    lo, hi = (np.percentile(fld, [0.5, 99.5]) if args.field == "twist" else (fld.min(), fld.max()))
+                    fmin, fmax = min(fmin, float(lo)), max(fmax, float(hi))
                 g = None
                 if k in surf:
                     gv = VTK(surf[k]).cell_data.get("gamma")
                     g = float(gv.mean()) if gv is not None else None
                 ti = file_step(source, k)
                 info[k] = dict(t=max(ti, 0) * dt, step=ti, gamma=g, h=hr,
-                               V=vol[k][1] * s ** 3 if k in vol else None)
+                               V=pcs[k][1] if k in pcs else (vol[k][1] * s ** 3 if k in vol else None),
+                               p=pcs[k][0] if k in pcs else None)
 
         if auto_range:   # 0..max |u| (or min..max h/h0) over all frames, rounded outward to 2 significant digits
             def _nice(x, up):
