@@ -289,6 +289,10 @@ def cmd_solid3d(args):
         pv = pv[pv["step"] >= 0]
         return {"t": pv["t"], "V_ml": pv["V_ml"], "p_kPa": pv["p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"]}
     pvs = [(lab, read_pv(Path(d) / "pv.csv")) for d, lab in zip(dirs, labels) if (Path(d) / "pv.csv").exists()]
+    for d in args.ref_shell:                            # shell Track P runs: <case>/<out_dir>/pv.csv (out_dir from control.dat)
+        from .io import read_control, output_dir
+        f = output_dir(Path(d), read_control(Path(d)), None) / "pv.csv"
+        if f.exists(): pvs.append((f"shell {Path(d).resolve().name}", read_pv(f)))
     if pvs:                                             # Track P: PV loop and pressure / volume vs time
         fig, axs = plt.subplots(1, 3, figsize=(13, 4))
         for i, (lab, pv) in enumerate(pvs):
@@ -301,6 +305,12 @@ def cmd_solid3d(args):
         for ax, (xl, yl) in zip(axs, [("cavity volume (ml)", "cavity pressure (kPa)"), ("t / T", "cavity pressure (kPa)"),
                                       ("t / T", "cavity volume (ml)")]):
             ax.set_ylabel(yl, fontsize=9); style.finish(ax, xl)
+        kp = json.loads(Path(args.ref_curves).read_text()).get("key_points_fig4") if args.ref_curves else None
+        if kp:                                          # EDP, AVO, ESP, MVO of the paper's PV loop (mmHg -> kPa)
+            mm = 0.133322
+            V = [kp["EDV_ml"], kp["EDV_ml"], kp["ESV_ml"], kp["ESV_ml"], kp["EDV_ml"]]
+            P = [kp["p_ed_mmHg"] * mm, kp["p_ao_mmHg"] * mm, kp["p_ao_mmHg"] * mm, kp["p_ed_mmHg"] * mm, kp["p_ed_mmHg"] * mm]
+            axs[0].plot(V, P, color=style.INK, lw=1.0, ls=":", marker="o", ms=4, label="Pezzuto 2014 (Fig. 4 points)")
         axs[0].legend(frameon=False, fontsize=7)
         fig.tight_layout()
         fig.savefig(out.with_name(out.stem + "_pv.png"), dpi=130)
