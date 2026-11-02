@@ -20,9 +20,10 @@ Metrics (definitions follow biofem post lv so shell runs can be overlaid; long a
 --ref-curves JSON (e.g. Pezzuto 2014 Fig. 6 digitized: panels radial_position_cm, torsion_case2_deg, I1e, I4fe, each
 with endo / mid / epi lists of [s, value], s = phase coordinate 0 EDP, 1 AVO, 2 ESP, 3 MVO, 4 EDP) writes <out>_curves.png:
 the same quantities of the runs on that phase axis (Track P runs: valve events from pv.csv), at the mid-axis section:
-radial position of the endo / epi surfaces; torsion (rotation at --torsion-sections[1] minus [0], relative to the unloaded
-mesh) of the sub-endo (psi < 0.15), mid (0.4..0.6) and sub-epi (psi > 0.85) vertices, psi = transmural prolate depth;
-I1 and I4f of Ce = Fa^-T C Fa^-1 averaged over the tets of the band in the same depth classes (P1 F from the vertex values).
+radial position of the endo / epi surfaces; I1 and I4f of Ce = Fa^-T C Fa^-1 averaged over the tets of the band in the
+depth classes sub-endo (psi < 0.15), mid (0.4..0.6), sub-epi (psi > 0.85), psi = transmural prolate depth (P1 F from the
+vertex values). It also writes <out>_phase.png: volume, pressure, thickening, epicardial torsion and shortening, all from
+end-diastole, on the same phase axis against the paper's time-dependent data.
 --ref-shell overlays shell runs (biofem post lv), --ref a JSON of paper values (peak lines). With two or more --dir on the
 same mesh, the last panel shows max |u_k - u_1| / max |u_1| of each run k against the first.
 """
@@ -227,12 +228,12 @@ def shell_curve_metrics(case_dir, band_cm=0.4, sections=(0.10, 0.85)):
 
 
 def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs, shells=()):
+    # torsion: in <out>_phase.png only (from end-diastole, as the paper's text values and the other metrics)
     panels = [("radial_position_cm", "radial position, mid-axis section (cm)", ["endo", "epi"], "rad"),
-              ("torsion_case2_deg", "torsion, apex vs base, from unloaded (deg)", ["endo", "mid", "epi"], "tors"),
               ("I1e", r"$I_1^e$, mid-axis section", ["endo", "mid", "epi"], "I1e"),
               ("I4fe", r"$I_{4f}^e$, mid-axis section", ["endo", "mid", "epi"], "I4fe")]
     ls = {"endo": "--", "mid": "-.", "epi": "-"}
-    fig, axs = plt.subplots(1, 4, figsize=(17, 4.2))
+    fig, axs = plt.subplots(1, 3, figsize=(13, 4.2))
     rows = []
     cases = [(lab, curve_metrics(r, band, secs), phase_events(d, r["steps"])) for r, d, lab in zip(runs, dirs, labels)]
     for d in shells:                                     # shell Track P runs

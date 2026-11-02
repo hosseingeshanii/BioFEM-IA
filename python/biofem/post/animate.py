@@ -246,8 +246,13 @@ def cmd_animate(args):
             mos.paste(frames[i], ((j % 4) * w, (j // 4) * h))
         pal = mos.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
         q = [f.quantize(palette=pal, dither=Image.Dither.NONE) for f in frames]
-        dur = [600] + [int(1000 / args.fps)] * max(len(q) - 2, 0) + [1200]
-        dur = dur[:len(q)]
+        # even frame timing; a closed cycle (last state == first, e.g. a PV loop back at end-diastole) drops the last frame
+        # so the loop does not show the same state twice
+        first, last = work / f"in_{ks[0]:06d}.vtk", work / f"in_{ks[-1]:06d}.vtk"
+        P0, P1 = VTK(str(first)).points, VTK(str(last)).points
+        if len(q) > 2 and P0.shape == P1.shape and np.abs(P1 - P0).max() < 1e-3 * np.ptp(P0, axis=0).max():
+            q, frames = q[:-1], frames[:-1]
+        dur = [int(1000 / args.fps)] * len(q)
         q[0].save(out, save_all=True, append_images=q[1:], duration=dur, loop=0)
         frames[0].save(out.with_suffix(".png"), save_all=True, append_images=frames[1:], duration=dur, loop=0)
         gk = [info[k]["gamma"] if info[k]["gamma"] is not None else -1 for k in ks]
