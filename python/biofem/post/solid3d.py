@@ -91,7 +91,22 @@ def read_run(run_dir, mesh_override=""):
         u = np.zeros_like(X0); u[order] = d[:, 3:6]
         U[int(f.stem[6:])] = u
     return dict(info=info, X0=X0, tets=tets, bnd=tris, endo=tris[tags == 1], epi_v=np.unique(tris[tags == 2]),
-                endo_v=np.unique(tris[tags == 1]), steps=steps, U=U)
+                endo_v=np.unique(tris[tags == 1]), base_v=np.unique(tris[tags == 3]), steps=steps, U=U)
+
+
+def placed(r, k):
+    """deformed positions of step k with the in-plane rigid motion of the base face (gmsh tag 3, endo to epi) removed:
+    Kabsch in x-y, rotation about z + translation, i.e. null average in-plane displacement and rotation of the base as
+    Pezzuto's BC. The rim pins let the whole ventricle swing about the pinned point; that swing is a rotation about the
+    long axis plus a translation, and the translation reads as a rotation that grows as the radius shrinks (torsion,
+    radii, thickening), most at the endocardium."""
+    X0 = r["X0"]; P = X0 + r["U"][k]
+    base = np.zeros(len(X0), bool); base[r["base_v"]] = True
+    A, B = X0[base, :2], P[base, :2]; ca, cb = A.mean(0), B.mean(0)
+    H = (B - cb).T @ (A - ca); a = np.arctan2(H[0, 1] - H[1, 0], H[0, 0] + H[1, 1])
+    R = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    P = P.copy(); P[:, :2] = (P[:, :2] - cb) @ R.T + ca
+    return P
 
 
 def metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
@@ -115,12 +130,12 @@ def metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
         x, X = P[:, :2], P0[:, :2]
         return np.degrees(np.arctan2(-(x[:, 0] * X[:, 1] - x[:, 1] * X[:, 0]), np.sum(x * X, axis=1)))   # e3 = -z
     rad = lambda P: np.hypot(P[:, 0], P[:, 1])
-    R = X0 + r["U"][0]                                            # reference of the metrics: end-diastole with pressure
+    R = placed(r, 0)                                              # reference of the metrics: end-diastole with pressure
     V0, W0, L0 = cavity(R), wall(X0), R[iapex, 2] - zb
     h0 = rad(R[pv][bp]).mean() - rad(R[ev][be]).mean()
     out = {k: [] for k in ("t", "k", "V", "EF", "wall", "thick", "short", "tors")}
     for k in sorted(r["U"]):
-        P = X0 + r["U"][k]
+        P = placed(r, k)
         th = theta(P[pv], R[pv])
         out["t"].append(k / r["steps"]); out["k"].append(k)
         V = cavity(P); out["V"].append(V * 1e6); out["EF"].append(100 * (V0 - V) / V0)
@@ -189,7 +204,7 @@ def curve_metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
     for k in ("tors", "I1e", "I4fe"):
         for c in cls: out[f"{k}_{c}"] = []
     for k in sorted(r["U"]):
-        t = k / r["steps"]; g = gmax * (1 - abs(2 * t - 1)); P = X0 + r["U"][k]
+        t = k / r["steps"]; g = gmax * (1 - abs(2 * t - 1)); P = placed(r, k)
         out["t"].append(t)
         out["rad_endo"].append(100 * rad(P[be]).mean()); out["rad_epi"].append(100 * rad(P[bp]).mean())
         th = theta(P, X0)
