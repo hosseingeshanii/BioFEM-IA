@@ -524,6 +524,10 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(PetscOptionsReal("-traction", "plate: traction on x = max [Pa]", "", traction, &traction, NULL));
   PetscCall(PetscOptionsReal("-nitti_Lx", "plate: Nitti patch Lx", "", nLx, &nLx, NULL));
   PetscCall(PetscOptionsReal("-nitti_Ly", "plate: Nitti patch Ly", "", nLy, &nLy, NULL));
+  PetscCall(PetscOptionsReal("-prolate_d", "lv: focal length of the prolate geometry [m] (must match the mesh)", "", geo.d, &geo.d, NULL));
+  PetscCall(PetscOptionsReal("-lam_endo", "lv: prolate lambda of the endocardium (must match the mesh)", "", geo.le, &geo.le, NULL));
+  PetscCall(PetscOptionsReal("-lam_epi", "lv: prolate lambda of the epicardium (must match the mesh)", "", geo.lp, &geo.lp, NULL));
+  PetscCall(PetscOptionsReal("-mu_base_deg", "lv: prolate mu of the base cut [deg] (must match the mesh)", "", mu_base_deg, &mu_base_deg, NULL));
   PetscCall(PetscOptionsReal("-alpha_endo", "lv: helix angle at the endocardium [deg]", "", geo.a_endo, &geo.a_endo, NULL));
   PetscCall(PetscOptionsReal("-alpha_epi", "lv: helix angle at the epicardium [deg]", "", geo.a_epi, &geo.a_epi, NULL));
   PetscCall(PetscOptionsReal("-p_ed", "lv: end-diastolic cavity pressure [Pa]; > 0 runs the PV loop (Track P)", "", p_ed, &p_ed, NULL));
@@ -656,6 +660,7 @@ PetscErrorCode Solid3dRun(void)
       /* read by biofem post solid3d: the vertex files u_stepNNNN.txt are at t = k/steps of the gamma ramp */
       fprintf(fp, "code=biofem-solid3d\nsource=%s\nproblem=%s\nmesh=%s\ngamma=%g\nsteps=%d\nout_every=%d\nalpha_endo=%g\nalpha_epi=%g\n",
               BIOFEM_GIT, ProblemNames[prob], mesh, (double)gmax, (int)steps, (int)out_every, (double)geo.a_endo, (double)geo.a_epi);
+      fprintf(fp, "prolate_d=%g\nlam_endo=%g\nlam_epi=%g\nmu_base_deg=%g\n", (double)geo.d, (double)geo.le, (double)geo.lp, (double)mu_base_deg);
       /* p_ed > 0: u_step0000.txt is end-diastole (after filling); metrics are relative to it */
       if (prob == PROB_LV && p_ed > 0.0) fprintf(fp, "p_ed=%g\np_ao=%g\nfill_steps=%d\n", (double)p_ed, (double)p_ao, (int)fill_steps);
       fclose(fp);

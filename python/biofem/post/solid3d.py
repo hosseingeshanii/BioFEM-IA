@@ -17,6 +17,12 @@ Metrics (definitions follow biofem post lv so shell runs can be overlaid; long a
   - apex-base shortening of the epicardial apex vertex relative to the base plane (> 0: shortening)
   - torsion (Pezzuto & Ambrosi 2014): mean rotation of the epicardial vertices in the section at --torsion-sections[1]
     (apex) minus the one at [0] (base), fractions of the base-apex height, e3 from apex to base
+--ref-curves JSON (e.g. Pezzuto 2014 Fig. 6 digitized: panels radial_position_cm, torsion_case2_deg, I1e, I4fe, each
+with endo / mid / epi lists of [s, value], s = phase coordinate 0 EDP, 1 AVO, 2 ESP, 3 MVO, 4 EDP) writes <out>_curves.png:
+the same quantities of the runs on that phase axis (Track P runs: valve events from pv.csv), at the mid-axis section:
+radial position of the endo / epi surfaces; torsion (rotation at --torsion-sections[1] minus [0], relative to the unloaded
+mesh) of the sub-endo (psi < 0.15), mid (0.4..0.6) and sub-epi (psi > 0.85) vertices, psi = transmural prolate depth;
+I1 and I4f of Ce = Fa^-T C Fa^-1 averaged over the tets of the band in the same depth classes (P1 F from the vertex values).
 --ref-shell overlays shell runs (biofem post lv), --ref a JSON of paper values (peak lines). With two or more --dir on the
 same mesh, the last panel shows max |u_k - u_1| / max |u_1| of each run k against the first.
 """
@@ -123,6 +129,106 @@ def metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
     return {k: np.array(v) for k, v in out.items()}
 
 
+PROLATE = dict(d=0.0291, le=0.557, lp=1.00)          # Pezzuto geometry (biofem-solid3d prolate_frame defaults)
+
+
+def prolate_depth_fiber(X, a_endo=-60.0, a_epi=60.0, d=PROLATE["d"], le=PROLATE["le"], lp=PROLATE["lp"]):
+    """transmural depth psi (0 endo, 1 epi) and fiber f at reference points X, as biofem-solid3d prolate_frame"""
+    r1 = np.linalg.norm(X - [0, 0, d], axis=1); r2 = np.linalg.norm(X + [0, 0, d], axis=1)
+    lam = np.arccosh(np.maximum(1.0, (r1 + r2) / (2 * d))); mu = np.arccos(np.clip((r2 - r1) / (2 * d), -1, 1))
+    th = np.arctan2(X[:, 1], X[:, 0]); psi = np.clip((lam - le) / (lp - le), 0, 1)
+    al = np.radians(a_endo * (1 - psi) + a_epi * psi)
+    em = np.c_[np.sinh(lam) * np.cos(mu) * np.cos(th), np.sinh(lam) * np.cos(mu) * np.sin(th), -np.cosh(lam) * np.sin(mu)]
+    em /= np.maximum(np.linalg.norm(em, axis=1), 1e-30)[:, None]
+    et = np.c_[-np.sin(th), np.cos(th), np.zeros_like(th)]
+    f = np.cos(al)[:, None] * et + np.sin(al)[:, None] * em
+    return psi, f / np.linalg.norm(f, axis=1)[:, None]
+
+
+def phase_events(run_dir, steps):
+    """t of EDP, AVO, ESP, MVO, EDP from pv.csv (midpoint between the steps around a valve event); None without pv.csv"""
+    f = Path(run_dir) / "pv.csv"
+    if not f.exists(): return None
+    pv = np.genfromtxt(f, delimiter=",", names=True); pv = pv[pv["step"] >= 0]
+    t, ph = pv["t"], pv["phase"].astype(int)
+    def first(p): i = np.argmax(ph == p); return 0.5 * (t[i - 1] + t[i])
+    return [0.0, first(2), 0.5, first(4), 1.0]
+
+
+def curve_metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
+    """time series of the --ref-curves quantities (see the module doc)"""
+    X0, T = r["X0"], r["tets"]; ev, pv_ = r["endo_v"], r["epi_v"]
+    a_endo, a_epi = float(r["info"].get("alpha_endo", -60)), float(r["info"].get("alpha_epi", 60))
+    gmax = float(r["info"].get("gamma", 0.2))
+    zb = X0[ev, 2].min(); za = 0.5 * (X0[ev, 2].max() + X0[pv_, 2].max()); zmid, H = 0.5 * (zb + za), za - zb
+    band = band_cm / 100.0
+    geo = dict(d=float(r["info"].get("prolate_d", PROLATE["d"])), le=float(r["info"].get("lam_endo", PROLATE["le"])),
+               lp=float(r["info"].get("lam_epi", PROLATE["lp"])))
+    psi_v, _ = prolate_depth_fiber(X0, a_endo, a_epi, **geo)
+    frac = (X0[:, 2] - zb) / H
+    cls = {"endo": psi_v < 0.15, "mid": (psi_v > 0.4) & (psi_v < 0.6), "epi": psi_v > 0.85}
+    sb, sa = np.abs(frac - sections[0]) < 0.04, np.abs(frac - sections[1]) < 0.04
+    be, bp = ev[np.abs(X0[ev, 2] - zmid) < band], pv_[np.abs(X0[pv_, 2] - zmid) < band]
+    C = X0[T].mean(1); psi_c, f_c = prolate_depth_fiber(C, a_endo, a_epi, **geo)
+    tb = np.abs(C[:, 2] - zmid) < band
+    tcls = {k: tb & m for k, m in {"endo": psi_c < 0.15, "mid": (psi_c > 0.4) & (psi_c < 0.6), "epi": psi_c > 0.85}.items()}
+    Dm = np.stack([X0[T[:, 1]] - X0[T[:, 0]], X0[T[:, 2]] - X0[T[:, 0]], X0[T[:, 3]] - X0[T[:, 0]]], axis=2)
+    Dinv = np.linalg.inv(Dm)
+    rad = lambda P: np.hypot(P[:, 0], P[:, 1])
+    def theta(P, P0):
+        return np.degrees(np.arctan2(-(P[:, 0] * P0[:, 1] - P[:, 1] * P0[:, 0]), P[:, 0] * P0[:, 0] + P[:, 1] * P0[:, 1]))
+    out = {"t": [], "rad_endo": [], "rad_epi": []}
+    for k in ("tors", "I1e", "I4fe"):
+        for c in cls: out[f"{k}_{c}"] = []
+    for k in sorted(r["U"]):
+        t = k / r["steps"]; g = gmax * (1 - abs(2 * t - 1)); P = X0 + r["U"][k]
+        out["t"].append(t)
+        out["rad_endo"].append(100 * rad(P[be]).mean()); out["rad_epi"].append(100 * rad(P[bp]).mean())
+        th = theta(P, X0)
+        for c, m in cls.items(): out[f"tors_{c}"].append(th[m & sa].mean() - th[m & sb].mean())
+        Ds = np.stack([P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]], P[T[:, 3]] - P[T[:, 0]]], axis=2)
+        F = Ds @ Dinv
+        A = (1 / (1 - g) - np.sqrt(1 - g)) * np.einsum("ni,nj->nij", f_c, f_c) + np.sqrt(1 - g) * np.eye(3)   # Fa^-1
+        Fe = F @ A
+        I1 = np.einsum("nij,nij->n", Fe, Fe); Ff = np.einsum("nij,nj->ni", F, f_c)
+        I4 = np.einsum("ni,ni->n", Ff, Ff) / (1 - g) ** 2
+        for c, m in tcls.items(): out[f"I1e_{c}"].append(I1[m].mean()); out[f"I4fe_{c}"].append(I4[m].mean())
+    return {k: np.array(v) for k, v in out.items()}
+
+
+def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs):
+    panels = [("radial_position_cm", "radial position, mid-axis section (cm)", ["endo", "epi"], "rad"),
+              ("torsion_case2_deg", "torsion, apex vs base, from unloaded (deg)", ["endo", "mid", "epi"], "tors"),
+              ("I1e", r"$I_1^e$, mid-axis section", ["endo", "mid", "epi"], "I1e"),
+              ("I4fe", r"$I_{4f}^e$, mid-axis section", ["endo", "mid", "epi"], "I4fe")]
+    ls = {"endo": "--", "mid": "-.", "epi": "-"}
+    fig, axs = plt.subplots(1, 4, figsize=(17, 4.2))
+    rows = []
+    for i, (r, d, lab) in enumerate(zip(runs, dirs, labels)):
+        ev = phase_events(d, r["steps"])
+        if ev is None: continue
+        m = curve_metrics(r, band, secs); s = np.interp(m["t"], ev, [0, 1, 2, 3, 4])
+        for ax, (_, _, layers, key) in zip(axs, panels):
+            for L in layers:
+                y = m[f"{key}_{L}"]
+                ax.plot(s, y, color=style.case_color(i), lw=1.8, ls=ls[L], label=f"{lab} {L}" if ax is axs[0] or L == "epi" else None)
+                rows += [(lab, key, L, a, b) for a, b in zip(s, y)]
+    for ax, (pk, title, layers, _) in zip(axs, panels):
+        for L in layers:
+            c = np.array(ref["panels"].get(pk, {}).get(L, []))
+            if len(c): ax.plot(c[:, 0], c[:, 1], color=style.INK, lw=1.2, ls=ls[L], alpha=0.8,
+                               label=f"{ref.get('label', 'Pezzuto 2014')} {L}")
+        ax.set_title(title, fontsize=9); style.finish(ax, "")
+        ax.set_xticks([0, 1, 2, 3, 4]); ax.set_xticklabels(["EDP", "AVO", "ESP", "MVO", "EDP"])
+        ax.legend(frameon=False, fontsize=6)
+    fig.tight_layout()
+    f = out.with_name(out.stem + "_curves.png"); fig.savefig(f, dpi=130)
+    with open(f.with_suffix(".csv"), "w", newline="") as fh:
+        w = csv.writer(fh); w.writerow(["case", "quantity", "layer", "s", "value"])
+        for row in rows: w.writerow([row[0], row[1], row[2], f"{row[3]:.4f}", f"{row[4]:.6g}"])
+    print(f"[biofem] curves vs {ref.get('label', 'reference')} saved -> {f}")
+
+
 def cmd_solid3d(args):
     plt = style.setup(args.show)
     dirs = args.dir or ["."]
@@ -209,6 +315,9 @@ def cmd_solid3d(args):
             w = csv.writer(fh); w.writerow(["case", "k", "max_rel", "rms_rel"])
             for row in du_rows: w.writerow([row[0], row[1], f"{row[2]:.6g}", f"{row[3]:.6g}"])
     print(f"[biofem] data saved -> {out.with_suffix('.csv')}")
+
+    if args.ref_curves:
+        plot_ref_curves(plt, runs, dirs, labels, json.loads(Path(args.ref_curves).read_text()), out, args.band, secs)
 
     names = [("EF", "peak EF (%)", max), ("thick", "peak thickening (%)", max), ("short", "peak shortening (%)", max),
              ("short", "peak elongation (%)", lambda a: -min(a)), ("tors", "peak torsion (deg)", lambda a: a[np.argmax(np.abs(a))]),

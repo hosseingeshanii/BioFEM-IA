@@ -224,6 +224,7 @@ Run:
     p_s3.add_argument("--mesh", default="", help="gmsh .msh of the runs (default: the path in run_info.txt)")
     p_s3.add_argument("--ref-shell", action="append", default=[], help="shell case directory to overlay (biofem post lv metrics; repeat)")
     p_s3.add_argument("--ref", default="", help="JSON with paper values (label, EF, thickening, shortening, torsion), drawn as peak lines")
+    p_s3.add_argument("--ref-curves", default="", help="JSON of digitized time curves (e.g. Pezzuto 2014 Fig. 6) -> <out>_curves.png (Track P runs)")
     p_s3.add_argument("--band", type=float, default=0.4, help="half-width of the mid-axis band for thickening, in cm (default: 0.4)")
     p_s3.add_argument("--torsion-sections", default="0.10,0.85", help="base,apex section heights as fractions of the base-apex height")
     _add_common_post_args(p_s3, "solid3d_metrics.png")
