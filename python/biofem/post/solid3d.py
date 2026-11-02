@@ -177,8 +177,11 @@ def cmd_solid3d(args):
     fig.savefig(out, dpi=130)
     print(f"[biofem] plot saved -> {out}")
 
-    pvs = [(lab, np.genfromtxt(Path(d) / "pv.csv", delimiter=",", names=True)) for d, lab in zip(dirs, labels)
-           if (Path(d) / "pv.csv").exists()]
+    def read_pv(f):                                     # biofem-solid3d (p_kPa) or the pulse script (P_kPa, filling rows < 0)
+        pv = np.genfromtxt(f, delimiter=",", names=True)
+        pv = pv[pv["step"] >= 0]
+        return {"t": pv["t"], "V_ml": pv["V_ml"], "p_kPa": pv["p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"]}
+    pvs = [(lab, read_pv(Path(d) / "pv.csv")) for d, lab in zip(dirs, labels) if (Path(d) / "pv.csv").exists()]
     if pvs:                                             # Track P: PV loop and pressure / volume vs time
         fig, axs = plt.subplots(1, 3, figsize=(13, 4))
         for i, (lab, pv) in enumerate(pvs):
