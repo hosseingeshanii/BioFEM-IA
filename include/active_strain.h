@@ -63,6 +63,8 @@ PetscErrorCode ElemUpdFint(FE *fem, PetscInt ec, PetscReal *Fb_out);
 
 /** @brief Run per-element precomputations before global internal-force assembly. */
 PetscErrorCode FInternalPreCalc(FE *fem);
+PetscErrorCode LVCavityPressureLoad(FE *fem, PetscReal p);        /* Track P: endocardial pressure into fem->Fext */
+PetscErrorCode LVEndoCavityVolumeSubdiv(FE *fem, PetscReal *V);   /* Track P: matching endocardial cavity volume */
 
 /** @brief Assemble global internal force vector for active-strain mechanics. */
 PetscErrorCode FInternalAct(FE *fem);

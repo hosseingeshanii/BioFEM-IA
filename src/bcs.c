@@ -17,6 +17,8 @@ extern PetscErrorCode  SurfaceNormalPressure(PetscReal P, FE *fem);
 extern PetscErrorCode  DistributedForce(PetscReal w, FE *fem);
 extern PetscErrorCode  EdgeConstPressure(PetscInt edge_n, PetscReal P, PetscInt dir, FE *fem);
 extern PetscErrorCode  NodeForce(PetscInt nv, PetscReal F, PetscInt dir, FE *fem);
+extern PetscErrorCode  LVCavityPressureLoad(FE *fem, PetscReal p);
+extern PetscReal       lv_p_cav, lv_p_ed;
 extern PetscErrorCode  GhostFix(PetscInt edge_n, FE *fem);
 extern PetscErrorCode  GhostFree(PetscInt edge_n, FE *fem);
 extern PetscErrorCode  ModifyGhostFix(PetscInt edge_n, FE *fem);
@@ -116,6 +118,9 @@ PetscErrorCode FExternal(FE *fem) {
       EdgeConstPressure(1, plate_P, 0, fem);
     }
   }
+
+  /* Track P (-lv_p_ed > 0): cavity pressure on the endocardium (active_strain.c); main.c sets lv_p_cav per phase */
+  if (lv_p_ed > 0.0) PetscCall(LVCavityPressureLoad(fem, lv_p_cav));
 
   /* Pinched-hemisphere benchmark (Simo, Rifai & Fox 1990; Asadi & Borazjani
    * 2023 Fig. A6): two pairs of equal-and-opposite point forces 2P at four

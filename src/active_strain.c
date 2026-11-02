@@ -80,6 +80,64 @@ extern char           out_dir[256];
 
 
 
+/* Irregular patch (valence v, nen = v + 6 control points): B3 (12 x nen) maps the patch to the 12 control points of the
+ * regular sub-patch around the element centre after one Loop subdivision step; the regular box-spline tables evaluated
+ * on that sub-patch give the irregular element's basis there (ElemGeom: derivatives; ElemCenterShapeValues: values). */
+static void SubdivIrregularB3_(PetscInt v, PetscInt nen, PetscReal B3[12][64])
+{
+  PetscReal w = (1.0/(PetscReal)v) *
+              (0.625 - PetscPowReal(0.375 + 0.25*PetscCosReal(2*PETSC_PI/(PetscReal)v), 2.0));
+
+  PetscReal B2[12][64], B1[64][64];
+
+  for (PetscInt i = 0; i < 12; i++)
+    for (PetscInt j = 0; j < (v+12); j++)
+      B2[i][j] = 0.0;
+
+  for (PetscInt i = 0; i < (v+12); i++)
+    for (PetscInt j = 0; j < nen; j++)
+      B1[i][j] = 0.0;
+
+  /* B2 entries */
+  B2[0][v+9]  = 1.;  B2[1][v+6]  = 1.;  B2[2][v+4]  = 1.;  B2[3][v+1]  = 1.;
+  B2[4][v+2]  = 1.;  B2[5][v+5]  = 1.;  B2[6][v]    = 1.;  B2[7][1]    = 1.;
+  B2[8][v+3]  = 1.;  B2[9][v-1]  = 1.;  B2[10][0]   = 1.;  B2[11][2]   = 1.;
+
+  /* B1 entries (unchanged block) */
+  {
+    PetscInt j;
+    B1[0][0] = 1 - v*w;  for (j=0; j<v; j++) {B1[0][1+j] = w;}
+    B1[1][0] = 0.375;  B1[1][1] = 0.375;  B1[1][2] = 0.125;  B1[1][v] = 0.125;
+    B1[2][0] = 0.375;  B1[2][1] = 0.125;  B1[2][2] = 0.375;  B1[2][3] = 0.125;
+    if (v>5) {B1[v-4][0] = 0.375;  B1[v-4][v-5] = 0.125;  B1[v-4][v-4] = 0.375;  B1[v-4][v-3] = 0.125;}
+    if (v>4) {B1[v-3][0] = 0.375;  B1[v-3][v-4] = 0.125;  B1[v-3][v-3] = 0.375;  B1[v-3][v-2] = 0.125;}
+    B1[v-2][0] = 0.375;  B1[v-2][v-3] = 0.125;  B1[v-2][v-2] = 0.375;  B1[v-2][v-1] = 0.125;
+    B1[v-1][0] = 0.375;  B1[v-1][v-2] = 0.125;  B1[v-1][v-1] = 0.375;  B1[v-1][v] = 0.125;
+    B1[v][0] = 0.375;  B1[v][1] = 0.125;  B1[v][v-1] = 0.125;  B1[v][v] = 0.375;
+    B1[v+1][0] = 0.125;  B1[v+1][1] = 0.375;  B1[v+1][v] = 0.375;  B1[v+1][v+1] = 0.125;
+    B1[v+2][0] = 0.0625;  B1[v+2][1] = 0.625;  B1[v+2][2] = 0.0625;  B1[v+2][v] = 0.0625;  B1[v+2][v+1] = 0.0625;  B1[v+2][v+2] = 0.0625;  B1[v+2][v+3] = 0.0625;
+    B1[v+3][0] = 0.125;  B1[v+3][1] = 0.375;  B1[v+3][2] = 0.375;  B1[v+3][v+3] = 0.125;
+    B1[v+4][0] = 0.0625;  B1[v+4][1] = 0.0625;  B1[v+4][v-1] = 0.0625;  B1[v+4][v] = 0.625;  B1[v+4][v+1] = 0.0625;  B1[v+4][v+4] = 0.0625;  B1[v+4][v+5] = 0.0625;
+    B1[v+5][0] = 0.125;  B1[v+5][v-1] = 0.375;  B1[v+5][v] = 0.375;  B1[v+5][v+5] = 0.125;
+    B1[v+6][1] = 0.375;  B1[v+6][v] = 0.125;  B1[v+6][v+1] = 0.375;  B1[v+6][v+2] =  0.125;
+    B1[v+7][1] = 0.375;  B1[v+7][v+1] =  0.125;  B1[v+7][v+2] =  0.375;  B1[v+7][v+3] = 0.125;
+    B1[v+8][1] = 0.375;  B1[v+8][2] = 0.125;  B1[v+8][v+2] = 0.125;  B1[v+8][v+3] = 0.375;
+    B1[v+9][1] = 0.125;  B1[v+9][v] = 0.375;  B1[v+9][v+1] = 0.375;  B1[v+9][v+4] = 0.125;
+    B1[v+10][v] = 0.375;  B1[v+10][v+1] = 0.125;  B1[v+10][v+4] = 0.375;  B1[v+10][v+5] = 0.125;
+    B1[v+11][v-1] = 0.125;  B1[v+11][v] = 0.375;  B1[v+11][v+4] = 0.125;  B1[v+11][v+5] = 0.375;
+  }
+
+  /* B3 = B2*B1 */
+  for (PetscInt i = 0; i < 12; i++) {
+    for (PetscInt j = 0; j < nen; j++) {
+      PetscReal s = 0.0;
+      for (PetscInt m = 0; m < (v+12); m++) s += B2[i][m] * B1[m][j];
+      B3[i][j] = s;
+    }
+  }
+
+}
+
 /* Shape function derivatives at element center (subdivision surface) */
 static const PetscReal Na_center[2][12] = {
   /* Na[0][i] */
@@ -88,6 +146,13 @@ static const PetscReal Na_center[2][12] = {
   /* Na[1][i] */
   {-0.0309, -0.0247, -0.1852, -0.4815,  0.0000, -0.0062,
     0.0000,  0.4815,  0.0247,  0.0062,  0.1852,  0.0309}
+};
+
+/* Shape function values at element center: the 12 Loop box splines (Cirak et al. 2000) at u = v = w = 1/3, in the
+   patch order of Na_center (checked against Na_center / Nab_center); sum = 1 */
+static const PetscReal N_center[12] = {
+  4.0/1296, 4.0/1296, 56.0/1296, 368.0/1296, 56.0/1296, 4.0/1296,
+  368.0/1296, 368.0/1296, 4.0/1296, 4.0/1296, 56.0/1296, 4.0/1296
 };
 
 static const PetscReal Nab_center[3][12] = {
@@ -680,61 +745,13 @@ static PetscErrorCode ElemUpdateGeomSubdivFromCoords_(
       X0[i][2] = zb[node];
     }
 
-    PetscReal w = (1.0/(PetscReal)v) *
-                  (0.625 - PetscPowReal(0.375 + 0.25*PetscCosReal(2*PETSC_PI/(PetscReal)v), 2.0));
-
     /* NOTE: you previously used VLA-style arrays. Keep them if your compiler supports it.
        Here I keep your earlier “<=64” fixed stack assumption since v<=32. */
     PetscCheck(v+12 <= 64, PETSC_COMM_SELF, PETSC_ERR_SUP,
                "v too large for fixed stack arrays; v=%" PetscInt_FMT, v);
 
-    PetscReal B2[12][64], B1[64][64], B3[12][64];
-
-    for (PetscInt i = 0; i < 12; i++)
-      for (PetscInt j = 0; j < (v+12); j++)
-        B2[i][j] = 0.0;
-
-    for (PetscInt i = 0; i < (v+12); i++)
-      for (PetscInt j = 0; j < nen; j++)
-        B1[i][j] = 0.0;
-
-    /* B2 entries */
-    B2[0][v+9]  = 1.;  B2[1][v+6]  = 1.;  B2[2][v+4]  = 1.;  B2[3][v+1]  = 1.;
-    B2[4][v+2]  = 1.;  B2[5][v+5]  = 1.;  B2[6][v]    = 1.;  B2[7][1]    = 1.;
-    B2[8][v+3]  = 1.;  B2[9][v-1]  = 1.;  B2[10][0]   = 1.;  B2[11][2]   = 1.;
-
-    /* B1 entries (unchanged block) */
-    {
-      PetscInt j;
-      B1[0][0] = 1 - v*w;  for (j=0; j<v; j++) {B1[0][1+j] = w;}
-      B1[1][0] = 0.375;  B1[1][1] = 0.375;  B1[1][2] = 0.125;  B1[1][v] = 0.125;
-      B1[2][0] = 0.375;  B1[2][1] = 0.125;  B1[2][2] = 0.375;  B1[2][3] = 0.125;
-      if (v>5) {B1[v-4][0] = 0.375;  B1[v-4][v-5] = 0.125;  B1[v-4][v-4] = 0.375;  B1[v-4][v-3] = 0.125;}
-      if (v>4) {B1[v-3][0] = 0.375;  B1[v-3][v-4] = 0.125;  B1[v-3][v-3] = 0.375;  B1[v-3][v-2] = 0.125;}
-      B1[v-2][0] = 0.375;  B1[v-2][v-3] = 0.125;  B1[v-2][v-2] = 0.375;  B1[v-2][v-1] = 0.125;
-      B1[v-1][0] = 0.375;  B1[v-1][v-2] = 0.125;  B1[v-1][v-1] = 0.375;  B1[v-1][v] = 0.125;
-      B1[v][0] = 0.375;  B1[v][1] = 0.125;  B1[v][v-1] = 0.125;  B1[v][v] = 0.375;
-      B1[v+1][0] = 0.125;  B1[v+1][1] = 0.375;  B1[v+1][v] = 0.375;  B1[v+1][v+1] = 0.125;
-      B1[v+2][0] = 0.0625;  B1[v+2][1] = 0.625;  B1[v+2][2] = 0.0625;  B1[v+2][v] = 0.0625;  B1[v+2][v+1] = 0.0625;  B1[v+2][v+2] = 0.0625;  B1[v+2][v+3] = 0.0625;
-      B1[v+3][0] = 0.125;  B1[v+3][1] = 0.375;  B1[v+3][2] = 0.375;  B1[v+3][v+3] = 0.125;
-      B1[v+4][0] = 0.0625;  B1[v+4][1] = 0.0625;  B1[v+4][v-1] = 0.0625;  B1[v+4][v] = 0.625;  B1[v+4][v+1] = 0.0625;  B1[v+4][v+4] = 0.0625;  B1[v+4][v+5] = 0.0625;
-      B1[v+5][0] = 0.125;  B1[v+5][v-1] = 0.375;  B1[v+5][v] = 0.375;  B1[v+5][v+5] = 0.125;
-      B1[v+6][1] = 0.375;  B1[v+6][v] = 0.125;  B1[v+6][v+1] = 0.375;  B1[v+6][v+2] =  0.125;
-      B1[v+7][1] = 0.375;  B1[v+7][v+1] =  0.125;  B1[v+7][v+2] =  0.375;  B1[v+7][v+3] = 0.125;
-      B1[v+8][1] = 0.375;  B1[v+8][2] = 0.125;  B1[v+8][v+2] = 0.125;  B1[v+8][v+3] = 0.375;
-      B1[v+9][1] = 0.125;  B1[v+9][v] = 0.375;  B1[v+9][v+1] = 0.375;  B1[v+9][v+4] = 0.125;
-      B1[v+10][v] = 0.375;  B1[v+10][v+1] = 0.125;  B1[v+10][v+4] = 0.375;  B1[v+10][v+5] = 0.125;
-      B1[v+11][v-1] = 0.125;  B1[v+11][v] = 0.375;  B1[v+11][v+4] = 0.125;  B1[v+11][v+5] = 0.375;
-    }
-
-    /* B3 = B2*B1 */
-    for (PetscInt i = 0; i < 12; i++) {
-      for (PetscInt j = 0; j < nen; j++) {
-        PetscReal s = 0.0;
-        for (PetscInt m = 0; m < (v+12); m++) s += B2[i][m] * B1[m][j];
-        B3[i][j] = s;
-      }
-    }
+    PetscReal B3[12][64];
+    SubdivIrregularB3_(v, nen, B3);
 
     /* IN arrays (stack) */
     PetscReal INa0[64], INa1[64], INab0[64], INab1[64], INab2[64];
@@ -2750,4 +2767,140 @@ PetscErrorCode UpdateElements(FE *fem, ElemFunc func)
     }
 
     PetscFunctionReturn(0);
+}
+
+
+/*--------------------------------------------------------------------------------------------------
+ *              LV cavity pressure on the endocardium (Track P) and the matching cavity volume
+ *-------------------------------------------------------------------------------------------------*/
+
+PetscReal lv_p_cav = 0.0;   /* cavity pressure [Pa] applied by FExternal when -lv_p_ed > 0 (main.c sets it per phase) */
+
+/* Shape-function values N_a at the element centre, in the order of ibm->patch[16*ec + a] (the same point and basis as
+ * the internal force): regular patch N_center, irregular patch B3^T N_center. */
+static PetscErrorCode ElemCenterShapeValues_(IBMNodes *ibm, PetscInt ec, PetscInt *nen, PetscReal Nv[64])
+{
+  PetscFunctionBeginUser;
+  if (ibm->ire[ec] == 0) {
+    *nen = 12;
+    for (PetscInt a = 0; a < 12; a++) Nv[a] = N_center[a];
+  } else {
+    const PetscInt v = ibm->val[ec];
+    PetscReal B3[12][64];
+    PetscCheck(v + 12 <= 64, PETSC_COMM_SELF, PETSC_ERR_SUP, "valence %d too large", (int)v);
+    *nen = v + 6;
+    SubdivIrregularB3_(v, *nen, B3);
+    for (PetscInt j = 0; j < *nen; j++) {
+      Nv[j] = 0.0;
+      for (PetscInt i = 0; i < 12; i++) Nv[j] += B3[i][j] * N_center[i];
+    }
+  }
+  PetscFunctionReturn(0);
+}
+
+/* Endocardium of element ec at its centre: x_endo = x + theta3 a3 and the outward (cavity -> wall) area vector
+ * s (g1 x g2) / 2 with g_alpha = a_alpha + theta3 a3,alpha, theta3 = -s h / 2 (Kirchhoff-Love: the endocardium is at
+ * -h/2 along the normal that points away from the cavity, s a3); the factor 1/2 = one-point rule on the parameter
+ * triangle. h = ibm->thickness[ec], refreshed after every Track P solve (main.c TrackPSolveAt_) so the volume is
+ * V(x, h(x)); within a solve the load uses the thickness of the previous solve (an h from this evaluation's C33 makes
+ * the matrix-free Jacobian noisy: GMRES breakdown). Needs ead->geom of the current state. */
+static void ElemEndo_(FE *fem, PetscInt ec, PetscReal s, const PetscReal Nv[], PetscInt nen, struct Cmpnts *xe, struct Cmpnts *ae)
+{
+  IBMNodes *ibm = fem->ibm;
+  const SubdivGeomQP *G = &fem->act_data.elem_act_data[ec].geom[0];
+  struct Cmpnts a3_1, a3_2, x = {0.0, 0.0, 0.0};
+  Compute_a3_alpha_(G->ndx21, G->ndx31, G->Aaa, G->Aab, G->Abb, &a3_1, &a3_2);
+  for (PetscInt a = 0; a < nen; a++) {
+    const PetscInt n = ibm->patch[16*ec + a];
+    x.x += Nv[a] * ibm->x_bp[n]; x.y += Nv[a] * ibm->y_bp[n]; x.z += Nv[a] * ibm->z_bp[n];
+  }
+  const PetscReal th = -0.5 * s * ibm->thickness[ec];
+  *xe = PLUS(x, AMULT(th, G->nn));
+  *ae = AMULT(0.5 * s, CROSS(PLUS(G->ndx21, AMULT(th, a3_1)), PLUS(G->ndx31, AMULT(th, a3_2))));
+}
+
+/* s = +1 if the element normals a3 point away from the cavity (summed over all elements: one orientation per mesh) */
+static PetscErrorCode LVNormalSign_(FE *fem, PetscReal *s)
+{
+  IBMNodes *ibm = fem->ibm; DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscReal c[3] = {0, 0, 0}, loc = 0.0, tot;
+  PetscFunctionBeginUser;
+  for (PetscInt n = 0; n < ibm->n_v; n++) { c[0] += ibm->x_bp[n]; c[1] += ibm->y_bp[n]; c[2] += ibm->z_bp[n]; }
+  for (PetscInt d = 0; d < 3; d++) c[d] /= ibm->n_v;
+  for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
+    const PetscInt ec = ctx->layout.orig_cell[lc];
+    if (ec < 0 || ec >= ibm->n_elmt) continue;
+    const SubdivGeomQP *G = &fem->act_data.elem_act_data[ec].geom[0];
+    const PetscInt n = ibm->nv1[ec];
+    loc += G->nn.x * (ibm->x_bp[n] - c[0]) + G->nn.y * (ibm->y_bp[n] - c[1]) + G->nn.z * (ibm->z_bp[n] - c[2]);
+  }
+  PetscCallMPI(MPIU_Allreduce(&loc, &tot, 1, MPIU_REAL, MPIU_SUM, PETSC_COMM_WORLD));
+  *s = (tot >= 0.0) ? 1.0 : -1.0;
+  PetscFunctionReturn(0);
+}
+
+/* Cavity pressure p on the endocardium, consistent with the subdivision basis: virtual work p int du_endo . n da_endo
+ * with du_endo = sum_a N_a du_a (the thickness change and the rotation of the normal do no work to leading order: plane
+ * stress, n . dn = 0), so f_a = p N_a s (g1 x g2)/2 at the element centre (one-point rule, as the internal force).
+ * Added to fem->Fext (routed with VecSetValues; ghost control points by the same chain rule as Fint). Collective. */
+PetscErrorCode LVCavityPressureLoad(FE *fem, PetscReal p)
+{
+  IBMNodes *ibm = fem->ibm; DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscReal s, Nv[64]; PetscInt nen;
+  PetscFunctionBeginUser;
+  PetscCall(LVNormalSign_(fem, &s));
+  for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
+    const PetscInt ec = ctx->layout.orig_cell[lc];
+    if (ec < 0 || ec >= ibm->n_elmt) continue;
+    struct Cmpnts xe, ae;
+    PetscCall(ElemCenterShapeValues_(ibm, ec, &nen, Nv));
+    ElemEndo_(fem, ec, s, Nv, nen, &xe, &ae);
+    for (PetscInt a = 0; a < nen; a++) {
+      const PetscInt node = ibm->patch[16*ec + a];
+      const PetscReal f[3] = {p * Nv[a] * ae.x, p * Nv[a] * ae.y, p * Nv[a] * ae.z};
+      if (node == 1000000 || node < 0) continue;
+      if (node >= ibm->n_v) {                       /* ghost: x_g = x[s1] + x[s2] - x[s3] */
+        if (!ibm->ghost_src || node >= ibm->n_v + ibm->n_ghosts) continue;
+        const PetscInt gc = node - ibm->n_v; const PetscReal sg[3] = {1.0, 1.0, -1.0};
+        for (PetscInt k = 0; k < 3; k++) {
+          const PetscInt g0 = ctx->ibm_to_global_dof0[ibm->ghost_src[3*gc + k]];
+          if (g0 < 0) continue;
+          PetscInt dofs[3] = {g0, g0 + 1, g0 + 2}; PetscReal vals[3] = {sg[k] * f[0], sg[k] * f[1], sg[k] * f[2]};
+          PetscCall(VecSetValues(fem->Fext, 3, dofs, vals, ADD_VALUES));
+        }
+        continue;
+      }
+      const PetscInt g0 = ctx->ibm_to_global_dof0[node];
+      if (g0 < 0) continue;
+      PetscInt dofs[3] = {g0, g0 + 1, g0 + 2};
+      PetscCall(VecSetValues(fem->Fext, 3, dofs, f, ADD_VALUES));
+    }
+  }
+  PetscCall(VecAssemblyBegin(fem->Fext)); PetscCall(VecAssemblyEnd(fem->Fext));
+  PetscFunctionReturn(0);
+}
+
+/* Endocardial cavity volume on the subdivision surface, V = 1/3 int (x_endo - x0) . n da_endo with the same quadrature
+ * and area vectors as LVCavityPressureLoad (so the load is p dV/dx_a for frozen h, n); x0 = (0, 0, z_rim), z_rim = mean
+ * z of the base-rim control points: with the base held axially the closing cap adds ~nothing. Needs ead->geom of the
+ * current state (call after FormFunctionFEM). Collective. */
+PetscErrorCode LVEndoCavityVolumeSubdiv(FE *fem, PetscReal *V)
+{
+  IBMNodes *ibm = fem->ibm; DMPlexGeomCtx *ctx = &fem->geom_ctx;
+  PetscReal s, Nv[64], zr = 0.0, loc = 0.0; PetscInt nen;
+  PetscFunctionBeginUser;
+  PetscCall(LVNormalSign_(fem, &s));
+  for (PetscInt j = 0; j < ibm->n_bnodes[0]; j++) zr += ibm->z_bp[ibm->bnodes[j]];
+  zr /= ibm->n_bnodes[0];
+  for (PetscInt lc = 0; lc < ctx->layout.nLocalCells; ++lc) {
+    const PetscInt ec = ctx->layout.orig_cell[lc];
+    if (ec < 0 || ec >= ibm->n_elmt) continue;
+    struct Cmpnts xe, ae;
+    PetscCall(ElemCenterShapeValues_(ibm, ec, &nen, Nv));
+    ElemEndo_(fem, ec, s, Nv, nen, &xe, &ae);
+    loc += (xe.x * ae.x + xe.y * ae.y + (xe.z - zr) * ae.z) / 3.0;
+  }
+  /* s (g1 x g2) points from the cavity into the wall: the outward normal of the cavity */
+  PetscCallMPI(MPIU_Allreduce(&loc, V, 1, MPIU_REAL, MPIU_SUM, PETSC_COMM_WORLD));
+  PetscFunctionReturn(0);
 }

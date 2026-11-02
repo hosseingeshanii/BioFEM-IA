@@ -162,5 +162,6 @@ PetscErrorCode WriteLVFiberVTK(IBMNodes *ibm, const char *filepath);
  * both populate bnodes[0]/n_bnodes[0] the same way.
  */
 PetscErrorCode LVCavityVolume(IBMNodes *ibm, PetscReal *V);
+PetscErrorCode LVEndoCavityVolume(IBMNodes *ibm, PetscReal *V);   /* control-net nodes moved to x - h/2 n */
 
 #endif /* LV_GEOMETRY_H */

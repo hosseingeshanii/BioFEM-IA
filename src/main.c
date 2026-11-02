@@ -60,6 +60,18 @@ PetscInt   snes_stagnation_its=0;/* -snes_stagnation_its N: stop Newton when ||R
 PetscReal  accept_reduction=1.0; /* -accept_reduction r: a step whose SNES did not converge keeps its last Newton iterate
                                     if ||R_end|| < r*||R_start|| (default 1: any decrease); otherwise the step is
                                     rolled back to its start state. 0 = always roll back. */
+extern PetscReal lv_p_cav;       /* active_strain.c: cavity pressure applied by FExternal */
+PetscReal  lv_p_ed=0.0;          /* -lv_p_ed P [Pa] > 0: Track P, the Pezzuto & Ambrosi 2014 PV loop (TrackP* below):
+                                    passive filling 0 -> P at gamma = 0, then over the gamma ramp isovolumic contraction
+                                    (V = EDV) until p >= -lv_p_ao, ejection at p_ao, isovolumic relaxation (V = ESV) until
+                                    p <= P, filling at P. Pressure on the endocardium, consistent with the subdivision
+                                    basis (LVCavityPressureLoad); out_dir/pv.csv. Quasi-static, one body. */
+PetscReal  lv_p_ao=1.0e4;        /* -lv_p_ao: aortic pressure during ejection [Pa] */
+PetscInt   lv_fill_steps=20;     /* -lv_fill_steps: pressure steps of the passive filling */
+PetscReal  lv_volume_rtol=1e-6;  /* -lv_volume_rtol: isovolumic phases end when |V - V*| <= rtol V* */
+static PetscInt  trackp_phase = 0;                 /* 1 isovol. contraction, 2 ejection, 3 isovol. relaxation, 4 filling */
+static PetscReal trackp_Vfix = 0.0, trackp_EDV = 0.0, trackp_C = 0.0;   /* held volume, EDV, dV/dp estimate */
+static FILE     *trackp_fp = NULL;
 PetscInt   adaptive_substeps=0;  /* -adaptive_substeps L (quasi-static, -disable_fdyn 1): a step whose SNES did not converge
                                     is redone from its start state in substeps of the time (hence gamma) increment, first
                                     dt/2, halved on failure down to dt/2^L, doubled again after a success. If the smallest
@@ -357,6 +369,131 @@ static PetscErrorCode SolveSubstep_(FE *fem, Vec U, SNESConvergedReason *reason,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* ---------------- Track P (-lv_p_ed > 0) ---------------- */
+
+/* one solve at cavity pressure p, starting from U; afterwards the model state (x_bp, geometry, C33, and the thickness
+ * that places the endocardium) is that of U and *V = V(x, h(x)), the endocardial cavity volume on the subdivision
+ * surface */
+static PetscErrorCode TrackPSolveAt_(FE *fem, Vec U, PetscReal p, PetscBool *ok, PetscReal *V)
+{
+  SNESConvergedReason r; PetscReal a0, a1;
+  PetscFunctionBeginUser;
+  lv_p_cav = p;
+  PetscCall(SolveSubstep_(fem, U, &r, &a0, &a1));
+  *ok = (PetscBool)(r > 0);
+  PetscCall(FormFunctionFEM(NULL, U, fem->Res, (void *)fem));
+  if (*ok) PetscCall(UpdateElementThickness(fem));
+  PetscCall(LVEndoCavityVolumeSubdiv(fem, V));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode TrackPRecord_(FE *fem, PetscInt step, PetscReal t, PetscBool ok)
+{
+  PetscReal V, Vc;
+  PetscFunctionBeginUser;
+  PetscCall(LVEndoCavityVolumeSubdiv(fem, &V));
+  PetscCall(LVEndoCavityVolume(fem->ibm, &Vc));
+  const PetscReal g = GammaOfTimeCurrent(fem, 0);
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[trackp] step=%d t=%.4f phase=%d gamma=%.5f p=%.4f kPa V=%.4f ml (control net %.4f ml)%s\n",
+                        (int)step, (double)t, (int)trackp_phase, (double)g, (double)(lv_p_cav / 1000), (double)(V * 1e6),
+                        (double)(Vc * 1e6), ok ? "" : " NOT converged"));
+  if (trackp_fp) { fprintf(trackp_fp, "%d,%.6f,%d,%.6f,%.6f,%.6f,%.6f,%d\n", (int)step, (double)t, (int)trackp_phase, (double)g,
+                           (double)(lv_p_cav / 1000), (double)(V * 1e6), (double)(Vc * 1e6), (int)ok); fflush(trackp_fp); }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* passive filling 0 -> lv_p_ed at gamma = 0 (t_solve = 0), before the time loop; leaves the model at end-diastole */
+static PetscErrorCode TrackPFill_(FE *fem)
+{
+  Vec U; PetscReal V0, V = 0.0; PetscBool ok;
+  PetscMPIInt r;
+  PetscFunctionBeginUser;
+  PetscCheck(nbody == 1 && muscle_activation && disable_fdyn, PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP,
+             "-lv_p_ed: one body, -muscle_activation 1 and -disable_fdyn 1 (quasi-static)");
+  PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &r));
+  if (!r) {
+    char fn[512]; snprintf(fn, sizeof(fn), "%s/pv.csv", out_dir);
+    trackp_fp = fopen(fn, "w");
+    PetscCheck(trackp_fp, PETSC_COMM_SELF, PETSC_ERR_FILE_OPEN, "cannot write %s", fn);
+    fprintf(trackp_fp, "step,t,phase,gamma,p_kPa,V_ml,V_controlnet_ml,converged\n");
+  }
+  t_solve = 0.0;
+  lv_p_cav = 0.0;
+  PetscCall(FormFunctionFEM(NULL, fem->x, fem->Res, (void *)fem));
+  PetscCall(LVEndoCavityVolumeSubdiv(fem, &V0));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[trackp] unloaded endocardial cavity %.4f ml\n", (double)(V0 * 1e6)));
+  PetscCall(VecDuplicate(fem->x, &U));
+  for (PetscInt j = 1; j <= lv_fill_steps; j++) {
+    PetscCall(VecCopy(fem->x, U));
+    PetscCall(TrackPSolveAt_(fem, U, lv_p_ed * j / lv_fill_steps, &ok, &V));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[trackp] filling %d/%d: p=%.4f kPa V=%.4f ml %s\n", (int)j, (int)lv_fill_steps,
+                          (double)(lv_p_cav / 1000), (double)(V * 1e6), ok ? "" : "NOT converged"));
+    PetscCheck(ok, PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "Track P: filling step %d did not converge", (int)j);
+    PetscCall(VecCopy(U, fem->x));
+  }
+  PetscCall(VecDestroy(&U));
+  PetscCall(VecCopy(fem->x, fem->xn)); PetscCall(VecCopy(fem->x, fem->xnm1));
+  t_solve = -1.0;
+  trackp_EDV = trackp_Vfix = V; trackp_phase = 1;
+  trackp_C = (V - V0) / lv_p_ed;
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[trackp] END-DIASTOLE: EDV %.4f ml at %.4f kPa\n", (double)(V * 1e6), (double)(lv_p_ed / 1000)));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* isovolumic step: secant iteration on the cavity pressure (each iterate a full solve, warm-started) until
+ * |V - Vstar| <= lv_volume_rtol Vstar; starts from lv_p_cav, leaves the result in U and lv_p_cav */
+static PetscErrorCode TrackPIsovolumic_(FE *fem, Vec Xstart, Vec U, PetscReal Vstar, PetscBool *ok)
+{
+  PetscReal p0 = lv_p_cav, V0, p1, V1, C = trackp_C;
+  PetscFunctionBeginUser;
+  PetscCall(VecCopy(Xstart, U));
+  PetscCall(TrackPSolveAt_(fem, U, p0, ok, &V0));
+  for (PetscInt k = 0; *ok && PetscAbsReal(V0 - Vstar) > lv_volume_rtol * Vstar; k++) {
+    if (k == 30) { *ok = PETSC_FALSE; break; }
+    p1 = p0 + (Vstar - V0) / C;
+    PetscCall(TrackPSolveAt_(fem, U, p1, ok, &V1));
+    if (V1 != V0 && (V1 - V0) / (p1 - p0) > 0.0) C = (V1 - V0) / (p1 - p0);
+    p0 = p1; V0 = V1;
+  }
+  if (*ok) trackp_C = C;
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[trackp] isovolumic: p=%.4f kPa V=%.6f ml (target %.6f) %s\n", (double)(lv_p_cav / 1000),
+                        (double)(V0 * 1e6), (double)(Vstar * 1e6), *ok ? "" : "FAILED"));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* before the solve of step ti: valve logic. Ejection and filling are ordinary solves at p_ao / p_ed (*done = false);
+ * isovolumic steps are solved here (*done = true, *reason set); a valve opening switches the phase and leaves the step
+ * to the ordinary solve at the new pressure from Xstart. */
+static PetscErrorCode TrackPStep_(FE *fem, Vec Xstart, Vec U, SNESConvergedReason *reason, PetscBool *done)
+{
+  const MuscleActParams *mp = &fem->act_data.muscle_act_params;
+  const PetscReal T = (mp->gamma_T > 0.0) ? mp->gamma_T : (PetscReal)tisteps * dt, t = (PetscReal)ti * dt;
+  PetscBool ok;
+  PetscFunctionBeginUser;
+  *done = PETSC_FALSE;
+  if (trackp_phase == 2 && t > 0.5 * T + 1e-12) {          /* gamma starts to fall: the aortic valve closes */
+    PetscReal V;
+    PetscCall(LVEndoCavityVolumeSubdiv(fem, &V));             /* model state = end of the last step */
+    trackp_Vfix = V; trackp_phase = 3;
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[trackp] END-SYSTOLE: ESV %.4f ml, EF %.2f%%\n", (double)(V * 1e6),
+                          (double)(100 * (trackp_EDV - V) / trackp_EDV)));
+  }
+  if (trackp_phase == 2 || trackp_phase == 4) { lv_p_cav = (trackp_phase == 2) ? lv_p_ao : lv_p_ed; PetscFunctionReturn(PETSC_SUCCESS); }
+  PetscCall(TrackPIsovolumic_(fem, Xstart, U, trackp_Vfix, &ok));
+  if (ok && ((trackp_phase == 1 && lv_p_cav >= lv_p_ao) || (trackp_phase == 3 && lv_p_cav <= lv_p_ed))) {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[trackp] %s valve opens at t=%.4f (p=%.4f kPa): step redone at %.4f kPa\n",
+                          trackp_phase == 1 ? "aortic" : "mitral", (double)t, (double)(lv_p_cav / 1000),
+                          (double)((trackp_phase == 1 ? lv_p_ao : lv_p_ed) / 1000)));
+    trackp_phase = (trackp_phase == 1) ? 2 : 4;
+    lv_p_cav = (trackp_phase == 2) ? lv_p_ao : lv_p_ed;
+    PetscCall(VecCopy(Xstart, U));
+    PetscFunctionReturn(PETSC_SUCCESS);
+  }
+  *reason = ok ? SNES_CONVERGED_FNORM_ABS : SNES_DIVERGED_MAX_IT;
+  *done = PETSC_TRUE;
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 int main(int argc, char **argv)
 {
   /* Pass "control.dat" as the options file so PETSc loads it BEFORE argv.
@@ -434,6 +571,10 @@ int main(int argc, char **argv)
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-snes_stagnation_its", &snes_stagnation_its, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-accept_reduction", &accept_reduction, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-adaptive_substeps", &adaptive_substeps, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_p_ed", &lv_p_ed, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_p_ao", &lv_p_ao, PETSC_NULL);
+  PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fill_steps", &lv_fill_steps, PETSC_NULL);
+  PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-lv_volume_rtol", &lv_volume_rtol, PETSC_NULL);
   PetscOptionsGetReal(PETSC_NULL, PETSC_NULL, "-newmark_gamma", &newmark_gamma, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-lv_fix_apex", &lv_fix_apex, PETSC_NULL);
   PetscOptionsGetInt(PETSC_NULL, PETSC_NULL, "-rect_plate_nitti", &rect_plate_nitti, PETSC_NULL);
@@ -685,6 +826,8 @@ int main(int argc, char **argv)
 
   // if (tistart==0) tisteps ++;
 
+  if (lv_p_ed > 0.0) { ierr = TrackPFill_(&fem[0]); CHKERRQ(ierr); }
+
   for (ti=tistart; ti<tistart+tisteps; ti++) {
 
   for (ibi=0; ibi<nbody; ibi++) {
@@ -746,7 +889,9 @@ int main(int argc, char **argv)
           SNESMonitorSet(snes, ResidualMonitor, NULL, NULL);
         }
 
-	        ierr = SNESSolve(snes, PETSC_NULL, U);
+	        PetscBool trackp_done = PETSC_FALSE;   /* Track P solved this step itself (isovolumic) */
+	        if (lv_p_ed > 0.0) { ierr = TrackPStep_(&fem[ibi], Xstart, U, &reason, &trackp_done); CHKERRQ(ierr); }
+	        ierr = trackp_done ? 0 : SNESSolve(snes, PETSC_NULL, U);
 	        if (ierr) {
 	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "SNESSolve failed with ierr=%d for body %d at step %d\n",
@@ -777,7 +922,7 @@ int main(int argc, char **argv)
 	          }
 	        }
 
-	        ierr = SNESGetConvergedReason(snes, &reason);
+	        ierr = trackp_done ? 0 : SNESGetConvergedReason(snes, &reason);
 	        if (ierr) {
 	          PetscPrintf(PETSC_COMM_WORLD,
 	                      "SNESGetConvergedReason failed with ierr=%d for body %d at step %d\n",
@@ -796,9 +941,10 @@ int main(int argc, char **argv)
 	        {
 	          PetscReal *hist = NULL; PetscInt nhist = 0;
 	          SNESGetConvergenceHistory(snes, &hist, NULL, &nhist);
+	          if (trackp_done) nhist = 0;
 	          PetscReal f0 = (nhist > 0) ? hist[0] : 0.0, fend = (nhist > 0) ? hist[nhist - 1] : 0.0;
 	          /* -adaptive_substeps: redo a failed step in smaller time increments from its start state */
-	          if (reason < 0 && adaptive_substeps > 0) {
+	          if (reason < 0 && adaptive_substeps > 0 && lv_p_ed <= 0.0) {
 	            PetscCheck(disable_fdyn, PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP, "-adaptive_substeps is quasi-static only: needs -disable_fdyn 1");
 	            Vec Ufirst, Xs;                  /* the original attempt (fallback) and the state at the substep start */
 	            VecDuplicate(U, &Ufirst); VecCopy(U, Ufirst);
@@ -849,6 +995,7 @@ int main(int argc, char **argv)
 	            ierr = FormFunctionFEM(snes, fem[ibi].x, fem[ibi].Res, (void *)&fem[ibi]); CHKERRQ(ierr);
 	          }
 	          if (log_c33) { ierr = LogC33Stats(&fem[ibi], ti); CHKERRQ(ierr); }
+	          if (lv_p_ed > 0.0) { ierr = TrackPRecord_(&fem[ibi], ti, ti * dt, (PetscBool)(reason >= 0)); CHKERRQ(ierr); }
 	          if (lv_mean_bc) {
 	            IBMNodes *ib = fem[ibi].ibm; PetscReal cx = 0, cy = 0, ux = 0, uy = 0, mom = 0, S = 0;
 	            for (PetscInt v = 0; v < ib->n_v; v++) { cx += ib->x_bp0[v]; cy += ib->y_bp0[v]; }
