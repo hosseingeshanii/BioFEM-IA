@@ -244,7 +244,8 @@ def cmd_solid3d(args):
         from .lv import compute
         for d in args.ref_shell:
             s = compute(d, None, "m", "+z", args.band, secs)
-            s["EF"] = 100 * (s["V_endo"][0] - s["V_endo"]) / s["V_endo"][0]
+            i0 = s.get("iref", 0)                       # end-diastole for Track P shell runs
+            s["EF"] = 100 * (s["V_endo"][i0] - s["V_endo"]) / s["V_endo"][i0]
             shells.append((f"shell {Path(d).resolve().name}", s))
     ref = json.loads(Path(args.ref).read_text()) if args.ref else {}
 

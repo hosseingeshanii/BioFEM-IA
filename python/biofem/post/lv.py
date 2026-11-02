@@ -66,6 +66,9 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
         lam3.append(v.cell_data.get("lambda3"))
         cells = cells or v.cells
     X = np.array(X)
+    # reference of the metrics: file 0 (unloaded), or end-diastole for Track P runs (pv.csv): file 1 = cycle step 0,
+    # solved at gamma = 0 after the passive filling (as Pezzuto, metrics relative to end-diastole)
+    iref = ks.index(1) if (out / "pv.csv").exists() and 1 in ks else 0
     z = sgn * X[0][:, 2]
     zb, za = z.min(), z.max(); H = za - zb
     zmid = 0.5 * (zb + za)
@@ -74,9 +77,9 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
     rate = np.r_[np.nan, np.where(dtk > 0, np.linalg.norm(np.diff(X, axis=0), axis=2).mean(1) / np.where(dtk > 0, dtk, 1), np.nan)]
     iapex = int(np.argmax(z))
     L = sgn * X[:, iapex, 2] - zb
-    shortening = 100.0 * (L[0] - L) / L[0]
+    shortening = 100.0 * (L[iref] - L) / L[iref]
 
-    res = dict(case=str(case_dir), t=t, k=np.array(ks), dt=dt,
+    res = dict(case=str(case_dir), t=t, k=np.array(ks), dt=dt, iref=iref,
                u_mean=U.mean(1), u_max=U.max(1), rate=rate, shortening=shortening)
 
     # thickening + torsion: shell3d if present, else mid-surface / lambda3
@@ -90,14 +93,13 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
     if all(k in s3 for k in ks):
         n = X.shape[1]
         thick_r, thick_n, tors = [], [], []
-        ref = None
+        v = VTK(s3[ks[iref]]); P = v.points * s; A, B = P[:n], P[n:]
+        endo_first = np.hypot(A[:, 0], A[:, 1]).mean() < np.hypot(B[:, 0], B[:, 1]).mean()
+        ref = (A, B) if endo_first else (B, A)
+        h0 = v.point_data["thickness"][:n].copy()
         for k in ks:
             v = VTK(s3[k]); P = v.points * s; h = v.point_data["thickness"]
             A, B = P[:n], P[n:]
-            if ref is None:
-                endo_first = np.hypot(A[:, 0], A[:, 1]).mean() < np.hypot(B[:, 0], B[:, 1]).mean()
-                ref = (A, B) if endo_first else (B, A)
-                h0 = h[:n].copy()
             endo, epi = (A, B) if endo_first else (B, A)
             w = np.hypot(epi[:, 0], epi[:, 1]) - np.hypot(endo[:, 0], endo[:, 1])
             w0 = np.hypot(ref[1][:, 0], ref[1][:, 1]) - np.hypot(ref[0][:, 0], ref[0][:, 1])
@@ -110,7 +112,7 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
         if lam3[0] is not None and cells:
             cz = np.array([z[c].mean() for c in cells]); cb = np.abs(cz - zmid) < band_cm
             res["thick_normal"] = np.array([100 * (l3[cb].mean() - 1) for l3 in lam3])
-        tors = [(lambda th: th[sec_apex].mean() - th[sec_base].mean())(_theta_pezzuto(Xk, X[0], e3, axis_xy)) for Xk in X]
+        tors = [(lambda th: th[sec_apex].mean() - th[sec_base].mean())(_theta_pezzuto(Xk, X[iref], e3, axis_xy)) for Xk in X]
         res.update(torsion=np.array(tors), torsion_surface="mid-surface")
 
     vol = read_lv_volume(out)
