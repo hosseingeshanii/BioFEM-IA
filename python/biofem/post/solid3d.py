@@ -196,7 +196,37 @@ def curve_metrics(r, band_cm=0.4, sections=(0.10, 0.85)):
     return {k: np.array(v) for k, v in out.items()}
 
 
-def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs):
+def shell_curve_metrics(case_dir, band_cm=0.4, sections=(0.10, 0.85)):
+    """--ref-curves quantities of a shell Track P run (biofem post lv files): radial position of the endo / epi layers
+    (shell3d) at the mid-axis section and torsion of the endo, mid (surface) and epi layers relative to the unloaded
+    mesh (file 0); t = (file - 1) dt (file 1 = cycle step 0). No elastic invariants (the shell does not write them)."""
+    from .io import VTK, read_control, output_dir, output_files, control_float
+    ctrl = read_control(case_dir); out = output_dir(Path(case_dir), ctrl, None); dt = control_float(ctrl, "-dt")
+    surf = dict(output_files(out, "surface")); s3 = dict(output_files(out, "shell3d"))
+    ks = sorted(k for k in surf if k in s3)
+    M0 = VTK(surf[ks[0]]).points * 100.0; n = len(M0)
+    zb, za = M0[:, 2].min(), M0[:, 2].max(); H = za - zb; zmid = 0.5 * (zb + za)
+    band = np.abs(M0[:, 2] - zmid) < band_cm; frac = (M0[:, 2] - zb) / H
+    sb, sa = np.abs(frac - sections[0]) < 0.04, np.abs(frac - sections[1]) < 0.04
+    rad = lambda P: np.hypot(P[:, 0], P[:, 1])
+    def layers(k):
+        P = VTK(s3[k]).points * 100.0; A, B = P[:n], P[n:]
+        return (A, B) if rad(A).mean() < rad(B).mean() else (B, A)
+    E0, P0 = layers(ks[0])
+    def theta(P, R):
+        return np.degrees(np.arctan2(-(P[:, 0] * R[:, 1] - P[:, 1] * R[:, 0]), P[:, 0] * R[:, 0] + P[:, 1] * R[:, 1]))
+    out_ = {"t": [], "rad_endo": [], "rad_epi": [], "tors_endo": [], "tors_mid": [], "tors_epi": []}
+    for k in ks:
+        if k < 1: continue
+        E, P = layers(k); Mk = VTK(surf[k]).points * 100.0
+        out_["t"].append((k - 1) * dt)
+        out_["rad_endo"].append(rad(E[band]).mean()); out_["rad_epi"].append(rad(P[band]).mean())
+        for L, X, X0 in (("endo", E, E0), ("mid", Mk, M0), ("epi", P, P0)):
+            th = theta(X, X0); out_[f"tors_{L}"].append(th[sa].mean() - th[sb].mean())
+    return {k: np.array(v) for k, v in out_.items()}, out
+
+
+def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs, shells=()):
     panels = [("radial_position_cm", "radial position, mid-axis section (cm)", ["endo", "epi"], "rad"),
               ("torsion_case2_deg", "torsion, apex vs base, from unloaded (deg)", ["endo", "mid", "epi"], "tors"),
               ("I1e", r"$I_1^e$, mid-axis section", ["endo", "mid", "epi"], "I1e"),
@@ -204,12 +234,16 @@ def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs):
     ls = {"endo": "--", "mid": "-.", "epi": "-"}
     fig, axs = plt.subplots(1, 4, figsize=(17, 4.2))
     rows = []
-    for i, (r, d, lab) in enumerate(zip(runs, dirs, labels)):
-        ev = phase_events(d, r["steps"])
+    cases = [(lab, curve_metrics(r, band, secs), phase_events(d, r["steps"])) for r, d, lab in zip(runs, dirs, labels)]
+    for d in shells:                                     # shell Track P runs
+        m, od = shell_curve_metrics(d, band, secs)
+        cases.append((f"shell {Path(d).resolve().name}", m, phase_events(od, None)))
+    for i, (lab, m, ev) in enumerate(cases):
         if ev is None: continue
-        m = curve_metrics(r, band, secs); s = np.interp(m["t"], ev, [0, 1, 2, 3, 4])
+        s = np.interp(m["t"], ev, [0, 1, 2, 3, 4])
         for ax, (_, _, layers, key) in zip(axs, panels):
             for L in layers:
+                if f"{key}_{L}" not in m: continue
                 y = m[f"{key}_{L}"]
                 ax.plot(s, y, color=style.case_color(i), lw=1.8, ls=ls[L], label=f"{lab} {L}" if ax is axs[0] or L == "epi" else None)
                 rows += [(lab, key, L, a, b) for a, b in zip(s, y)]
@@ -329,7 +363,8 @@ def cmd_solid3d(args):
     print(f"[biofem] data saved -> {out.with_suffix('.csv')}")
 
     if args.ref_curves:
-        plot_ref_curves(plt, runs, dirs, labels, json.loads(Path(args.ref_curves).read_text()), out, args.band, secs)
+        plot_ref_curves(plt, runs, dirs, labels, json.loads(Path(args.ref_curves).read_text()), out, args.band, secs,
+                        shells=args.ref_shell)
 
     names = [("EF", "peak EF (%)", max), ("thick", "peak thickening (%)", max), ("short", "peak shortening (%)", max),
              ("short", "peak elongation (%)", lambda a: -min(a)), ("tors", "peak torsion (deg)", lambda a: a[np.argmax(np.abs(a))]),
