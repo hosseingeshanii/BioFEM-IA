@@ -795,7 +795,7 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(VecSet(U, 0.0));
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes)); PetscCall(SNESSetDM(snes, dm));
   PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, NULL));
-  MeanBC mb = {NULL, NULL, NULL, NULL, {NULL, NULL, NULL}, 0};
+  MeanBC mb = {0};
   Mat Jmb = NULL, Jpmb = NULL;
   if (prob == PROB_LV && mean_bc) {
     void (*ft[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_tx, mode_zero};
