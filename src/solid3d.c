@@ -308,6 +308,8 @@ static void mode_rz(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, con
 { f[0] = -(x[1] + PetscRealPart(u[uOff[0] + 1])); f[1] = x[0] + PetscRealPart(u[uOff[0]]); f[2] = 0.0; }
 static void mode_rz0(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
 { f[0] = -x[1]; f[1] = x[0]; f[2] = 0.0; }
+static void mode_X(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{ f[0] = x[0]; f[1] = x[1]; f[2] = 0.0; }
 static void mode_zero(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
 { f[0] = 0.0; }
 static void g0_uu_reg(KERNEL_ARGS, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g0[])
@@ -362,7 +364,8 @@ static PetscErrorCode WriteVTU(DM dm, Vec U, const char fname[])
  * are the Jacobian's null space (MeanBCJacobian; KSP removes them, so every Newton update and hence u has zero mean
  * displacement / rotation), and the preconditioner matrix adds a tiny spring C_REG (LU of the singular Jacobian fails).
  * Means are dof sums (P2 nodes), the rotation one with the current coordinates. */
-typedef struct { DM dm; Vec tx, ty, rz0, q[3]; PetscInt nx; } MeanBC;
+typedef struct { DM dm; Vec tx, ty, rz0, PX, q[3]; PetscInt nx; } MeanBC;
+static MeanBC *mean_bc_ctx = NULL;                          /* set for -mean_bc: solves are re-gauged (MeanBCGauge_) */
 
 static PetscErrorCode MeanBCModes_(MeanBC *mb, Vec X)
 {
@@ -415,6 +418,43 @@ static PetscErrorCode MeanBCJacobian(SNES snes, Vec X, Mat J, Mat Jp, void *ctx)
     for (PetscInt i = 0; i < 3; i++) PetscCall(VecDestroy(&v[i]));
   }
   PetscCall(MatSetNullSpace(J, nsp)); PetscCall(MatNullSpaceDestroy(&nsp));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* after a converged solve: the finite in-plane rigid motion x' = Q(phi) x + t (x = X + u) that makes the mean in-plane
+   displacement and the mean rotation sum_a (X_a x u_a)_z exactly zero (the Newton updates are not exactly orthogonal to
+   the rigid modes: the regularised LU amplifies them). R(Q x + t) = Q R(x) here (base u_z = 0, follower pressure,
+   material fibers), so equilibrium is unchanged. A = X + u and A_perp = e_z x A on the x, y displacement dofs. */
+static PetscErrorCode MeanBCGauge_(MeanBC *mb, Vec U)
+{
+  void (*fr[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_rz, mode_zero};
+  Vec A, Ap, W, Uxy; PetscScalar d; PetscReal phi = 0.0, tx = 0.0, ty = 0.0;
+  PetscFunctionBeginUser;
+  PetscCall(VecDuplicate(U, &A)); PetscCall(VecDuplicate(U, &Ap)); PetscCall(VecDuplicate(U, &W)); PetscCall(VecDuplicate(U, &Uxy));
+  PetscCall(VecWAXPY(W, 1.0, mb->tx, mb->ty)); PetscCall(VecPointwiseMult(Uxy, U, W));   /* u on the x, y dofs */
+  PetscCall(VecWAXPY(A, 1.0, mb->PX, Uxy));
+  PetscCall(DMProjectField(mb->dm, 0.0, U, fr, INSERT_VALUES, Ap));
+  /* c(phi) = rz0 . u'(phi) with t(phi) from the two translation conditions; Newton on phi (numerical derivative) */
+  for (PetscInt it = 0; it < 20; it++) {
+    PetscReal c[2];
+    for (PetscInt j = 0; j < 2; j++) {
+      const PetscReal ph = phi + (j ? 1e-7 : 0.0);
+      PetscCall(VecAXPBYPCZ(W, PetscCosReal(ph), PetscSinReal(ph), 0.0, A, Ap));            /* Q(ph) x (in-plane) */
+      PetscCall(VecAXPY(W, -1.0, mb->PX));                                                 /* - X */
+      PetscCall(VecDot(W, mb->tx, &d)); tx = -PetscRealPart(d) / mb->nx;
+      PetscCall(VecDot(W, mb->ty, &d)); ty = -PetscRealPart(d) / mb->nx;
+      PetscCall(VecAXPY(W, tx, mb->tx)); PetscCall(VecAXPY(W, ty, mb->ty));
+      PetscCall(VecDot(W, mb->rz0, &d)); c[j] = PetscRealPart(d);
+    }
+    if (PetscAbsReal(c[0]) < 1e-14 * mb->nx) break;
+    phi -= c[0] * 1e-7 / (c[1] - c[0]);
+  }
+  PetscCall(VecAXPBYPCZ(W, PetscCosReal(phi), PetscSinReal(phi), 0.0, A, Ap));
+  PetscCall(VecAXPY(W, -1.0, mb->PX));
+  PetscCall(VecDot(W, mb->tx, &d)); tx = -PetscRealPart(d) / mb->nx; PetscCall(VecDot(W, mb->ty, &d)); ty = -PetscRealPart(d) / mb->nx;
+  PetscCall(VecAXPY(W, tx, mb->tx)); PetscCall(VecAXPY(W, ty, mb->ty));
+  PetscCall(VecAXPY(U, -1.0, Uxy)); PetscCall(VecAXPY(U, 1.0, W));                          /* new u on the x, y dofs */
+  PetscCall(VecDestroy(&A)); PetscCall(VecDestroy(&Ap)); PetscCall(VecDestroy(&W)); PetscCall(VecDestroy(&Uxy));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -489,6 +529,7 @@ static PetscErrorCode SolveVolume(SNES snes, PetscDS ds, Vec U, PetscScalar c[],
     PetscCall(SNESGetConvergedReason(snes, &r)); PetscCall(SNESGetIterationNumber(snes, &its));
     *its_out += its;
     if (r <= 0) break;
+    if (mean_bc_ctx) PetscCall(MeanBCGauge_(mean_bc_ctx, U));
     PetscCall(CavityVolume(dm, ds, U, c, &V, b));
     if (PetscAbsReal(V - Vstar) <= vtol * Vstar) { *ok = PETSC_TRUE; break; }
     const PetscReal pc = PetscRealPart(c[C_PCAV]);
@@ -526,6 +567,7 @@ static PetscErrorCode SolveStep(SNES snes, PetscDS ds, Vec U, PetscScalar c0[], 
         PetscCall(SNESSolve(snes, NULL, U));
         PetscCall(SNESGetConvergedReason(snes, &r)); PetscCall(SNESGetIterationNumber(snes, &its));
         *its_out += its; good = (PetscBool)(r > 0);
+        if (good && mean_bc_ctx) PetscCall(MeanBCGauge_(mean_bc_ctx, U));
       }
     }
     if (good) *ok = PETSC_TRUE;
@@ -761,7 +803,9 @@ PetscErrorCode Solid3dRun(void)
     void (*fr[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_rz0, mode_zero};
     PetscScalar nx;
     mb.dm = dm;
-    PetscCall(VecDuplicate(U, &mb.tx)); PetscCall(VecDuplicate(U, &mb.ty)); PetscCall(VecDuplicate(U, &mb.rz0));
+    void (*fX[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_X, mode_zero};
+    PetscCall(VecDuplicate(U, &mb.tx)); PetscCall(VecDuplicate(U, &mb.ty)); PetscCall(VecDuplicate(U, &mb.rz0)); PetscCall(VecDuplicate(U, &mb.PX));
+    PetscCall(DMProjectField(dm, 0.0, U, fX, INSERT_VALUES, mb.PX));
     for (PetscInt i = 0; i < 3; i++) PetscCall(VecDuplicate(U, &mb.q[i]));
     PetscCall(DMProjectField(dm, 0.0, U, ft, INSERT_VALUES, mb.tx)); PetscCall(DMProjectField(dm, 0.0, U, fy, INSERT_VALUES, mb.ty));
     PetscCall(DMProjectField(dm, 0.0, U, fr, INSERT_VALUES, mb.rz0));
@@ -769,6 +813,7 @@ PetscErrorCode Solid3dRun(void)
     PetscCall(DMCreateMatrix(dm, &Jmb)); PetscCall(DMCreateMatrix(dm, &Jpmb));
     PetscCall(SNESSetFunction(snes, NULL, MeanBCFunction, &mb));
     PetscCall(SNESSetJacobian(snes, Jmb, Jpmb, MeanBCJacobian, &mb));
+    mean_bc_ctx = &mb;
   }
   PetscCall(SNESSetFromOptions(snes));
   if (prob == PROB_LV && mean_bc) {                         /* the operator is singular: Krylov with the null space removed */
@@ -929,7 +974,8 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(VecDestroy(&U));
   PetscCall(PetscFEDestroy(&fe[0])); PetscCall(PetscFEDestroy(&fe[1]));
   if (mb.dm) {
-    PetscCall(VecDestroy(&mb.tx)); PetscCall(VecDestroy(&mb.ty)); PetscCall(VecDestroy(&mb.rz0));
+    PetscCall(VecDestroy(&mb.tx)); PetscCall(VecDestroy(&mb.ty)); PetscCall(VecDestroy(&mb.rz0)); PetscCall(VecDestroy(&mb.PX));
+    mean_bc_ctx = NULL;
     for (PetscInt i = 0; i < 3; i++) PetscCall(VecDestroy(&mb.q[i]));
     PetscCall(MatDestroy(&Jmb)); PetscCall(MatDestroy(&Jpmb));
   }
