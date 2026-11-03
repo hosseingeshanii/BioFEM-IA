@@ -408,7 +408,12 @@ static PetscErrorCode MeanBCJacobian(SNES snes, Vec X, Mat J, Mat Jp, void *ctx)
   PetscCall(DMPlexSNESComputeJacobianFEM(mb->dm, Xl, J, Jp, NULL));
   PetscCall(DMRestoreLocalVector(mb->dm, &Xl));
   PetscCall(MeanBCModes_(mb, X));
-  PetscCall(MatNullSpaceCreate(PetscObjectComm((PetscObject)J), PETSC_FALSE, 3, mb->q, &nsp));
+  {                                                         /* the null space locks its vectors read-only: own copies */
+    Vec v[3];
+    for (PetscInt i = 0; i < 3; i++) { PetscCall(VecDuplicate(mb->q[i], &v[i])); PetscCall(VecCopy(mb->q[i], v[i])); }
+    PetscCall(MatNullSpaceCreate(PetscObjectComm((PetscObject)J), PETSC_FALSE, 3, v, &nsp));
+    for (PetscInt i = 0; i < 3; i++) PetscCall(VecDestroy(&v[i]));
+  }
   PetscCall(MatSetNullSpace(J, nsp)); PetscCall(MatNullSpaceDestroy(&nsp));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
