@@ -14,6 +14,8 @@
  *                 a follower load on the endocardium (tag 1), filling 0 -> p_ed with gamma = 0 in -fill_steps, then over the
  *                 gamma ramp: isovolumic contraction (V = EDV, p_c unknown) until p_c >= p_ao, ejection at p_ao until gamma
  *                 peaks, isovolumic relaxation (V = ESV) until p_c <= p_ed, filling at p_ed. pv.csv in -out_dir.
+ *                 -mean_bc 1: instead of the rim pins, Pezzuto's null average in-plane displacement and null average
+ *                 rotation about z of the ventricle (MeanBC* below); the pins (default) are kept for the pulse comparison.
  * Mesh from options: -dm_plex_filename <file.msh> (or a PETSc box with a mesh generator).
  */
 #include <petscdmplex.h>
@@ -27,7 +29,7 @@ static const char *const ProblemNames[] = {"cube", "plate", "lv", "Problem", "PR
 
 /* PetscDS constants */
 enum { C_LAW, C_A, C_B, C_AF, C_BF, C_AS, C_BS, C_AFS, C_BFS, C_TENSION, C_SHEET, C_MU, C_K,
-       C_GAMMA, C_FA_DIAG, C_A1, C_A2, C_A3, C_FIBER_AUX, C_F0, C_S0 = C_F0 + 3, C_TRACTION = C_S0 + 3, C_PCAV, C_ZB, C_N };
+       C_GAMMA, C_FA_DIAG, C_A1, C_A2, C_A3, C_FIBER_AUX, C_F0, C_S0 = C_F0 + 3, C_TRACTION = C_S0 + 3, C_PCAV, C_ZB, C_REG, C_N };
 
 typedef struct { MatParams m; PetscReal A[9], f[3], s[3]; } KernelData;
 
@@ -296,6 +298,24 @@ static PetscErrorCode WriteVertexDisplacement(DM dm, Vec U, const char fname[])
 
 /* ParaView output: displacement and pressure interpolated to P1 (their vertex values) and written as VTU by PETSc's
  * VTK viewer (parallel). The P1 copy of the DM is made once. */
+/* -mean_bc: in-plane rigid modes at the dofs (translations; rotation about z with the CURRENT coordinates x + u, the
+   tangent's null vector of a deformed body), and the regularising spring of the preconditioner matrix */
+static void mode_tx(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{ f[0] = 1.0; f[1] = 0.0; f[2] = 0.0; }
+static void mode_ty(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{ f[0] = 0.0; f[1] = 1.0; f[2] = 0.0; }
+static void mode_rz(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{ f[0] = -(x[1] + PetscRealPart(u[uOff[0] + 1])); f[1] = x[0] + PetscRealPart(u[uOff[0]]); f[2] = 0.0; }
+static void mode_rz0(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{ f[0] = -x[1]; f[1] = x[0]; f[2] = 0.0; }
+static void mode_zero(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
+{ f[0] = 0.0; }
+static void g0_uu_reg(KERNEL_ARGS, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g0[])
+{
+  for (PetscInt i = 0; i < 9; i++) g0[i] = 0.0;
+  for (PetscInt i = 0; i < 3; i++) g0[i * 4] = constants[C_REG];
+}
+
 static void copy_u(KERNEL_ARGS, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f[])
 {
   for (PetscInt i = 0; i < 3; i++) f[i] = u[uOff[0] + i];
@@ -332,6 +352,74 @@ static PetscErrorCode WriteVTU(DM dm, Vec U, const char fname[])
   PetscCall(VecView(V, vw));
   PetscCall(PetscViewerDestroy(&vw));
   PetscCall(DMRestoreGlobalVector(dmV, &V));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* ---------------- -mean_bc: null average in-plane displacement and rotation (Pezzuto & Ambrosi 2014) ----------------
+ * No pins: the base u_z = 0 leaves the in-plane translations and the rotation about z free (3 rigid modes). The
+ * Lagrange multipliers of the 3 average conditions act as a uniform in-plane force and torque, i.e. the residual is
+ * stationary only up to its rigid-mode components: those are projected out of the residual (MeanBCFunction), the modes
+ * are the Jacobian's null space (MeanBCJacobian; KSP removes them, so every Newton update and hence u has zero mean
+ * displacement / rotation), and the preconditioner matrix adds a tiny spring C_REG (LU of the singular Jacobian fails).
+ * Means are dof sums (P2 nodes), the rotation one with the current coordinates. */
+typedef struct { DM dm; Vec tx, ty, rz0, q[3]; PetscInt nx; } MeanBC;
+
+static PetscErrorCode MeanBCModes_(MeanBC *mb, Vec X)
+{
+  void (*fr[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_rz, mode_zero};
+  PetscScalar d;
+  PetscFunctionBeginUser;
+  PetscCall(VecCopy(mb->tx, mb->q[0])); PetscCall(VecCopy(mb->ty, mb->q[1]));
+  PetscCall(DMProjectField(mb->dm, 0.0, X, fr, INSERT_VALUES, mb->q[2]));
+  for (PetscInt i = 0; i < 3; i++) {                        /* Gram-Schmidt */
+    for (PetscInt j = 0; j < i; j++) { PetscCall(VecDot(mb->q[i], mb->q[j], &d)); PetscCall(VecAXPY(mb->q[i], -d, mb->q[j])); }
+    PetscCall(VecNormalize(mb->q[i], NULL));
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode MeanBCLocal_(DM dm, Vec X, Vec *Xl)
+{
+  PetscFunctionBeginUser;
+  PetscCall(DMGetLocalVector(dm, Xl)); PetscCall(VecSet(*Xl, 0.0));
+  PetscCall(DMPlexInsertBoundaryValues(dm, PETSC_TRUE, *Xl, 0.0, NULL, NULL, NULL));
+  PetscCall(DMGlobalToLocal(dm, X, INSERT_VALUES, *Xl));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode MeanBCFunction(SNES snes, Vec X, Vec F, void *ctx)
+{
+  MeanBC *mb = (MeanBC *)ctx; Vec Xl, Fl; PetscScalar d;
+  PetscFunctionBeginUser;
+  PetscCall(MeanBCLocal_(mb->dm, X, &Xl)); PetscCall(DMGetLocalVector(mb->dm, &Fl)); PetscCall(VecSet(Fl, 0.0));
+  PetscCall(DMPlexSNESComputeResidualFEM(mb->dm, Xl, Fl, NULL));
+  PetscCall(VecSet(F, 0.0)); PetscCall(DMLocalToGlobal(mb->dm, Fl, ADD_VALUES, F));
+  PetscCall(DMRestoreLocalVector(mb->dm, &Xl)); PetscCall(DMRestoreLocalVector(mb->dm, &Fl));
+  PetscCall(MeanBCModes_(mb, X));
+  for (PetscInt i = 0; i < 3; i++) { PetscCall(VecDot(F, mb->q[i], &d)); PetscCall(VecAXPY(F, -d, mb->q[i])); }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode MeanBCJacobian(SNES snes, Vec X, Mat J, Mat Jp, void *ctx)
+{
+  MeanBC *mb = (MeanBC *)ctx; Vec Xl; MatNullSpace nsp;
+  PetscFunctionBeginUser;
+  PetscCall(MeanBCLocal_(mb->dm, X, &Xl));
+  PetscCall(DMPlexSNESComputeJacobianFEM(mb->dm, Xl, J, Jp, NULL));
+  PetscCall(DMRestoreLocalVector(mb->dm, &Xl));
+  PetscCall(MeanBCModes_(mb, X));
+  PetscCall(MatNullSpaceCreate(PetscObjectComm((PetscObject)J), PETSC_FALSE, 3, mb->q, &nsp));
+  PetscCall(MatSetNullSpace(J, nsp)); PetscCall(MatNullSpaceDestroy(&nsp));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* mean in-plane displacement (dof means of u_x, u_y) and mean rotation about z (reference coordinates) of U */
+static PetscErrorCode MeanBCReport_(MeanBC *mb, Vec U, PetscReal m[3])
+{
+  PetscScalar a, b, c, rr;
+  PetscFunctionBeginUser;
+  PetscCall(VecDot(U, mb->tx, &a)); PetscCall(VecDot(U, mb->ty, &b)); PetscCall(VecDot(U, mb->rz0, &c)); PetscCall(VecDot(mb->rz0, mb->rz0, &rr));
+  m[0] = PetscRealPart(a) / mb->nx; m[1] = PetscRealPart(b) / mb->nx; m[2] = PetscRealPart(c) / PetscRealPart(rr);
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -501,7 +589,8 @@ PetscErrorCode Solid3dRun(void)
   Problem prob = PROB_CUBE;
   PetscReal gmax = 0.2, traction = 9.0e5, nLx = 1.2, nLy = 0.9, p_ed = 0.0, p_ao = 1.0e4, vtol = 1e-8;
   PetscInt steps = 4, out_every = 5, levels = 3, vtk_every = -1, fill_steps = 20;
-  PetscBool test_jdir = PETSC_FALSE;
+  PetscBool test_jdir = PETSC_FALSE, mean_bc = PETSC_FALSE;
+  PetscReal mean_bc_reg = 1e-8;
   char out_dir[PETSC_MAX_PATH_LEN] = "solid3d_out";
   MatParams m = {MAT_HO, 236.2, 10.810, 20037.0, 14.154, 3724.5, 5.1645, 410.8, 11.300, PETSC_TRUE, PETSC_TRUE, 1.5e6, 7.445e7};
   Prolate geo = {0.0291, 0.557, 1.00, -60.0, 60.0};
@@ -533,6 +622,8 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(PetscOptionsReal("-p_ed", "lv: end-diastolic cavity pressure [Pa]; > 0 runs the PV loop (Track P)", "", p_ed, &p_ed, NULL));
   PetscCall(PetscOptionsReal("-p_ao", "lv: aortic pressure during ejection [Pa]", "", p_ao, &p_ao, NULL));
   PetscCall(PetscOptionsInt("-fill_steps", "lv: pressure steps of the passive filling 0 -> p_ed", "", fill_steps, &fill_steps, NULL));
+  PetscCall(PetscOptionsBool("-mean_bc", "lv: null average in-plane displacement and rotation instead of the rim pins", "", mean_bc, &mean_bc, NULL));
+  PetscCall(PetscOptionsReal("-mean_bc_reg", "lv -mean_bc: spring of the preconditioner matrix, relative to the HO a / d^2", "", mean_bc_reg, &mean_bc_reg, NULL));
   PetscCall(PetscOptionsBool("-test_jacobian_dir", "check J v against a central difference of R (lv: unloaded and at end-diastole)", "", test_jdir, &test_jdir, NULL));
   PetscCall(PetscOptionsReal("-volume_rtol", "lv: isovolumic phases, |V - V*| <= rtol V*", "", vtol, &vtol, NULL));
   PetscOptionsEnd();
@@ -582,6 +673,12 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(PetscDSSetJacobian(ds, 0, 1, NULL, NULL, g2_up, NULL));
   PetscCall(PetscDSSetJacobian(ds, 1, 0, NULL, g1_pu, NULL, NULL));
   PetscCall(PetscDSSetJacobian(ds, 1, 1, g0_pp, NULL, NULL, NULL));
+  if (prob == PROB_LV && mean_bc) {                         /* preconditioner matrix = Jacobian + a tiny spring */
+    PetscCall(PetscDSSetJacobianPreconditioner(ds, 0, 0, g0_uu_reg, NULL, NULL, g3_uu));
+    PetscCall(PetscDSSetJacobianPreconditioner(ds, 0, 1, NULL, NULL, g2_up, NULL));
+    PetscCall(PetscDSSetJacobianPreconditioner(ds, 1, 0, NULL, g1_pu, NULL, NULL));
+    PetscCall(PetscDSSetJacobianPreconditioner(ds, 1, 1, g0_pp, NULL, NULL, NULL));
+  }
   if (prob == PROB_CUBE || prob == PROB_PLATE) {
     for (PetscInt d = 0; d < 3; d++) {
       char name[8]; DMLabel lab; PetscInt one = 1, comp = d;
@@ -601,10 +698,12 @@ PetscErrorCode Solid3dRun(void)
     DMLabel lab; PetscInt one = 1, cz = 2, cxy[2] = {0, 1}, cy = 1;
     PetscCall(DMGetLabel(dm, "base", &lab));
     PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "base_uz", lab, 1, &one, 0, 1, &cz, (void (*)(void))zero_fn, NULL, NULL, NULL));
-    PetscCall(DMGetLabel(dm, "pinA", &lab));
-    PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "pinA", lab, 1, &one, 0, 2, cxy, (void (*)(void))zero_fn, NULL, NULL, NULL));
-    PetscCall(DMGetLabel(dm, "pinB", &lab));
-    PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "pinB", lab, 1, &one, 0, 1, &cy, (void (*)(void))zero_fn, NULL, NULL, NULL));
+    if (!mean_bc) {                                          /* rim pins (default; the pulse reference uses them) */
+      PetscCall(DMGetLabel(dm, "pinA", &lab));
+      PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "pinA", lab, 1, &one, 0, 2, cxy, (void (*)(void))zero_fn, NULL, NULL, NULL));
+      PetscCall(DMGetLabel(dm, "pinB", &lab));
+      PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "pinB", lab, 1, &one, 0, 1, &cy, (void (*)(void))zero_fn, NULL, NULL, NULL));
+    }
     if (p_ed > 0.0) {                                       /* cavity pressure on the endocardium */
       PetscInt bd, comps[3] = {0, 1, 2}; PetscWeakForm wf;
       PetscCall(DMGetLabel(dm, "endo", &lab));
@@ -612,6 +711,7 @@ PetscErrorCode Solid3dRun(void)
       PetscCall(PetscDSGetBoundary(ds, bd, &wf, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL));
       PetscCall(PetscWeakFormSetIndexBdResidual(wf, lab, 1, 0, 0, 0, f0_pressure, 0, NULL));
       PetscCall(PetscWeakFormSetIndexBdJacobian(wf, lab, 1, 0, 0, 0, 0, NULL, 0, g1_pressure, 0, NULL, 0, NULL));
+      if (mean_bc) PetscCall(PetscWeakFormSetIndexBdJacobianPreconditioner(wf, lab, 1, 0, 0, 0, 0, NULL, 0, g1_pressure, 0, NULL, 0, NULL));
     }
   }
 
@@ -641,13 +741,37 @@ PetscErrorCode Solid3dRun(void)
   c0[C_A1] = c0[C_A2] = c0[C_A3] = 1.0;
   c0[C_F0] = 1.0; c0[C_S0 + 2] = 1.0;                       /* uniform fiber e_x, sheet e_z (cube) */
   c0[C_ZB] = geo.d * PetscCoshReal(geo.le) * PetscCosReal(mu_base_deg * PETSC_PI / 180.0);   /* z of the endo rim */
+  c0[C_REG] = mean_bc_reg * m.a / (geo.d * geo.d);
   PetscCall(PetscDSSetConstants(ds, C_N, c0));
 
   PetscCall(DMCreateGlobalVector(dm, &U)); PetscCall(PetscObjectSetName((PetscObject)U, "solution"));
   PetscCall(VecSet(U, 0.0));
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes)); PetscCall(SNESSetDM(snes, dm));
   PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, NULL));
+  MeanBC mb = {NULL, NULL, NULL, NULL, {NULL, NULL, NULL}, 0};
+  Mat Jmb = NULL, Jpmb = NULL;
+  if (prob == PROB_LV && mean_bc) {
+    void (*ft[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_tx, mode_zero};
+    void (*fy[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_ty, mode_zero};
+    void (*fr[2])(KERNEL_ARGS, const PetscReal[], PetscInt, const PetscScalar[], PetscScalar[]) = {mode_rz0, mode_zero};
+    PetscScalar nx;
+    mb.dm = dm;
+    PetscCall(VecDuplicate(U, &mb.tx)); PetscCall(VecDuplicate(U, &mb.ty)); PetscCall(VecDuplicate(U, &mb.rz0));
+    for (PetscInt i = 0; i < 3; i++) PetscCall(VecDuplicate(U, &mb.q[i]));
+    PetscCall(DMProjectField(dm, 0.0, U, ft, INSERT_VALUES, mb.tx)); PetscCall(DMProjectField(dm, 0.0, U, fy, INSERT_VALUES, mb.ty));
+    PetscCall(DMProjectField(dm, 0.0, U, fr, INSERT_VALUES, mb.rz0));
+    PetscCall(VecDot(mb.tx, mb.tx, &nx)); mb.nx = (PetscInt)PetscRealPart(nx);
+    PetscCall(DMCreateMatrix(dm, &Jmb)); PetscCall(DMCreateMatrix(dm, &Jpmb));
+    PetscCall(SNESSetFunction(snes, NULL, MeanBCFunction, &mb));
+    PetscCall(SNESSetJacobian(snes, Jmb, Jpmb, MeanBCJacobian, &mb));
+  }
   PetscCall(SNESSetFromOptions(snes));
+  if (prob == PROB_LV && mean_bc) {                         /* the operator is singular: Krylov with the null space removed */
+    KSP ksp; PetscCall(SNESGetKSP(snes, &ksp));
+    PetscCall(KSPSetType(ksp, KSPFGMRES)); PetscCall(KSPSetTolerances(ksp, 1e-10, 1e-30, PETSC_DEFAULT, 200));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[mean_bc] no rim pins; null average in-plane displacement and rotation; FGMRES on the "
+                          "Jacobian with its rigid null space, preconditioner = the given PC of Jacobian + spring %.2e Pa/m^2\n", (double)c0[C_REG]));
+  }
   if (prob == PROB_LV || vtk_every > 0) {                  /* rank 0 creates the output directory, the others wait */
     PetscMPIInt rank; PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
     if (!rank) {
@@ -661,6 +785,7 @@ PetscErrorCode Solid3dRun(void)
       fprintf(fp, "code=biofem-solid3d\nsource=%s\nproblem=%s\nmesh=%s\ngamma=%g\nsteps=%d\nout_every=%d\nalpha_endo=%g\nalpha_epi=%g\n",
               BIOFEM_GIT, ProblemNames[prob], mesh, (double)gmax, (int)steps, (int)out_every, (double)geo.a_endo, (double)geo.a_epi);
       fprintf(fp, "prolate_d=%g\nlam_endo=%g\nlam_epi=%g\nmu_base_deg=%g\n", (double)geo.d, (double)geo.le, (double)geo.lp, (double)mu_base_deg);
+      if (prob == PROB_LV) fprintf(fp, "base_bc=%s\n", mean_bc ? "mean (null average in-plane displacement and rotation)" : "pins (endo rim theta=0: ux=uy=0; epi rim theta=0: uy=0)");
       /* p_ed > 0: u_step0000.txt is end-diastole (after filling); metrics are relative to it */
       if (prob == PROB_LV && p_ed > 0.0) fprintf(fp, "p_ed=%g\np_ao=%g\nfill_steps=%d\n", (double)p_ed, (double)p_ao, (int)fill_steps);
       fclose(fp);
@@ -750,6 +875,10 @@ PetscErrorCode Solid3dRun(void)
     } else
       PetscCall(PetscPrintf(PETSC_COMM_WORLD, "[step %d] gamma %.5f: %s, %d Newton its (%.1f s)\n", (int)k, (double)PetscRealPart(c1[C_GAMMA]),
                             ok ? "converged" : "NOT converged", (int)its, (double)(t1 - t0)));
+    if (mb.dm && (k % out_every == 0 || k == steps)) {
+      PetscReal mm[3]; PetscCall(MeanBCReport_(&mb, U, mm));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "  [mean_bc] mean u_x %.2e m, mean u_y %.2e m, mean rotation %.2e rad\n", (double)mm[0], (double)mm[1], (double)mm[2]));
+    }
     if (!ok) { PetscCall(PetscPrintf(PETSC_COMM_WORLD, "stopping: step %d failed with %d substep levels\n", (int)k, (int)levels)); break; }
     PetscCall(WriteStep(dm, U, out_dir, k, (PetscBool)(prob == PROB_LV && (k % out_every == 0 || k == steps)),
                         (PetscBool)(vtk_every > 0 && (k % vtk_every == 0 || k == steps))));
@@ -794,6 +923,11 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(VecViewFromOptions(U, NULL, "-solution_view"));
   PetscCall(VecDestroy(&U));
   PetscCall(PetscFEDestroy(&fe[0])); PetscCall(PetscFEDestroy(&fe[1]));
+  if (mb.dm) {
+    PetscCall(VecDestroy(&mb.tx)); PetscCall(VecDestroy(&mb.ty)); PetscCall(VecDestroy(&mb.rz0));
+    for (PetscInt i = 0; i < 3; i++) PetscCall(VecDestroy(&mb.q[i]));
+    PetscCall(MatDestroy(&Jmb)); PetscCall(MatDestroy(&Jpmb));
+  }
   PetscCall(SNESDestroy(&snes)); PetscCall(DMDestroy(&dm));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
