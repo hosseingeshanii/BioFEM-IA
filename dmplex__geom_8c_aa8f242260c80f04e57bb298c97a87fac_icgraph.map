@@ -1,0 +1,49 @@
+<map id="EnsureDMPlexGeomLogEvents_" name="EnsureDMPlexGeomLogEvents_">
+<area shape="rect" id="Node000001" title=" " alt="" coords="1791,322,2020,350"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#aeca513213e67a07a712cc41e8c6412ea" title="One&#45;time DMPlex geometry setup." alt="" coords="1556,225,1738,252"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="1859,315,1742,268,1704,256,1705,250,1744,263,1864,316"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#af7fb8fc68c27b224f0458d0c42911fe6" title="Per&#45;SNES&#45;iteration geometry update." alt="" coords="1551,277,1743,304"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="1805,319,1730,308,1730,302,1810,319"/>
+<area shape="rect" id="Node000018" href="$dmplex__geom_8c.html#a14490a5ebe1fce84a8ad0654ef0e798b" title="Synchronise remote coordinates and evaluate the geometry kernel for all local cells." alt="" coords="1571,397,1723,424"/>
+<area shape="poly" id="edge23_Node000001_Node000018" title=" " alt="" coords="1843,354,1699,399,1698,394,1838,355"/>
+<area shape="rect" id="Node000021" href="$dmplex__geom_8c.html#a30dded199da09376f4867a4006039b2c" title=" " alt="" coords="1554,449,1740,476"/>
+<area shape="poly" id="edge28_Node000001_Node000021" title=" " alt="" coords="1876,358,1816,400,1744,438,1710,451,1709,446,1742,434,1813,396,1871,360"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,221,60,248"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="1614,215,1535,160,1480,125,1417,90,1348,59,1275,32,1199,15,1123,8,304,8,243,14,197,31,156,60,110,103,85,133,65,165,41,221,36,220,60,163,80,129,106,99,153,56,194,26,242,8,304,3,1123,3,1200,9,1276,27,1350,54,1419,86,1482,120,1538,155,1619,216"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="1297,225,1476,252"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="1538,239,1477,241,1476,236,1543,238"/>
+<area shape="poly" id="edge22_Node000005_Node000004" title=" " alt="" coords="1556,273,1460,256,1460,250,1562,273"/>
+<area shape="rect" id="Node000006" href="$active__strain_8c.html#a693fb698122674ff7df6dd47ac75167c" title="Run per&#45;element precomputations before global internal&#45;force assembly." alt="" coords="1322,277,1450,304"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="1533,291,1451,293,1451,288,1538,290"/>
+<area shape="rect" id="Node000007" href="$active__strain_8c.html#a3bac899c10052c346d2afe9eccbac71d" title="Assemble global internal force vector for active&#45;strain mechanics." alt="" coords="1071,258,1172,286"/>
+<area shape="poly" id="edge6_Node000006_Node000007" title=" " alt="" coords="1304,285,1172,278,1172,273,1309,285"/>
+<area shape="rect" id="Node000008" href="$main_8c.html#a9a070a6f408cadb404b0ee7fbc74c576" title=" " alt="" coords="836,221,973,248"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="1053,261,974,249,974,244,1059,261"/>
+<area shape="poly" id="edge18_Node000008_Node000003" title=" " alt="" coords="885,206,845,154,818,127,787,105,712,71,680,63,649,58,583,57,499,59,304,59,260,64,219,78,180,99,144,125,84,179,47,222,42,219,80,175,140,120,177,95,217,73,259,59,304,53,499,53,583,52,650,53,681,58,714,66,789,100,821,123,849,151,890,208"/>
+<area shape="rect" id="Node000009" href="$main_8c.html#af99424d86bad4d4933f456e6f0b67498" title=" " alt="" coords="413,118,582,146"/>
+<area shape="poly" id="edge8_Node000008_Node000009" title=" " alt="" coords="881,208,841,168,815,149,787,134,734,120,678,115,624,115,576,120,574,115,624,110,678,109,735,115,789,130,818,145,845,164,886,209"/>
+<area shape="rect" id="Node000010" href="$jacobian__pc_8c.html#a3ad2999d9e2cc7bf1095f8104c4c264f" title=" " alt="" coords="630,144,788,171"/>
+<area shape="poly" id="edge10_Node000008_Node000010" title=" " alt="" coords="856,214,787,186,754,174,754,169,789,182,861,214"/>
+<area shape="rect" id="Node000017" href="$jacobian__pc_8c.html#aea81246a8b8146dfe0d1550663405f05" title=" " alt="" coords="641,196,776,223"/>
+<area shape="poly" id="edge11_Node000008_Node000017" title=" " alt="" coords="818,224,777,221,777,215,823,224"/>
+<area shape="rect" id="Node000012" href="$main_8c.html#a055ede0f78afbc368a5be6e1e441512b" title=" " alt="" coords="439,246,556,274"/>
+<area shape="poly" id="edge19_Node000008_Node000012" title=" " alt="" coords="818,241,557,259,556,254,823,239"/>
+<area shape="rect" id="Node000013" href="$main_8c.html#ae8c56c94072bda4017b234026c6ad7ac" title=" " alt="" coords="245,297,365,324"/>
+<area shape="poly" id="edge21_Node000008_Node000013" title=" " alt="" coords="818,252,788,260,555,291,366,309,365,304,554,286,788,255,823,251"/>
+<area shape="rect" id="Node000014" href="$main_8c.html#abe0d4c083ed98b4a04410941b15514e9" title=" " alt="" coords="108,297,197,324"/>
+<area shape="poly" id="edge20_Node000008_Node000014" title=" " alt="" coords="865,255,828,273,789,287,672,314,579,327,365,339,305,343,245,339,197,328,196,322,245,333,305,337,365,333,579,321,671,309,787,281,826,268,860,256"/>
+<area shape="poly" id="edge9_Node000009_Node000003" title=" " alt="" coords="396,138,259,156,182,171,109,193,79,207,55,222,51,219,77,202,107,188,181,166,258,150,400,135"/>
+<area shape="poly" id="edge12_Node000017_Node000003" title=" " alt="" coords="623,212,393,218,108,231,62,234,59,230,107,225,393,213,628,209"/>
+<area shape="poly" id="edge13_Node000017_Node000012" title=" " alt="" coords="631,228,557,249,555,244,636,226"/>
+<area shape="poly" id="edge14_Node000012_Node000003" title=" " alt="" coords="423,259,60,239,60,233,425,254"/>
+<area shape="poly" id="edge15_Node000012_Node000013" title=" " alt="" coords="426,279,361,299,360,294,431,277"/>
+<area shape="poly" id="edge16_Node000013_Node000014" title=" " alt="" coords="227,312,198,313,197,308,232,310"/>
+<area shape="poly" id="edge17_Node000014_Node000003" title=" " alt="" coords="114,289,56,252,56,246,119,287"/>
+<area shape="rect" id="Node000019" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="1021,398,1222,426"/>
+<area shape="poly" id="edge24_Node000018_Node000019" title=" " alt="" coords="1553,411,1222,414,1222,409,1558,411"/>
+<area shape="rect" id="Node000020" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="1270,449,1503,476"/>
+<area shape="poly" id="edge26_Node000018_Node000020" title=" " alt="" coords="1562,428,1460,451,1459,446,1556,428"/>
+<area shape="poly" id="edge25_Node000019_Node000003" title=" " alt="" coords="1003,412,710,415,304,415,244,411,197,398,155,374,106,338,84,317,65,293,41,252,41,246,69,290,88,313,109,334,158,370,200,393,245,406,304,409,710,409,1008,412"/>
+<area shape="poly" id="edge27_Node000020_Node000003" title=" " alt="" coords="1252,463,906,465,304,465,244,464,196,456,153,437,106,401,76,364,54,321,41,280,36,251,36,246,46,279,59,319,80,361,110,397,156,432,198,451,244,459,304,460,906,460,1257,463"/>
+<area shape="poly" id="edge29_Node000021_Node000020" title=" " alt="" coords="1536,463,1504,465,1503,460,1542,463"/>
+</map>

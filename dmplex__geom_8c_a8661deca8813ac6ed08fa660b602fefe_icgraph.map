@@ -1,0 +1,17 @@
+<map id="DMPlexPatchLayoutDestroy_" name="DMPlexPatchLayoutDestroy_">
+<area shape="rect" id="Node000001" title="Free all heap memory owned by a DMPlexPatchLayout and zero the struct." alt="" coords="637,109,846,137"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#acd9d927472d6fc4a438b9c505e2f27c7" title="Destroy the persistent DMPlex geometry context in fem&#45;&gt;geom_ctx." alt="" coords="374,57,571,85"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="648,106,548,88,548,83,654,106"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="108,109,308,137"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="621,125,308,126,308,121,624,121"/>
+<area shape="rect" id="Node000007" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="356,160,589,188"/>
+<area shape="poly" id="edge7_Node000001_Node000007" title=" " alt="" coords="652,140,550,162,550,157,647,141"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a5708a379fc3617fea5407b19a4832fab" title=" " alt="" coords="133,5,282,33"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="381,55,282,36,282,31,386,53"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="118,57,298,85"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="357,72,298,74,298,69,362,71"/>
+<area shape="rect" id="Node000004" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="5,109,60,137"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="118,41,109,48,72,79,46,110,41,107,68,75,106,44,122,38"/>
+<area shape="poly" id="edge6_Node000006_Node000004" title=" " alt="" coords="90,125,61,126,60,121,94,122"/>
+<area shape="poly" id="edge8_Node000007_Node000004" title=" " alt="" coords="338,173,226,168,107,151,60,137,60,131,108,146,227,163,343,173"/>
+</map>

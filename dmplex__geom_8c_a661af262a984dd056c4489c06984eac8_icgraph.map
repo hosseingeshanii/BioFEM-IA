@@ -1,0 +1,15 @@
+<map id="BuildPatchCoordinateExchange_" name="BuildPatchCoordinateExchange_">
+<area shape="rect" id="Node000001" title="Build the DMPlexPatchExchange SF for cross&#45;rank coordinate fetching." alt="" coords="514,57,744,85"/>
+<area shape="rect" id="Node000002" href="$dmplex__geom_8c.html#aeca513213e67a07a712cc41e8c6412ea" title="One&#45;time DMPlex geometry setup." alt="" coords="258,109,440,137"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="539,88,428,111,428,106,533,89"/>
+<area shape="rect" id="Node000005" href="$dmplex__geom_8c.html#ac4ecb4d172bee5f7c59a9fdf2680bb51" title="Benchmark: run the full distributed DMPlex geometry pipeline for all bodies." alt="" coords="249,5,450,33"/>
+<area shape="poly" id="edge4_Node000001_Node000005" title=" " alt="" coords="533,54,428,36,428,31,539,54"/>
+<area shape="rect" id="Node000006" href="$dmplex__geom_8c.html#abb714d272f5fbf12ac163ae5c7381256" title="Benchmark: same as RunDMPlexGeomProcesses, but each rank&#39;s local cell partition is evaluated on its o..." alt="" coords="233,57,466,85"/>
+<area shape="poly" id="edge6_Node000001_Node000006" title=" " alt="" coords="496,71,467,74,466,69,501,71"/>
+<area shape="rect" id="Node000003" href="$main_8c.html#a3c04138a5bfe5d72780bb7e82a18e627" title=" " alt="" coords="68,57,122,85"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="261,108,123,79,123,74,265,104"/>
+<area shape="rect" id="Node000004" href="$dmplex__geom_8c.html#af897ef006be5d3cc2be53b272a4f5a61" title="Drop&#45;in geometry call: setup + update + destroy in one shot." alt="" coords="5,109,185,137"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="240,123,185,126,185,121,245,123"/>
+<area shape="poly" id="edge5_Node000005_Node000003" title=" " alt="" coords="262,39,124,68,122,63,264,34"/>
+<area shape="poly" id="edge7_Node000006_Node000003" title=" " alt="" coords="215,73,123,74,122,69,219,70"/>
+</map>

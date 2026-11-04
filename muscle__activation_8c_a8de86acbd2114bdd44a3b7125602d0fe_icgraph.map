@@ -1,0 +1,10 @@
+<map id="calculate_cov_basis" name="calculate_cov_basis">
+<area shape="rect" id="Node000001" title=" " alt="" coords="666,5,818,33"/>
+<area shape="rect" id="Node000002" href="$muscle__activation_8c.html#a98fd1f2632f8a9dafbcd477adbf354a0" title=" " alt="" coords="217,5,357,33"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="648,20,357,22,357,17,653,18"/>
+<area shape="rect" id="Node000004" href="$muscle__activation_8c.html#a6775d705d7242ce0339ce632abbfa4b4" title=" " alt="" coords="405,31,618,58"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="654,29,619,35,618,30,648,29"/>
+<area shape="rect" id="Node000003" href="$muscle__activation_8c.html#aad998374ae4f3ca2c8f14b4c4b2aaafd" title=" " alt="" coords="5,5,169,33"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="199,20,169,22,169,17,204,19"/>
+<area shape="poly" id="edge4_Node000004_Node000002" title=" " alt="" coords="387,31,357,30,357,24,392,31"/>
+</map>
