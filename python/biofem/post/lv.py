@@ -169,7 +169,7 @@ PANELS = [  # key, title, ref key
     ("rate", "mean nodal rate |dx|/dt (cm/s)", None),
     ("thick", "wall thickening, mid-axis band (%)", "thickening"),
     ("shortening", "apex-base shortening (%)  (<0: elongation)", "shortening"),
-    ("torsion", "torsion, apex vs base section (deg, Pezzuto def.)", "torsion"),
+    ("torsion", "torsion tau, Pezzuto case 2 (deg)", "torsion"),
     ("V_mid", "mid-surface volume (ml)", None),
 ]
 

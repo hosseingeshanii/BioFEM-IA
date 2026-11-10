@@ -40,7 +40,7 @@ from . import style
 from .lv import layer_sections, pezzuto_torsion
 
 PANELS = [("EF", "EF from the endocardial volume (%)", "EF"), ("thick", "mid-axis wall thickening (%)", "thickening"),
-          ("short", "apex-base shortening (%)  (<0: elongation)", "shortening"), ("tors", "torsion, apex vs base (deg)", "torsion"),
+          ("short", "apex-base shortening (%)  (<0: elongation)", "shortening"), ("tors", "epi torsion tau vs ref., Pezzuto case 2 (deg)", "torsion"),
           ("wall", "wall volume change (%)", None), ("du", "max |u - u_first| / max |u_first|", None)]
 
 
@@ -282,7 +282,7 @@ def shell_curve_metrics(case_dir, band_cm=0.4, sections=(0.10, 0.85)):
 
 def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs, shells=()):
     panels = [("radial_position_cm", "radial position, mid-axis section (cm)", ["endo", "epi"], "rad"),
-              ("torsion_case2_deg", "torsion, apex vs base, from unloaded (deg)", ["endo", "mid", "epi"], "tors"),
+              ("torsion_case2_deg", "torsion tau (Pezzuto case 2), from unloaded (deg)", ["endo", "mid", "epi"], "tors"),
               ("I1e", r"$I_1^e$, mid-axis section", ["endo", "mid", "epi"], "I1e"),
               ("I4fe", r"$I_{4f}^e$, mid-axis section", ["endo", "mid", "epi"], "I4fe")]
     ls = {"endo": "--", "mid": "-.", "epi": "-"}
