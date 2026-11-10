@@ -1,0 +1,27 @@
+<map id="CleanupAndFinalize" name="CleanupAndFinalize">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,136,155,164"/>
+<area shape="rect" id="Node000002" href="$cuda__wrapper_8cpp.html#aa4206262d6cba1bafdadf7bc0741d916" title=" " alt="" coords="213,57,389,85"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="111,133,202,95,230,88,226,91,204,100,113,138"/>
+<area shape="rect" id="Node000006" href="$kokkos__stub_8c.html#a72c6b2aedb59b6f1180fb56339623083" title=" " alt="" coords="206,109,396,137"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="154,138,193,135,188,138,156,143"/>
+<area shape="rect" id="Node000007" href="$dmplex__geom_8c.html#acd9d927472d6fc4a438b9c505e2f27c7" title="Destroy the persistent DMPlex geometry context in fem&#45;&gt;geom_ctx." alt="" coords="203,161,399,189"/>
+<area shape="poly" id="edge6_Node000001_Node000007" title=" " alt="" coords="155,156,190,161,184,163,155,161"/>
+<area shape="rect" id="Node000010" href="$main_8c.html#aa692271940ef81508149ad72c16c92c3" title=" " alt="" coords="276,213,326,241"/>
+<area shape="poly" id="edge9_Node000001_Node000010" title=" " alt="" coords="113,162,204,198,264,218,258,218,202,203,112,167"/>
+<area shape="rect" id="Node000003" href="$cuda__wrapper_8cpp.html#a5c7fed81035e28c02fbcf4121e806152" title=" " alt="" coords="462,5,659,33"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="373,54,475,36,470,38,375,59"/>
+<area shape="rect" id="Node000005" href="$cuda__wrapper_8cpp.html#af86dc1061822ed2e46121397481877ac" title=" " alt="" coords="458,57,663,85"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="389,69,445,71,440,72,390,74"/>
+<area shape="rect" id="Node000004" href="$cuda__wrapper_8cpp.html#a8ed7f3b582b539fb1733f501be4be1c2" title=" " alt="" coords="749,5,899,33"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="659,17,737,19,731,20,660,22"/>
+<area shape="rect" id="Node000008" href="$dmplex__geom_8c.html#a7e60d333a6f6667a8a2f4fdb3651a3f4" title="Free all heap memory owned by a DMPlexPatchExchange and zero the struct." alt="" coords="447,109,674,137"/>
+<area shape="poly" id="edge7_Node000007_Node000008" title=" " alt="" coords="373,158,475,140,470,141,374,163"/>
+<area shape="rect" id="Node000009" href="$dmplex__geom_8c.html#a8661deca8813ac6ed08fa660b602fefe" title="Free all heap memory owned by a DMPlexPatchLayout and zero the struct." alt="" coords="456,161,665,189"/>
+<area shape="poly" id="edge8_Node000007_Node000009" title=" " alt="" coords="399,173,444,175,438,175,400,178"/>
+<area shape="rect" id="Node000011" href="$active__strain_8c.html#ade1ca2d21184dfd18064f53cc91192fa" title="Free all active&#45;strain data allocated in ActDataAllocate()." alt="" coords="498,213,623,241"/>
+<area shape="poly" id="edge10_Node000010_Node000011" title=" " alt="" coords="326,225,486,227,480,227,326,230"/>
+<area shape="rect" id="Node000012" href="$active__strain_8c.html#aab13749d1d679119e5bef64c4d6855e1" title=" " alt="" coords="722,213,926,241"/>
+<area shape="poly" id="edge11_Node000011_Node000012" title=" " alt="" coords="623,225,710,227,704,227,623,230"/>
+<area shape="rect" id="Node000013" href="$active__strain_8c.html#aec9298d5baa8b311cfc29be8cac191fa" title=" " alt="" coords="974,213,1136,241"/>
+<area shape="poly" id="edge12_Node000012_Node000013" title=" " alt="" coords="926,225,961,227,955,227,926,230"/>
+</map>

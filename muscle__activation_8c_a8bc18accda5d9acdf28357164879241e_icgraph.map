@@ -1,0 +1,7 @@
+<map id="compute_intmd_state_cov_basis_element" name="compute_intmd_state_cov_basis_element">
+<area shape="rect" id="Node000001" title="Compute intermediate deformed covariant basis vectors." alt="" coords="416,5,579,50"/>
+<area shape="rect" id="Node000002" href="$muscle__activation_8c.html#a5000e7a797094fd0e94879c0c765d853" title="Update intermediate deformed basis vectors for all elements." alt="" coords="217,5,368,50"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="398,28,368,30,368,25,403,28"/>
+<area shape="rect" id="Node000003" href="$muscle__activation_8c.html#aad998374ae4f3ca2c8f14b4c4b2aaafd" title=" " alt="" coords="5,14,169,42"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="198,28,169,30,169,25,203,27"/>
+</map>
