@@ -37,7 +37,7 @@ _RULES = [
     ("bcs",        r"^(lv_fix_|lv_base_tangent|lv_rigid|lv_mean_bc|fix_|null_avg|pin)"),
     ("pressure",   r"(pressure|^p_cav|^p_ed|^p_es|^volume)"),
     ("activation", r"(gamma|^muscle_act|^fa_|^act_|_act_coeff|^curv_based_act|^fiber_based_act)"),
-    ("fibers",     r"^(alpha_|lv_alpha|cart_fib|fib|twist)"),
+    ("fibers",     r"^(alpha_|beta_|lv_alpha|cart_fib|fib|twist)"),
     ("material",   r"^(ho_|E$|mu$|K$|rho$|h0$|nu$|bulk_modulus$|Constitutive|material_model|membrane$|bending$|traction$)"),
     ("geometry",   r"^(dm_plex|dm_|lv_|mesh|in_dir$|char_length|problem$|nitti_|nbody$|twod$|contact$|inverse$)"),
     ("time",       r"^(steps$|dt$|tisteps$|tistart$|t_|legacy_restart)"),
