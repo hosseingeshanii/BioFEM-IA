@@ -6,11 +6,13 @@ From the output series (surface00_*.vtk, shell3d00_*.vtk if -write_3d_shell 1, l
   - wall thickening in a mid-axis band: radial (epi minus endo radius, shell3d) and normal
     (h/h0 from shell3d thickness, or the lambda3 cell field without shell3d)
   - apex-base length change (shortening > 0), base plane = reference rim
-  - torsion as in Pezzuto & Ambrosi 2014 (p. 1587): rotation theta of a point about the long axis e3,
-    sin(theta) = ((x ^ X) . e3) / (r R), with e3 pointing from apex to base and R, r the distances from
-    the axis; torsion = theta(section just above the apex) - theta(section near the base). Here every
-    epicardial point in each section is used (mean), not one point, so mesh asymmetry averages out
-    (mid-surface without shell3d). Sections at --torsion-sections (fractions of base-apex height).
+  - torsion as Pezzuto & Ambrosi 2014 (p. 1587, "case 2"): rotation phi of a point about the long axis e3 from the
+    unloaded configuration, sin(phi) = ((x ^ X) . e3) / (r R), e3 apex -> base, R, r the distances from the axis;
+    tau = (phi_apex r_apex - phi_base r_base) / D, D the reference distance between a section near the base and one
+    just above the apex (his sign convention flipped so that the epicardium is positive with our e3). Every point
+    of the layer in each section is used (mean of phi r), not one point; sections at --torsion-sections fractions of
+    the layer's own base-apex height, points < 3 mm from the axis left out. Epicardium (shell3d) or mid-surface.
+    Reported relative to the reference of the metrics (end-diastole for Track P runs).
 Geometry convention: long axis along z, apex at +z (or -z with --apex -z), base = the other end.
 Lengths are reported in cm and volumes in ml; --solver-unit gives the solver's length unit.
 Reference values (e.g. from a paper) come from --ref <json>, never from this code:
@@ -42,6 +44,21 @@ def _theta_pezzuto(P, P0, e3, axis_xy):
     x = P[:, :2] - axis_xy; X = P0[:, :2] - axis_xy
     cross_z = x[:, 0] * X[:, 1] - x[:, 1] * X[:, 0]          # (x ^ X) . z
     return np.degrees(np.arctan2(cross_z * e3[2], np.sum(x * X, axis=1)))
+
+
+def pezzuto_torsion(phi_deg, r, apex, base, D):
+    """Pezzuto & Ambrosi 2014 torsion (case 2, deg): (mean(phi r) of the apex section - mean(phi r) of the base
+    section) / D, phi the rotation about the long axis from the unloaded state (deg), r the current distance from
+    the axis, D the reference distance between the two sections (same length unit as r)."""
+    return (np.mean(phi_deg[apex] * r[apex]) - np.mean(phi_deg[base] * r[base])) / D
+
+
+def layer_sections(z, rxy, zb, sections, halfwidth=SECTION_HALFWIDTH, axis_min=0.0):
+    """(apex mask, base mask, D) of one layer: slabs at sections[1] / sections[0] of the layer's own base-apex height
+    (z measured from the base at zb towards the apex), points closer than axis_min to the axis left out."""
+    zl = z.max(); fl = (z - zb) / (zl - zb); off = rxy > axis_min
+    return (off & (np.abs(fl - sections[1]) < halfwidth), off & (np.abs(fl - sections[0]) < halfwidth),
+            (sections[1] - sections[0]) * (zl - zb))
 
 
 def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4, sections=TORSION_SECTIONS):
@@ -85,14 +102,16 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
     # thickening + torsion: shell3d if present, else mid-surface / lambda3
     s3 = dict(output_files(out, "shell3d"))
     band_nodes = np.abs(z - zmid) < band_cm
-    frac = (z - zb) / H
-    sec_base = np.abs(frac - sections[0]) < SECTION_HALFWIDTH
-    sec_apex = np.abs(frac - sections[1]) < SECTION_HALFWIDTH
     e3 = np.array([0.0, 0.0, -sgn])                       # apex -> base
     axis_xy = X[0][:, :2].mean(0)
+    rxy = lambda P: np.hypot(P[:, 0] - axis_xy[0], P[:, 1] - axis_xy[1])
+    def tors_series(Ps):                                  # Pezzuto case 2 from the unloaded file, minus its reference value
+        P0 = Ps[0]; a_, b_, D = layer_sections(sgn * P0[:, 2], rxy(P0), zb, sections, axis_min=0.3)   # cm
+        tau = np.array([pezzuto_torsion(_theta_pezzuto(P, P0, e3, axis_xy), rxy(P), a_, b_, D) for P in Ps])
+        return tau - tau[iref]
     if all(k in s3 for k in ks):
         n = X.shape[1]
-        thick_r, thick_n, tors = [], [], []
+        thick_r, thick_n, epis = [], [], []
         v = VTK(s3[ks[iref]]); P = v.points * s; A, B = P[:n], P[n:]
         endo_first = np.hypot(A[:, 0], A[:, 1]).mean() < np.hypot(B[:, 0], B[:, 1]).mean()
         ref = (A, B) if endo_first else (B, A)
@@ -105,15 +124,13 @@ def compute(case_dir, out_override=None, solver_unit="m", apex="+z", band_cm=0.4
             w0 = np.hypot(ref[1][:, 0], ref[1][:, 1]) - np.hypot(ref[0][:, 0], ref[0][:, 1])
             thick_r.append(100 * (w[band_nodes].mean() / w0[band_nodes].mean() - 1))
             thick_n.append(100 * (h[:n][band_nodes].mean() / h0[band_nodes].mean() - 1))
-            th = _theta_pezzuto(epi, ref[1], e3, axis_xy)
-            tors.append(th[sec_apex].mean() - th[sec_base].mean())
-        res.update(thick_radial=np.array(thick_r), thick_normal=np.array(thick_n), torsion=np.array(tors), torsion_surface="epicardium")
+            epis.append(epi)
+        res.update(thick_radial=np.array(thick_r), thick_normal=np.array(thick_n), torsion=tors_series(epis), torsion_surface="epicardium")
     else:
         if lam3[0] is not None and cells:
             cz = np.array([z[c].mean() for c in cells]); cb = np.abs(cz - zmid) < band_cm
             res["thick_normal"] = np.array([100 * (l3[cb].mean() - 1) for l3 in lam3])
-        tors = [(lambda th: th[sec_apex].mean() - th[sec_base].mean())(_theta_pezzuto(Xk, X[iref], e3, axis_xy)) for Xk in X]
-        res.update(torsion=np.array(tors), torsion_surface="mid-surface")
+        res.update(torsion=tors_series(list(X)), torsion_surface="mid-surface")
 
     vol = read_lv_volume(out)
     if vol:
