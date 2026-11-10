@@ -172,7 +172,7 @@ static PetscErrorCode exact_p(PetscInt dim, PetscReal time, const PetscReal x[],
    (Guccione 1995 Table 1 style); the transmural depth is then psi = (lambda - lambda_endo(mu)) / (lambda_epi(mu) - lambda_endo(mu)) */
 #define PROLATE_TAB_MAX 64
 typedef struct {
-  PetscReal d, le, lp, a_endo, a_epi;
+  PetscReal d, le, lp, a_endo, a_epi, b_endo, b_epi;          /* helix angle alpha, sheet angle beta [deg], linear in psi */
   PetscInt  ne, np;                                          /* table sizes (0: constant lambdas) */
   PetscReal me[PROLATE_TAB_MAX], lte[PROLATE_TAB_MAX], mp[PROLATE_TAB_MAX], ltp[PROLATE_TAB_MAX];   /* mu [rad], lambda */
 } Prolate;
@@ -193,13 +193,16 @@ static void prolate_frame(const Prolate *g, const PetscReal x[], PetscReal f[3],
   const PetscReal le_ = g->ne ? tab_interp(g->ne, g->me, g->lte, mu) : g->le, lp_ = g->np ? tab_interp(g->np, g->mp, g->ltp, mu) : g->lp;
   const PetscReal ls = PetscMin(1.0, PetscMax(0.0, (lam - le_) / (lp_ - le_)));
   const PetscReal al = (g->a_endo * (1.0 - ls) + g->a_epi * ls) * PETSC_PI / 180.0;
+  const PetscReal be = (g->b_endo * (1.0 - ls) + g->b_epi * ls) * PETSC_PI / 180.0;
   PetscReal el[3] = {PetscCoshReal(lam) * PetscSinReal(mu) * PetscCosReal(th), PetscCoshReal(lam) * PetscSinReal(mu) * PetscSinReal(th), PetscSinhReal(lam) * PetscCosReal(mu)};
   PetscReal em[3] = {PetscSinhReal(lam) * PetscCosReal(mu) * PetscCosReal(th), PetscSinhReal(lam) * PetscCosReal(mu) * PetscSinReal(th), -PetscCoshReal(lam) * PetscSinReal(mu)};
   const PetscReal et[3] = {-PetscSinReal(th), PetscCosReal(th), 0.0};
   PetscReal nl = PetscSqrtReal(el[0] * el[0] + el[1] * el[1] + el[2] * el[2]), nm = PetscSqrtReal(em[0] * em[0] + em[1] * em[1] + em[2] * em[2]);
   for (PetscInt i = 0; i < 3; i++) { el[i] /= nl; em[i] /= (nm > 0 ? nm : 1.0); f[i] = PetscCosReal(al) * et[i] + PetscSinReal(al) * em[i]; }
   PetscReal nf = PetscSqrtReal(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
-  for (PetscInt i = 0; i < 3; i++) { f[i] /= nf; s[i] = el[i]; }
+  /* sheet (Pezzuto & Ambrosi 2014 eq. 13): s = sin(beta) (sin(alpha) e_theta - cos(alpha) e_mu) + cos(beta) e_lambda,
+     orthogonal to f and unit; beta = 0: radial sheets */
+  for (PetscInt i = 0; i < 3; i++) { f[i] /= nf; s[i] = PetscSinReal(be) * (PetscSinReal(al) * et[i] - PetscCosReal(al) * em[i]) + PetscCosReal(be) * el[i]; }
 }
 static PetscErrorCode fiber_fn(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
 {
@@ -655,7 +658,7 @@ PetscErrorCode Solid3dRun(void)
   PetscReal mean_bc_reg = 1e-8;
   char out_dir[PETSC_MAX_PATH_LEN] = "solid3d_out";
   MatParams m = {MAT_HO, 236.2, 10.810, 20037.0, 14.154, 3724.5, 5.1645, 410.8, 11.300, PETSC_TRUE, PETSC_TRUE, 1.5e6, 7.445e7};
-  Prolate geo = {0.0291, 0.557, 1.00, -60.0, 60.0, 0, 0, {0}, {0}, {0}, {0}};
+  Prolate geo = {0.0291, 0.557, 1.00, -60.0, 60.0, 0.0, 0.0, 0, 0, {0}, {0}, {0}, {0}};
   char lam_table[PETSC_MAX_PATH_LEN] = "";
   PetscReal mu_base_deg = 113.0;
   PetscScalar c0[C_N], c1[C_N];
@@ -683,6 +686,8 @@ PetscErrorCode Solid3dRun(void)
   PetscCall(PetscOptionsString("-lambda_table", "lv: varying lambda(mu): file with lines 'endo|epi mu_deg lambda' (must match the mesh; needs -mean_bc)", "", lam_table, lam_table, sizeof(lam_table), NULL));
   PetscCall(PetscOptionsReal("-alpha_endo", "lv: helix angle at the endocardium [deg]", "", geo.a_endo, &geo.a_endo, NULL));
   PetscCall(PetscOptionsReal("-alpha_epi", "lv: helix angle at the epicardium [deg]", "", geo.a_epi, &geo.a_epi, NULL));
+  PetscCall(PetscOptionsReal("-beta_endo", "lv: sheet angle at the endocardium [deg] (0: radial sheets)", "", geo.b_endo, &geo.b_endo, NULL));
+  PetscCall(PetscOptionsReal("-beta_epi", "lv: sheet angle at the epicardium [deg]", "", geo.b_epi, &geo.b_epi, NULL));
   PetscCall(PetscOptionsReal("-p_ed", "lv: end-diastolic cavity pressure [Pa]; > 0 runs the PV loop (Track P)", "", p_ed, &p_ed, NULL));
   PetscCall(PetscOptionsReal("-p_ao", "lv: aortic pressure during ejection [Pa]", "", p_ao, &p_ao, NULL));
   PetscCall(PetscOptionsInt("-fill_steps", "lv: pressure steps of the passive filling 0 -> p_ed", "", fill_steps, &fill_steps, NULL));
@@ -891,6 +896,7 @@ PetscErrorCode Solid3dRun(void)
               BIOFEM_GIT, ProblemNames[prob], mesh, (double)gmax, (int)steps, (int)out_every, (double)geo.a_endo, (double)geo.a_epi);
       fprintf(fp, "prolate_d=%g\nlam_endo=%g\nlam_epi=%g\nmu_base_deg=%g\n", (double)geo.d, (double)geo.le, (double)geo.lp, (double)mu_base_deg);
       if (lam_table[0]) fprintf(fp, "lambda_table=%s\n", lam_table);
+      fprintf(fp, "beta_endo=%g\nbeta_epi=%g\n", (double)geo.b_endo, (double)geo.b_epi);
       if (prob == PROB_LV) fprintf(fp, "base_bc=%s\n", mean_bc ? "mean (null average in-plane displacement and rotation)" : "pins (endo rim theta=0: ux=uy=0; epi rim theta=0: uy=0)");
       /* p_ed > 0: u_step0000.txt is end-diastole (after filling); metrics are relative to it */
       if (prob == PROB_LV && p_ed > 0.0) fprintf(fp, "p_ed=%g\np_ao=%g\nfill_steps=%d\n", (double)p_ed, (double)p_ao, (int)fill_steps);
