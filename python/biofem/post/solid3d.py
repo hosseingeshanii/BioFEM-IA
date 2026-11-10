@@ -30,6 +30,7 @@ same mesh, the last panel shows max |u_k - u_1| / max |u_1| of each run k agains
 """
 import csv
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -289,6 +290,38 @@ def plot_ref_curves(plt, runs, dirs, labels, ref, out, band, secs, shells=()):
     print(f"[biofem] curves vs {ref.get('label', 'reference')} saved -> {f}")
 
 
+FILL_LOG = [   # (unloaded-volume line, filling-step line) of biofem-solid3d and of the shell's Track P
+    (re.compile(r"\[filling\] unloaded cavity volume ([\d.eE+-]+) ml"),
+     re.compile(r"\[filling (\d+)/\d+\] p_c ([\d.eE+-]+) kPa: V ([\d.eE+-]+) ml")),
+    (re.compile(r"\[trackp\] unloaded endocardial cavity ([\d.eE+-]+) ml"),
+     re.compile(r"\[trackp\] filling (\d+)/\d+: p=([\d.eE+-]+) kPa V=([\d.eE+-]+) ml")),
+]
+
+
+def filling_branch(pv_file, log_dirs):
+    """Passive filling from the unloaded state to end-diastole as (p_kPa, V_ml), p = 0 first; None if not found.
+    From pv.csv rows with step < 0 (pulse script) or else from the newest job log (*.out) in log_dirs that reached
+    END-DIASTOLE (biofem-solid3d, shell Track P: their pv.csv starts at end-diastole)."""
+    pv = np.genfromtxt(pv_file, delimiter=",", names=True)
+    pcol = "p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"
+    f = pv[pv["step"] < 0]
+    if len(f):                                           # ends at the end-diastolic row (step 0)
+        e = pv[pv["step"] == 0]
+        return np.r_[f[pcol], e[pcol]], np.r_[f["V_ml"], e["V_ml"]]
+    logs = sorted({g for d in log_dirs for g in Path(d).glob("*.out")}, key=lambda g: g.stat().st_mtime, reverse=True)
+    for g in logs:
+        txt = g.read_text(errors="replace")
+        if "END-DIASTOLE" not in txt: continue
+        for u_re, s_re in FILL_LOG:
+            m0 = u_re.search(txt)
+            if not m0: continue
+            steps = {int(k): (float(p), float(v)) for k, p, v in s_re.findall(txt)}   # a retried step keeps its last line
+            if not steps: continue
+            p = [0.0] + [steps[k][0] for k in sorted(steps)]; v = [float(m0.group(1))] + [steps[k][1] for k in sorted(steps)]
+            return np.array(p), np.array(v)
+    return None
+
+
 def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
     """<out>_phase.png: the cycle on the paper's phase axis (0 EDP, 1 AVO, 2 ESP, 3 MVO, 4 EDP; each run's own valve
     events from pv.csv), against the paper's time-dependent data only: cavity volume / pressure at its Fig. 4 points
@@ -304,8 +337,9 @@ def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
         ev = phase_events(d, r["steps"])
         if ev is None: continue
         m = metrics(r, band, secs); pv = np.genfromtxt(Path(d) / "pv.csv", delimiter=",", names=True); pv = pv[pv["step"] >= 0]
+        fill = filling_branch(Path(d) / "pv.csv", [d, Path(d).resolve().parent])
         cases.append((lab, ev, dict(t=m["t"], thick=m["thick"], tors=m["tors"], short=m["short"]),
-                      dict(t=pv["t"], V=pv["V_ml"], p=pv["p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"])))
+                      dict(t=pv["t"], V=pv["V_ml"], p=pv["p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"]), fill))
     for d in shells:
         sh = compute(d, None, "m", "+z", band, secs)
         from .io import read_control, output_dir
@@ -314,10 +348,15 @@ def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
         pv = np.genfromtxt(od / "pv.csv", delimiter=",", names=True)
         i0 = sh.get("iref", 0)                           # drop the unloaded file 0 (also at t = 0)
         cut = lambda a: None if a is None else a[i0:]
+        fill = filling_branch(od / "pv.csv", [d, od])
         cases.append((f"shell {Path(d).resolve().name}", ev, dict(t=sh["t"][i0:], thick=cut(sh.get("thick_radial")),
-                      tors=cut(sh["torsion"]), short=cut(sh["shortening"])), dict(t=pv["t"], V=pv["V_ml"], p=pv["p_kPa"])))
-    for i, (lab, ev, m, pv) in enumerate(cases):
+                      tors=cut(sh["torsion"]), short=cut(sh["shortening"])), dict(t=pv["t"], V=pv["V_ml"], p=pv["p_kPa"]), fill))
+    for i, (lab, ev, m, pv, fill) in enumerate(cases):
         c = style.case_color(i)
+        if fill is not None:                             # passive filling, unloaded (s = -1) -> EDP (s = 0), linear in p
+            sf = -1.0 + fill[0] / fill[0][-1]
+            ax["V"].plot(sf, fill[1], color=c, lw=1.4, ls="--")
+            rows += [(lab, "V_filling", a, b) for a, b in zip(sf, fill[1])]
         for key, src in (("V", pv), ("p", pv), ("thick", m), ("short", m)):
             if src.get(key) is None: continue
             sx = np.interp(src["t"], ev, [0, 1, 2, 3, 4])
@@ -328,6 +367,8 @@ def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
         Vk = [k["EDV_ml"], k["EDV_ml"], k["ESV_ml"], k["ESV_ml"], k["EDV_ml"]]
         ax["V"].plot([0, 1], Vk[:2], color=style.INK, lw=1.2, ls=":"); ax["V"].plot([2, 3], Vk[2:4], color=style.INK, lw=1.2, ls=":")
         ax["V"].plot(range(5), Vk, "o", color=style.INK, ms=5, label=f"{lab} (Fig. 4 table; isovolumic exact)")
+        if "reference_V_ml" in k:                         # his unloaded cavity; no filling curve published
+            ax["V"].plot([-1], [k["reference_V_ml"]], "s", mfc="none", color=style.INK, ms=6, label=f"{lab} unloaded (no curve)")
         ped, pao = k["p_ed_mmHg"] * 0.133322, k["p_ao_mmHg"] * 0.133322
         ax["p"].plot([1, 2], [pao, pao], color=style.INK, lw=1.2, ls=":"); ax["p"].plot([3, 4], [ped, ped], color=style.INK, lw=1.2, ls=":")
         ax["p"].plot(range(5), [ped, pao, pao, ped, ped], "o", color=style.INK, ms=5, label=f"{lab} (protocol; valve points)")
@@ -341,6 +382,9 @@ def plot_phase_metrics(plt, runs, dirs, labels, shells, ref, out, band, secs):
     for key, title in panels:
         a = ax[key]; a.set_title(title, fontsize=9); style.finish(a, "")
         a.set_xticks([0, 1, 2, 3, 4]); a.set_xticklabels(["EDP", "AVO", "ESP", "MVO", "EDP"]); a.legend(frameon=False, fontsize=6)
+    if any(cs[4] is not None for cs in cases):          # the volume panel also shows the filling (dashed)
+        ax["V"].set_xticks([-1, 0, 1, 2, 3, 4]); ax["V"].set_xticklabels(["unloaded", "EDP", "AVO", "ESP", "MVO", "EDP"])
+        ax["V"].set_title("cavity volume (ml); dashed: passive filling", fontsize=9)
     fig.tight_layout()
     f = out.with_name(out.stem + "_phase.png"); fig.savefig(f, dpi=130)
     with open(f.with_suffix(".csv"), "w", newline="") as fh:
@@ -405,20 +449,24 @@ def cmd_solid3d(args):
     fig.savefig(out, dpi=130)
     print(f"[biofem] plot saved -> {out}")
 
-    def read_pv(f):                                     # biofem-solid3d (p_kPa) or the pulse script (P_kPa, filling rows < 0)
+    def read_pv(f, log_dirs):                           # biofem-solid3d (p_kPa) or the pulse script (P_kPa, filling rows < 0)
         pv = np.genfromtxt(f, delimiter=",", names=True)
         pv = pv[pv["step"] >= 0]
-        return {"t": pv["t"], "V_ml": pv["V_ml"], "p_kPa": pv["p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"]}
-    pvs = [(lab, read_pv(Path(d) / "pv.csv")) for d, lab in zip(dirs, labels) if (Path(d) / "pv.csv").exists()]
+        return {"t": pv["t"], "V_ml": pv["V_ml"], "p_kPa": pv["p_kPa" if "p_kPa" in pv.dtype.names else "P_kPa"],
+                "fill": filling_branch(f, log_dirs)}
+    pvs = [(lab, read_pv(Path(d) / "pv.csv", [d, Path(d).resolve().parent])) for d, lab in zip(dirs, labels)
+           if (Path(d) / "pv.csv").exists()]
     for d in args.ref_shell:                            # shell Track P runs: <case>/<out_dir>/pv.csv (out_dir from control.dat)
         from .io import read_control, output_dir
-        f = output_dir(Path(d), read_control(Path(d)), None) / "pv.csv"
-        if f.exists(): pvs.append((f"shell {Path(d).resolve().name}", read_pv(f)))
+        od = output_dir(Path(d), read_control(Path(d)), None); f = od / "pv.csv"
+        if f.exists(): pvs.append((f"shell {Path(d).resolve().name}", read_pv(f, [d, od])))
     if pvs:                                             # Track P: PV loop and pressure / volume vs time
         fig, axs = plt.subplots(1, 3, figsize=(13, 4))
         for i, (lab, pv) in enumerate(pvs):
             c = style.case_color(i)
             axs[0].plot(pv["V_ml"], pv["p_kPa"], color=c, lw=1.8, label=lab)
+            if pv["fill"] is not None:                  # passive filling from the unloaded state (dashed)
+                axs[0].plot(pv["fill"][1], pv["fill"][0], color=c, lw=1.4, ls="--")
             axs[1].plot(pv["t"], pv["p_kPa"], color=c, lw=1.8, label=lab)
             axs[2].plot(pv["t"], pv["V_ml"], color=c, lw=1.8, label=lab)
             edv, esv = pv["V_ml"][0], pv["V_ml"].min()
@@ -432,7 +480,9 @@ def cmd_solid3d(args):
             V = [kp["EDV_ml"], kp["EDV_ml"], kp["ESV_ml"], kp["ESV_ml"], kp["EDV_ml"]]
             P = [kp["p_ed_mmHg"] * mm, kp["p_ao_mmHg"] * mm, kp["p_ao_mmHg"] * mm, kp["p_ed_mmHg"] * mm, kp["p_ed_mmHg"] * mm]
             axs[0].plot(V, P, color=style.INK, lw=1.0, ls=":", marker="o", ms=4, label="Pezzuto 2014 (Fig. 4 points)")
-        axs[0].legend(frameon=False, fontsize=7)
+            if "reference_V_ml" in kp:
+                axs[0].plot([kp["reference_V_ml"]], [0.0], "s", mfc="none", color=style.INK, ms=6, label="Pezzuto 2014 unloaded")
+        axs[0].legend(frameon=False, fontsize=7); axs[0].set_title("PV loop; dashed: passive filling from unloaded", fontsize=9)
         fig.tight_layout()
         fig.savefig(out.with_name(out.stem + "_pv.png"), dpi=130)
         print(f"[biofem] PV loop saved -> {out.with_name(out.stem + '_pv.png')}")
